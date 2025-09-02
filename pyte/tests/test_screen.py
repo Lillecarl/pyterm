@@ -1583,3 +1583,24 @@ def test_screen_set_icon_name_title():
 
     screen.set_title(text)
     assert screen.title == text
+
+
+def test_private_sgr_sequence_ignored():
+    def cursor_state(cursor):
+        return (cursor.x, cursor.y, cursor.attrs, cursor.hidden)
+
+    screen = pyte.HistoryScreen(2, 2)
+    stream = pyte.ByteStream(screen)
+
+    # Capture initial state
+    display = screen.display
+    mode = screen.mode.copy()
+    cursor = cursor_state(screen.cursor)
+
+    # Vim 9.0+ sends this to query modifyOtherKeys capability - should be ignored
+    stream.feed(b'\x1b[?4m')
+
+    # Verify nothing changed
+    assert screen.display == display
+    assert screen.mode == mode
+    assert cursor_state(screen.cursor) == cursor
