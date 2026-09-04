@@ -107,3 +107,26 @@ behind `passthru.checks`. Nothing else. A check belongs to the package it tests,
 so a comparison of ptterm against kitty lives in `ptterm`, not in `pymux`. Dev
 shells, and anything that is about the collection rather than one package,
 belong here.
+
+## File an issue for what you find and do not fix
+
+You will see problems that are not the task in front of you: a design that
+fights the code, a question nobody has answered, a fix that belongs somewhere
+else. Open a GitHub issue for each one and keep going.
+
+The issue is how you stay on the task. Writing it down means you do not have
+to choose between losing the finding and following it, and it survives a
+compaction, which a note in the conversation does not.
+
+Write what a reader needs to act:
+
+- What you saw, and where. Name the file and the line.
+- Why it matters. A finding with no cost attached is noise.
+- What you already know. A measurement, a test that shows it, the answer you
+  ruled out and the reason.
+
+One issue per finding. An issue that needs the word "and" is two issues.
+
+This covers anything that improves the collection: architecture, a question to
+research, a fix, a test that is missing, a name that misleads. It does not
+cover the task you are on. Finish that.
