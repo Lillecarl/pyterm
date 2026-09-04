@@ -14,8 +14,8 @@ let
   umbrellaSource = pkgs.fetchFromGitHub {
     owner = "Lillecarl";
     repo = "umbrella";
-    rev = "c78b2d2ccc0b7b19063af624f3e2579b84148c3c";
-    hash = "sha256-YaKOLPwN1xNn0RlkJ4nv90k/8/XtdmAkfFIqw8mWsXI=";
+    rev = "2302d8d376a8ce415fe544416958ba24f05922f6";
+    hash = "sha256-y/Yownj5+DRPWKo3fATxPxpacNsP0SvKwU0DH483OYE=";
   };
 in
 rec {
