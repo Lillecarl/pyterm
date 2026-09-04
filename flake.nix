@@ -22,8 +22,18 @@
             ptterm
             pyte
             prompt-toolkit
+            umbrella
             ;
         }
+      );
+      checks = forEachSystem (
+        system:
+        let
+          pkgs = import inputs.nixpkgs { inherit system; };
+        in
+        # The fuzz run is not a gate, so `nix flake check` leaves it alone.
+        # Reach it as `checks.ptterm-fuzz` through default.nix.
+        removeAttrs (import ./. { inherit pkgs; }).checks [ "ptterm-fuzz" ]
       );
       devShells = forEachSystem (
         system:

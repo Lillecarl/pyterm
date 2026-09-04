@@ -14,3 +14,7 @@
 	path = prompt-toolkit
 	url = git@github.com:lillecarl/python-prompt-toolkit.git
 	branch = render-performance
+[submodule "umbrella"]
+	path = umbrella
+	url = git@github.com:Lillecarl/umbrella.git
+	branch = main
