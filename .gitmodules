@@ -1,0 +1,16 @@
+[submodule "pymux"]
+	path = pymux
+	url = git@github.com:lillecarl/pymux.git
+	branch = graphics-protocol
+[submodule "pyte"]
+	path = pyte
+	url = git@github.com:lillecarl/pyte.git
+	branch = graphics-protocol
+[submodule "ptterm"]
+	path = ptterm
+	url = git@github.com:lillecarl/ptterm.git
+	branch = graphics-protocol
+[submodule "prompt-toolkit"]
+	path = prompt-toolkit
+	url = git@github.com:lillecarl/python-prompt-toolkit.git
+	branch = render-performance
