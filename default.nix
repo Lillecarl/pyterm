@@ -41,7 +41,7 @@ rec {
   };
 
   # Each package carries the tests that judge it, behind passthru. This is
-  # where they get names, so `nix-build -A checks.ptterm` works from here.
+  # where they get names, so `nix build --file . checks.ptterm` works from here.
   checks = {
     pyte = pyte.checks.tests;
     ptterm = ptterm.checks.tests;
@@ -49,6 +49,10 @@ rec {
     ptterm-fuzz = ptterm.checks.fuzz;
     pymux = pymux.checks.pymux;
     pymux-pty = pymux.checks.pty;
+    # Not a gate on its own: it judges the run against a recorded list
+    # of the tests that fail today, and complains at a difference in
+    # either direction.
+    pymux-esctest = pymux.checks.esctest;
   };
 
   shell = pkgs.callPackage ./pkgs/shell {

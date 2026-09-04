@@ -34,7 +34,7 @@ hooks described below.
 
 ## Building
 
-    nix-build -A pymux          # or pyte, ptterm, prompt-toolkit, umbrella
+    nix build --file . pymux    # or pyte, ptterm, prompt-toolkit, umbrella
     nix-shell                   # pymux, umbrella and the test dependencies
 
 `default.nix` is the whole definition. `shell.nix` and `flake.nix` only call
@@ -50,8 +50,8 @@ fails with "Path 'prompt-toolkit' ... is not tracked by Git":
 
     nix build '.?submodules=1#pymux'
 
-`nix-build` has no such problem, and it reads the working copies rather than the
-last commit, which is usually what you want while working.
+A build from a file has no such problem, and it reads the working copies rather
+than the last commit, which is usually what you want while working.
 
 ## Tests
 
@@ -59,23 +59,43 @@ A package exposes its own tests through `passthru.checks`. This repository gives
 them names, because a test of ptterm against kitty is a test of ptterm, and the
 run needs the ptterm that this collection assembled:
 
-    nix-build -A checks.pyte
-    nix-build -A checks.ptterm       # against kitty and libvterm
-    nix-build -A checks.pymux
-    nix-build -A checks.pymux-pty    # a real pty, a server and a client
+    nix build --file . checks.pyte
+    nix build --file . checks.ptterm        # against kitty and libvterm
+    nix build --file . checks.pymux
+    nix build --file . checks.pymux-pty     # a real pty, a server and a client
+    nix build --file . checks.pymux-esctest # the conformance suite, in a pane
 
 Every run happens in the build sandbox. The ptys, the sockets and the processes
 live and die inside it, so nothing of a run reaches the machine.
 
-Two of them read the environment, which needs the impure evaluation that
-`nix-build` does by default:
+Several of them read the environment. That needs impure evaluation, which a
+build from a file does and a flake does not:
 
-    PYMUX_TESTS=tests/test_sixel_encoder.py nix-build -A checks.pymux
-    PTTERM_FUZZ=20000 nix-build -A checks.ptterm-fuzz
+    PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux
+    PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
+    PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
 
 `checks.ptterm-fuzz` hunts for deviations between ptterm and kitty. It is not a
 gate: it finds them faster than they get fixed, and each one needs a decision
 about whether to follow kitty or xterm. `nix flake check` leaves it out.
+
+`checks.pymux-esctest` runs [esctest2][esctest2] in a pane. The suite judges a
+terminal from the inside, and most of it fails, because a pane is not xterm.
+Each failure names a real difference, and `pymux/tests/esctest-failures.txt`
+records them all. The check compares a run with that list and complains at a
+difference in either direction, so a regression and a fix are both visible.
+Write the list again after fixing something:
+
+    PYMUX_ESCTEST_RECORD=1 nix build --file . checks.pymux-esctest
+    cp result/failures.txt pymux/tests/esctest-failures.txt
+
+The result also holds `esctest.log`, which says why each test failed.
+Narrow the run to read the reasons for one group:
+
+    PYMUX_ESCTEST_INCLUDE=ChangeColorTests PYMUX_ESCTEST_RECORD=1 \
+        nix build --file . checks.pymux-esctest
+
+[esctest2]: https://github.com/ThomasDickey/esctest2
 
 ## umbrella
 
@@ -114,8 +134,8 @@ to build it anyway. `default.nix` handles that with a branch: it uses the
 pins on GitHub when it is not.
 
 So editing umbrella needs nothing special. Change a file in `umbrella/` and
-`nix-build -A umbrella` reads it, the same as any other submodule.
+`nix build --file . umbrella` reads it, the same as any other submodule.
 
 Moving the fallback is the one manual step. Change `rev` in `default.nix`, set
 `hash` to `lib.fakeHash`, move the `umbrella` checkout out of the way, run
-`nix-build -A umbrella`, and paste back the hash nix reports.
+`nix build --file . umbrella`, and paste back the hash nix reports.

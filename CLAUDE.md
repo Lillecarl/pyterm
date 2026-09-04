@@ -85,13 +85,22 @@ That writes `.claude/settings.local.json`, which is local and not committed.
 
 ## Building
 
-`nix-build -A pymux` reads the working copies, so you do not need to commit to
-test a change. A flake build needs `nix build '.?submodules=1#pymux'`, because
-flakes see only what git tracks and submodule contents are not that.
+`nix build --file . pymux` reads the working copies, so you do not need to
+commit to test a change. A flake build needs `nix build '.?submodules=1#pymux'`,
+because flakes see only what git tracks and submodule contents are not that.
 
-The tests are `nix-build -A checks.<name>`: `pyte`, `ptterm`, `pymux`,
-`pymux-pty` and `ptterm-fuzz`. Run the one for what you touched before you land.
-`README.md` says what each covers and which read the environment.
+The tests are `nix build --file . checks.<name>`: `pyte`, `ptterm`, `pymux`,
+`pymux-pty`, `pymux-esctest` and `ptterm-fuzz`. Run the one for what you
+touched before you land. `README.md` says what each covers and which read the
+environment.
+
+**Iterate inside the check, not beside it.** A build from a file evaluates
+impurely, so `builtins.getEnv` gives a check as much control as you need:
+`PYMUX_TESTS` picks what pytest runs, `PYMUX_ESCTEST_INCLUDE` narrows the
+conformance run to one class, `PYMUX_ESCTEST_RECORD` makes it write its list
+instead of judging one. Add a variable rather than driving the program a
+different way in `nix develop`. An outside tool belongs in the check inputs as
+a package, the way `esctest2` does.
 
 Each submodule's `default.nix` holds its package and the tests that judge it,
 behind `passthru.checks`. Nothing else. A check belongs to the package it tests,
