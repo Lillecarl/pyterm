@@ -102,6 +102,10 @@ rec {
     # libvterm reads what pymux emitted and answers the assertions, so
     # this judges the wire and not the model.
     pymux-vterm = pymux.checks.vterm;
+    # The reference tests of Alacritty, the same way. It is the slowest
+    # gate here: a pane of its own for each of the 40, and one of the
+    # recordings is a third of a megabyte.
+    pymux-alacritty = pymux.checks.alacritty;
   };
 
   shell = pkgs.callPackage ./pkgs/shell {

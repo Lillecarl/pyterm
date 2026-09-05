@@ -314,6 +314,38 @@ client. Seeing the fence on the wire proves the pane consumed the payload.
     PYMUX_VTERM_TRACE=1 nix build --file . checks.pymux-vterm.run
     less result/vterm.log
 
+### The same middle, with Alacritty's recordings
+
+`pymux/tests/middleman.py` holds the pane, the fifo and the fence, and nothing
+in it is libvterm's. `checks.pymux-alacritty` is the second suite to use it.
+
+Alacritty ships 45 reference tests. Each one is a recording of a real program
+— vim, tmux, fish, zsh — and the grid that recording should make. Their own
+`ref.rs` replays the bytes into a `Term` and compares. This puts the bytes on
+the screen of a full screen pane instead, and gives what pymux emitted to a
+real `Term`:
+
+    the recording ──▶ a full screen pane ──▶ pymux emits ──▶ a real Term
+                                                                  │
+                              grid.json ◀── compared with ────────┘
+
+So Alacritty's own assertion holds if we emit what the program drew, and
+`alacritty_terminal` builds the grid and compares it. The judge is a second
+binary in the crate the panel already builds, and the data is pinned to
+`v0.17.0`, the tag carrying the `alacritty_terminal` that judge links.
+
+**Five are left out**: they keep a scrollback, and a wire carries a screen.
+Of the 40 that run, **21 differ**, recorded in
+`pymux/tests/alacritty-failures.txt`. `tmux_htop`, `tmux_git_log`,
+`vim_simple_edit`, `vim_24bitcolors_bce`, `fish_cc` and `zsh_tab_completion`
+are among the ones that agree, cell for cell, over tens of thousands of bytes.
+
+It is the slowest gate here: each test gets a pane of its own, because each
+one names its own screen size.
+
+    PYMUX_ALACRITTY_INCLUDE=underline nix build --file . checks.pymux-alacritty.run
+    less result/alacritty.log
+
 ## umbrella
 
 [umbrella](https://github.com/Lillecarl/umbrella) is what makes a collection
