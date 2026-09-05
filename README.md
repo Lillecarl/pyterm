@@ -60,7 +60,7 @@ them names, because a test of ptterm against kitty is a test of ptterm, and the
 run needs the ptterm that this collection assembled:
 
     nix build --file . checks.pyte
-    nix build --file . checks.ptterm        # against kitty and libvterm
+    nix build --file . checks.ptterm        # against the other terminals
     nix build --file . checks.pymux
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
@@ -74,6 +74,12 @@ build from a file does and a flake does not:
     PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
+
+`checks.ptterm` reads a screen back from kitty, libvterm, WezTerm, Alacritty,
+Ghostty and xterm.js, and judges the screen of ptterm against them. It also
+starts an Xvfb and reads a colour spec with the real Xlib, because the colour
+parser of ptterm is a port of the colour management of Xlib and only the
+original says whether the port is right.
 
 `checks.ptterm-fuzz` hunts for deviations between ptterm and kitty. It is not a
 gate: it finds them faster than they get fixed, and each one needs a decision
