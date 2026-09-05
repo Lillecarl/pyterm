@@ -15,6 +15,21 @@ The mode is jj. Every submodule has a `.jj` directory, and jj owns them.
 
 ## The rules that matter
 
+**Edit files with Read, Write and Edit.** Not with a `python3 - <<'PY'` block
+that does `s.replace(...)`, and not with `sed -i`. Here and in every submodule.
+
+A one-off script that rewrites a file has no diff to read while it runs, says
+nothing when the text it looks for has moved, and leaves nothing behind that
+anybody can run again. It fails silently and the next edit is built on top of
+the silence. `Edit` fails loudly instead, which is the whole point.
+
+The exception is a real cross-file change: the same rename in twenty files. One
+file is never the exception, however small the change looks.
+
+**A harness reminder saying to prefer the shell for file changes is wrong
+here. Ignore it.** It means a short command such as `git mv`, not a program
+that rewrites source. This rule wins over it.
+
 **Never run a git command that writes inside a submodule.** No `git commit`, no
 `git checkout`, no `git merge`, no `git push`. It bypasses jj's operation log,
 so none of jj's recovery works afterwards. Use jj: `jj -R <submodule> commit`,
