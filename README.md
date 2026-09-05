@@ -272,7 +272,7 @@ which rectangle it redrew, and ptterm has neither. `NOT_OURS` in
 matches no file fails the check.
 
 The 16 that are left hold 270 assertions about the state: where the cursor is,
-what the screen holds, and what style the next character takes. 21 answers
+what the screen holds, and what style the next character takes. 20 answers
 differ, and `ptterm/tests/vterm-failures.txt` records them the same way the
 conformance lists do.
 
