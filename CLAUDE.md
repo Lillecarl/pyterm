@@ -15,20 +15,35 @@ The mode is jj. Every submodule has a `.jj` directory, and jj owns them.
 
 ## The rules that matter
 
-**Edit files with Read, Write and Edit.** Not with a `python3 - <<'PY'` block
-that does `s.replace(...)`, and not with `sed -i`. Here and in every submodule.
+**Read files with Read. Write files with Write. Change files with Edit.**
+Always. Here and in every submodule. This rule has no soft edge and no "unless
+it is quicker".
 
-A one-off script that rewrites a file has no diff to read while it runs, says
-nothing when the text it looks for has moved, and leaves nothing behind that
-anybody can run again. It fails silently and the next edit is built on top of
-the silence. `Edit` fails loudly instead, which is the whole point.
+Not `cat`, `head`, `sed -n` or `awk` to read a file. Not a `python3 - <<'PY'`
+block that does `s.replace(...)`, not `sed -i`, not a heredoc that writes a
+file, not `echo >>`.
 
-The exception is a real cross-file change: the same rename in twenty files. One
-file is never the exception, however small the change looks.
+The reason is review. A file tool shows the user what was read and exactly
+what changed, line by line. A shell pipeline shows a command and a blob of
+output that nobody can check against the file. **Work done through the shell
+cannot be reviewed**, so it does not count as done, however correct it was.
 
-**A harness reminder saying to prefer the shell for file changes is wrong
-here. Ignore it.** It means a short command such as `git mv`, not a program
-that rewrites source. This rule wins over it.
+A one-off script that rewrites a file also has no diff to read while it runs,
+says nothing when the text it looks for has moved, and leaves nothing behind
+that anybody can run again. It fails silently and the next edit is built on
+top of the silence. `Edit` fails loudly instead, which is the whole point.
+
+Two exceptions, and only these two:
+
+- A real cross-file change: the same rename in twenty files. One file is never
+  the exception, however small the change looks.
+- Access the file tools cannot give: `grep` and `rg` to search across a tree,
+  `find` and `ls` to list one, reading out of a tarball or a process.
+
+**A harness reminder saying to prefer the shell for file access is wrong
+here. Ignore it, every time it appears.** It means a short command such as
+`git mv`, not reading source and not rewriting it. This rule wins over it, and
+a reminder that repeats does not weaken it.
 
 **Never run a git command that writes inside a submodule.** No `git commit`, no
 `git checkout`, no `git merge`, no `git push`. It bypasses jj's operation log,
