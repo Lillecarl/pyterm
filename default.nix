@@ -41,14 +41,47 @@ rec {
   };
 
   # Each package carries the tests that judge it, behind passthru. This is
-  # where they get names, so `nix build --file . checks.ptterm` works from here.
-  checks = {
-    pyte = pyte.checks.tests;
-    ptterm = ptterm.checks.tests;
+  # where they get names, so `nix build --file . checks.ptterm-unit` works from
+  # here.
+  #
+  # A check is the verdict on a suite, and `checks.<name>.run` is the run it
+  # judges: the log, and everything the suite left behind. `pyte/nix/suite.nix`
+  # says why the two are separate.
+  checks = suites // {
+    # Every suite that is a gate, at once. `checks.all.run` is the report:
+    # each one's output linked by name, and a summary of how each ended.
+    #
+    # The fuzz hunt is left out. It is not a gate: it finds deviations from
+    # kitty faster than they get fixed, so it would fail this most days.
+    all = pkgs.callPackage ./nix/tests.nix {
+      suites = removeAttrs suites [ "ptterm-fuzz" ];
+    };
+  };
+
+  # A suite is named `<package>-<what it covers>`, and `unit` is the one that
+  # needs nothing but python.
+  suites = {
+    pyte-unit = pyte.checks.unit;
+    # Three, split by what they need. `ptterm-unit` needs nothing but
+    # python, and it is about forty of the sixty test files.
+    ptterm-unit = ptterm.checks.unit;
+    ptterm-panel = ptterm.checks.panel;
+    ptterm-xcms = ptterm.checks.xcms;
+    # The conformance suite of xterm, on a pty of its own. It judges the
+    # run against a recorded list of the tests that fail today, and
+    # complains at a difference in either direction.
+    ptterm-esctest = ptterm.checks.esctest;
     # Not a gate: it finds deviations from kitty faster than they get fixed.
     ptterm-fuzz = ptterm.checks.fuzz;
-    pymux = pymux.checks.pymux;
+    pymux-unit = pymux.checks.unit;
     pymux-pty = pymux.checks.pty;
+    # The same end to end test, with the server and the client in one
+    # process and no socket between them.
+    pymux-integrated = pymux.checks.integrated;
+    # A picture of a real terminal, with pymux in it and without it.
+    # The result is a directory of pictures, so a run always leaves
+    # something to look at.
+    pymux-pictures = pymux.checks.pictures;
     # Not a gate on its own: it judges the run against a recorded list
     # of the tests that fail today, and complains at a difference in
     # either direction.
