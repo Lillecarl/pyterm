@@ -79,6 +79,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
+    nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
     nix build --file . checks.all            # every one that is a gate
 
@@ -123,6 +124,7 @@ build from a file does and a flake does not:
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
     PTTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.ptterm-esctest
     PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm
+    PYMUX_VTERM_INCLUDE=unicode nix build --file . checks.pymux-vterm
     PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures
 
 The suite of ptterm is three checks, split by what each test needs. About forty
@@ -277,6 +279,40 @@ conformance lists do.
     PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm.run
     less result/vterm.log
     cp result/failures.txt ptterm/tests/vterm-failures.txt
+
+### The same suite, with pymux in the middle
+
+`checks.ptterm-vterm` judges our **model**. `checks.pymux-vterm` judges our
+**wire**, and it goes one level further:
+
+    the test file ── PUSH ──▶ a program in a full screen pane
+                                       │
+                                  ptterm parses
+                                       │
+                            pymux renders and emits
+                                       │
+      the test file ◀── an answer ── libvterm reads what pymux emitted
+
+Nothing of ours answers anything. `t/harness.c` is built as it stands, a real
+libvterm sits behind it, and every assertion is answered in libvterm's own
+words about what came off our wire. That is what makes it worth having: a
+judge holds things our model does not, so a borrowed suite can stay green on
+them as long as we emit them faithfully.
+
+It also decides which files can run, and the cut is different from the one
+`ptterm` makes. **A wire carries a screen and nothing else.** `?pen` asks what
+style the *next* character will take, and nothing has been drawn with it, so
+it is not on the wire to be read. `?lineinfo`, the modes, the margins and the
+tab stops are the same. Those are real questions, and the direct plug-in is
+where they are asked.
+
+The bytes reach the pane through a fifo, and a fence goes down it behind each
+payload: an OSC 52, which ptterm hands to pymux and pymux writes to its
+client. Seeing the fence on the wire proves the pane consumed the payload.
+`pymux/tests/vterm_middleman.py` says the rest.
+
+    PYMUX_VTERM_TRACE=1 nix build --file . checks.pymux-vterm.run
+    less result/vterm.log
 
 ## umbrella
 

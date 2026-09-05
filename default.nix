@@ -94,6 +94,10 @@ rec {
     # of the tests that fail today, and complains at a difference in
     # either direction.
     pymux-esctest = pymux.checks.esctest;
+    # The test suite of libvterm, with pymux in the middle. A real
+    # libvterm reads what pymux emitted and answers the assertions, so
+    # this judges the wire and not the model.
+    pymux-vterm = pymux.checks.vterm;
   };
 
   shell = pkgs.callPackage ./pkgs/shell {
