@@ -75,6 +75,10 @@ rec {
     # run against a recorded list of the tests that fail today, and
     # complains at a difference in either direction.
     ptterm-esctest = ptterm.checks.esctest;
+    # The test suite of libvterm, driven by libvterm's own runner. It
+    # judges the same list way: what fails today is written down, and a
+    # difference in either direction fails.
+    ptterm-vterm = ptterm.checks.vterm;
     # Not a gate: it finds deviations from kitty faster than they get fixed.
     ptterm-fuzz = ptterm.checks.fuzz;
     pymux-unit = pymux.checks.unit;

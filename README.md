@@ -74,6 +74,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.ptterm-panel  # against the other six terminals
     nix build --file . checks.ptterm-xcms   # colour specs, against the real Xlib
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
+    nix build --file . checks.ptterm-vterm  # the test suite of libvterm
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -121,6 +122,7 @@ build from a file does and a flake does not:
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
     PTTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.ptterm-esctest
+    PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm
     PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures
 
 The suite of ptterm is three checks, split by what each test needs. About forty
@@ -247,6 +249,34 @@ does not choose was never going to run, so it does not count as missing:
         nix build --file . checks.pymux-esctest.run
 
 [esctest2]: https://github.com/ThomasDickey/esctest2
+
+### The test suite of libvterm
+
+`checks.ptterm-vterm` is the other way round from a judge. libvterm already
+answers for ptterm in `checks.ptterm-panel`: the same bytes go into both and
+the two screens are compared. libvterm also ships 43 test files and a runner
+that drives them against any program, so its suite can judge ptterm.
+
+Nothing in libvterm changes. `t/run-test.pl` takes the program to drive, and
+`ptterm/tests/vterm_harness.py` is that program: it speaks the protocol of
+`t/harness.c` with ptterm behind it.
+
+A file is the unit that can be left out. The runner compares the lines a
+harness emits against the lines a file expects, in order, so a harness that
+stays quiet cannot skip. 27 files are left out by name, and each reason says
+why the question does not apply: libvterm reports every glyph it lays down and
+which rectangle it redrew, and ptterm has neither. `NOT_OURS` in
+`ptterm/tests/drive_with_vterm.py` holds the names, and a pattern there that
+matches no file fails the check.
+
+The 16 that are left ask 274 questions about the state: where the cursor is,
+what the screen holds, and what style the next character takes. 33 answers
+differ, and `ptterm/tests/vterm-failures.txt` records them the same way the
+conformance lists do.
+
+    PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm.run
+    less result/vterm.log
+    cp result/failures.txt ptterm/tests/vterm-failures.txt
 
 ## umbrella
 
