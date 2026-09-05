@@ -66,6 +66,10 @@ rec {
   # needs nothing but python.
   suites = {
     pyte-unit = pyte.checks.unit;
+    # The suite prompt-toolkit ships. ptterm and pymux are both built on
+    # this fork, so a change to it that breaks the library breaks them,
+    # and nothing here said so until this ran.
+    prompt-toolkit-unit = prompt-toolkit.checks.unit;
     # Three, split by what they need. `ptterm-unit` needs nothing but
     # python, and it is about forty of the sixty test files.
     ptterm-unit = ptterm.checks.unit;
