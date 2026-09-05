@@ -38,6 +38,10 @@ rec {
 
   pymux = pkgs.python3Packages.callPackage ./pymux {
     inherit prompt-toolkit ptterm;
+    # The one that draws, which its checks need for kitty. In the python
+    # package set `mesa` is a python binding that nixpkgs has marked
+    # broken, so it has to come from here.
+    inherit (pkgs) mesa;
   };
 
   # Each package carries the tests that judge it, behind passthru. This is

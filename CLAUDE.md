@@ -129,6 +129,20 @@ a red run is still there to read. `pyte/nix/suite.nix` says why.
 that repository's `nix/checks.nix`, which declares its own inputs. Nothing
 that only a test needs belongs in a `default.nix`.
 
+**Never take `pkgs` as an argument to a package.** A package names what it
+needs, one argument at a time, and something above it supplies them. When the
+scope holds the wrong thing under that name — `mesa` in a python package set
+is a broken python binding, not the one that draws — forward the right one
+from the root call site in this `default.nix`:
+
+    pymux = pkgs.python3Packages.callPackage ./pymux {
+      inherit prompt-toolkit ptterm;
+      inherit (pkgs) mesa;
+    };
+
+Each file down the chain then declares `mesa` by name, and none of them can
+reach for anything else.
+
 **Iterate inside the check, not beside it.** A build from a file evaluates
 impurely, so `builtins.getEnv` gives a check as much control as you need:
 `PYMUX_TESTS` picks what pytest runs, `PYMUX_ESCTEST_INCLUDE` and
