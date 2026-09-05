@@ -86,21 +86,41 @@ That writes `.claude/settings.local.json`, which is local and not committed.
 ## Building
 
 `nix build --file . pymux` reads the working copies, so you do not need to
-commit to test a change. A flake build needs `nix build '.?submodules=1#pymux'`,
-because flakes see only what git tracks and submodule contents are not that.
+commit to test a change.
 
-The tests are `nix build --file . checks.<name>`: `pyte`, `ptterm`, `pymux`,
-`pymux-pty`, `pymux-esctest` and `ptterm-fuzz`. Run the one for what you
-touched before you land. `README.md` says what each covers and which read the
-environment.
+**A flake is not first class here.** `flake.nix` exposes the packages and
+nothing else, so that somebody can install pymux with one command. It does not
+expose the checks or the dev shell, and it is not the way to build or test
+this collection. Two reasons, and both are real:
+
+- A flake evaluates purely, so `builtins.getEnv` sees nothing. Every knob that
+  narrows a test run works only from a file.
+- A flake sees only what git tracks, and the contents of a submodule are not
+  that, so even a package build needs `nix build '.?submodules=1#pymux'`.
+
+Do not add outputs to `flake.nix` to make something reachable. Add it to
+`default.nix`, where everything already is.
+
+The tests are `nix build --file . checks.<name>`, and `checks.all` runs every
+one that is a gate. Run the one for what you touched before you land.
+`README.md` says what each covers and which read the environment.
+
+**A check is two derivations.** `checks.<name>` is the verdict, and
+`checks.<name>.run` is the run it judges: the log, and everything the suite
+left behind. The run does not fail because the suite failed, so the output of
+a red run is still there to read. `pyte/nix/suite.nix` says why.
+
+**A package definition holds the package.** The suites that judge it live in
+that repository's `nix/checks.nix`, which declares its own inputs. Nothing
+that only a test needs belongs in a `default.nix`.
 
 **Iterate inside the check, not beside it.** A build from a file evaluates
 impurely, so `builtins.getEnv` gives a check as much control as you need:
-`PYMUX_TESTS` picks what pytest runs, `PYMUX_ESCTEST_INCLUDE` narrows the
-conformance run to one class, `PYMUX_ESCTEST_RECORD` makes it write its list
-instead of judging one. Add a variable rather than driving the program a
-different way in `nix develop`. An outside tool belongs in the check inputs as
-a package, the way `esctest2` does.
+`PYMUX_TESTS` picks what pytest runs, `PYMUX_ESCTEST_INCLUDE` and
+`PTTERM_ESCTEST_INCLUDE` narrow a conformance run to one class,
+`PYMUX_PICTURES` picks one picture fixture. Add a variable rather than driving
+the program a different way in `nix develop`. An outside tool belongs in the
+check inputs as a package, the way `esctest2` does.
 
 Each submodule's `default.nix` holds its package and the tests that judge it,
 behind `passthru.checks`. Nothing else. A check belongs to the package it tests,
