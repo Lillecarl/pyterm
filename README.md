@@ -269,7 +269,7 @@ which rectangle it redrew, and ptterm has neither. `NOT_OURS` in
 `ptterm/tests/drive_with_vterm.py` holds the names, and a pattern there that
 matches no file fails the check.
 
-The 16 that are left ask 274 questions about the state: where the cursor is,
+The 16 that are left hold 270 assertions about the state: where the cursor is,
 what the screen holds, and what style the next character takes. 25 answers
 differ, and `ptterm/tests/vterm-failures.txt` records them the same way the
 conformance lists do.
