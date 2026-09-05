@@ -168,6 +168,28 @@ from its own font stack, so a difference between two of them says nothing.
 What a second terminal adds is a second opinion on whether pymux changes what
 that terminal draws.
 
+### Reproducing a fault that only happens on your machine
+
+A fixture written by hand can only hold what somebody thought to write, and
+some programs cannot run in a build sandbox at all. Claude Code needs a login,
+a project and your own configuration, and what it draws depends on all three.
+
+So record it once, where it goes wrong, and replay the bytes:
+
+    ptterm-record --into pymux/tests/recordings --lines 24 --columns 80 \
+        claude -- claude
+
+`ptterm-record` comes with ptterm, so it runs anywhere. The program behaves
+normally: use it, reproduce the fault, and quit. A `claude.bin` in
+`pymux/tests/recordings` then becomes a fixture called `recorded-claude`, and
+`checks.pymux-pictures` plays it back bare and in a pane and subtracts the two
+pictures.
+
+    PYMUX_PICTURES=recorded-claude nix build --file . checks.pymux-pictures.run
+
+**Read a recording before you commit it.** It holds whatever was on the
+screen. `pymux/tests/recordings/README.md` says the rest.
+
 Not every difference is a fault. A pane reads what a program asked for and
 writes the request again in the form the terminal understands, so a pane can
 draw more than that terminal draws on its own. xterm ignores `CSI 4:1 m` and
