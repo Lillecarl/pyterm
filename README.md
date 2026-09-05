@@ -191,7 +191,7 @@ that terminal, writes control sequences and reads the reports that come back.
 Two checks run it, and the difference between them is the point.
 
 `checks.ptterm-esctest` runs it on a pty of its own, with ptterm as the
-terminal and nothing else around it. Eight tests fail, and each names a real
+terminal and nothing else around it. Seven tests fail, and each names a real
 difference between ptterm and xterm. `ptterm/tests/esctest-failures.txt`
 records them.
 
