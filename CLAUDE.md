@@ -172,6 +172,32 @@ so a comparison of ptterm against kitty lives in `ptterm`, not in `pymux`. Dev
 shells, and anything that is about the collection rather than one package,
 belong here.
 
+## Ask the panel before you believe a foreign suite
+
+A foreign suite says ptterm is wrong. It is one emulator's opinion, and it may
+be that emulator's own quirk rather than a rule. **Before you turn one of its
+assertions into a ptterm test, or change ptterm to satisfy it, put the same
+bytes through the panel and read the vote.** `ptterm/tests/panel.py` runs
+kitty, WezTerm, Alacritty, libvterm, Ghostty and xterm.js, and `verdict()`
+says one of three things:
+
+- Every judge agrees with the suite. ptterm is wrong. Fix it.
+- The judges disagree with each other. The suite is describing a choice, not
+  a rule. Record the difference with the vote in the reason, and change
+  nothing.
+- Every judge disagrees with the suite. The suite is describing its own
+  quirk. Record it, and say which emulator holds that opinion alone.
+
+A difference that survives the panel is not always a bug either. Some of them
+are what a terminal expects to see, and the answer is to **hold the metadata
+and render for the terminal in front of us**, rather than to pick one answer
+for everybody. `libvterm` reporting `idx(15)` for bold plus colour seven is
+that kind: it is a rendering decision that libvterm's embedder made, and
+ptterm keeps the bold and the colour apart so the renderer can decide.
+
+The vote belongs in the reason you write down. "kitty, Ghostty and WezTerm
+agree with libvterm here" is a finding. "libvterm says so" is not.
+
 ## File an issue for what you find and do not fix
 
 You will see problems that are not the task in front of you: a design that
