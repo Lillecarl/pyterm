@@ -179,8 +179,11 @@ top: a task cannot outlive the scope that started it, and an error in one
 cancels its siblings. `asyncio.create_task` gives neither, so a task nobody
 holds dies in silence and takes its exception with it.
 
-The pytest config sets `anyio_mode = auto`, which runs a coroutine test.
-Without it pytest skips one and the suite stays green with nothing run.
+`pyproject.toml` sets `anyio_mode = "auto"`, which runs a coroutine test with
+no mark on it. Without it pytest fails one: "async def functions are not
+natively supported". A suite reads its settings from the directory it runs
+in, so `testSources` has to carry that file, or the setting holds by hand and
+not in the check.
 
 Two exceptions. `pyte` takes no async at all, because it does no I/O. Patches
 to `prompt-toolkit` have to stay upstreamable, and upstream is asyncio.
