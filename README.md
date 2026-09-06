@@ -335,7 +335,7 @@ binary in the crate the panel already builds, and the data is pinned to
 `v0.17.0`, the tag carrying the `alacritty_terminal` that judge links.
 
 **Five are left out**: they keep a scrollback, and a wire carries a screen.
-Of the 40 that run, **15 differ**, recorded in
+Of the 40 that run, **13 differ**, recorded in
 `pymux/tests/alacritty-failures.txt`. `tmux_htop`, `tmux_git_log`,
 `vim_simple_edit`, `vim_24bitcolors_bce`, `fish_cc` and `zsh_tab_completion`
 are among the ones that agree, cell for cell, over tens of thousands of bytes.
