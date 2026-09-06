@@ -172,6 +172,19 @@ so a comparison of ptterm against kitty lives in `ptterm`, not in `pymux`. Dev
 shells, and anything that is about the collection rather than one package,
 belong here.
 
+## anyio, not asyncio
+
+New async code uses `anyio`. It has the same primitives, and a task group on
+top: a task cannot outlive the scope that started it, and an error in one
+cancels its siblings. `asyncio.create_task` gives neither, so a task nobody
+holds dies in silence and takes its exception with it.
+
+The pytest config sets `anyio_mode = auto`, which runs a coroutine test.
+Without it pytest skips one and the suite stays green with nothing run.
+
+Two exceptions. `pyte` takes no async at all, because it does no I/O. Patches
+to `prompt-toolkit` have to stay upstreamable, and upstream is asyncio.
+
 ## Ask the panel before you believe a foreign suite
 
 A foreign suite says ptterm is wrong. It is one emulator's opinion, and it may
