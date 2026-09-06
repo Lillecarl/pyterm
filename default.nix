@@ -83,6 +83,10 @@ rec {
     # judges the same list way: what fails today is written down, and a
     # difference in either direction fails.
     ptterm-vterm = ptterm.checks.vterm;
+    # What it costs to parse a recording, in bytecode instructions and not in
+    # seconds. It holds each count to a budget, so a change that makes the
+    # parser much slower fails here instead of being felt later.
+    ptterm-instructions = ptterm.checks.instructions;
     # Not a gate: it finds deviations from kitty faster than they get fixed.
     ptterm-fuzz = ptterm.checks.fuzz;
     pymux-unit = pymux.checks.unit;

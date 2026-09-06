@@ -346,6 +346,32 @@ one names its own screen size.
     PYMUX_ALACRITTY_INCLUDE=underline nix build --file . checks.pymux-alacritty.run
     less result/alacritty.log
 
+### What it costs, in instructions and not in seconds
+
+`checks.ptterm-instructions` feeds 23 of the same recordings to the parser alone
+and counts the **bytecode instructions** each one takes. A change that makes
+ptterm much slower passes every other check here, so this is the one that
+notices.
+
+The unit is deliberate. A second belongs to the machine that measured it, and
+a build sandbox runs beside other jobs, so a wall clock reading proves nothing
+twice. `sys.monitoring` reports one event per bytecode instruction, and the
+number is exact: the same code over the same bytes gives the same count on
+every machine, under any load. `nix build --rebuild` confirms it, byte for
+byte.
+
+`ptterm/tests/instruction-budgets.txt` holds one count per recording, and a
+run that moves more than 5% either way fails. A count that climbed is the
+fault this gate is for; a count that fell is a budget nobody updated.
+
+Two things move a count that is not a change in the code: the version of
+Python, and the seed of the hash. The check pins `PYTHONHASHSEED`, and an
+interpreter upgrade means recording the budgets again.
+
+    PTTERM_INSTRUCTIONS_INCLUDE=vim nix build --file . checks.ptterm-instructions
+    PTTERM_INSTRUCTIONS_TOLERANCE=2 nix build --file . checks.ptterm-instructions
+    cp result/instruction-budgets.txt ptterm/tests/instruction-budgets.txt
+
 ## umbrella
 
 [umbrella](https://github.com/Lillecarl/umbrella) is what makes a collection
