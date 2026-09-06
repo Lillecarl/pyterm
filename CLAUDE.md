@@ -220,3 +220,16 @@ One issue per finding. An issue that needs the word "and" is two issues.
 This covers anything that improves the collection: architecture, a question to
 research, a fix, a test that is missing, a name that misleads. It does not
 cover the task you are on. Finish that.
+
+## Tidy the issues before you stop
+
+Never stop with nothing to do while the list is stale. `gh issue list` is
+work. One pass:
+
+- Close what this session closed, and say in the comment what closed it.
+- Correct an issue this session contradicted. A wrong issue costs more than
+  no issue.
+- Split one that grew a second concern.
+- File what you found and did not fix.
+
+Then stop.
