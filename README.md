@@ -113,9 +113,8 @@ it. Running it again gives the same stored failure until an input changes.
 
 `checks.all` is every gate at once, and `checks.all.run` is the report: each
 suite's output linked by name, and a summary of how each one ended. Three are
-left out of it. Two are not gates: the fuzz hunt, and the vttest walk. The
-third, the pictures of vttest, is a gate but a slow one: minutes for one item
-of vttest's main menu, and hours for all of them.
+left out of it, and none of the three is a gate: the fuzz hunt, the vttest
+walk, and the pictures of vttest.
 
 ### Narrowing a run
 
@@ -319,6 +318,14 @@ foot draws every "ESC # 6" row ordinary and says nothing, and kitty logs
 
 `tests/vttest-picture-differences.txt` records each difference that stands and
 says why, and a run is judged against it in both directions.
+
+**It is not a gate yet, and it should not be made one yet.** The chain is
+proven: three runs of the default item give the same verdicts, and the first
+outing found three faults that no other check here can see. The judging is not
+proven. Item 2 of the main menu still flaps, because one of those faults is a
+single change at a fixed moment after a screen is drawn, so whether a
+measurement holds it depends on when the measurement starts. A check that
+flaps is worse than no check.
 
 [vttest]: https://invisible-island.net/vttest/
 
