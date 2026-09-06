@@ -233,6 +233,11 @@ Write what a reader needs to act:
 
 One issue per finding. An issue that needs the word "and" is two issues.
 
+**Every issue lives in `Lillecarl/pymux`, and most commits do not.** A bare
+`Closes #89` in a ptterm or pyte commit names an issue of that repository, which
+is not the one you mean. Write `Closes Lillecarl/pymux#89`, and close the issue
+by hand with a comment that says what closed it.
+
 This covers anything that improves the collection: architecture, a question to
 research, a fix, a test that is missing, a name that misleads. It does not
 cover the task you are on. Finish that.
