@@ -82,6 +82,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
     nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
+    nix build --file . checks.pymux-vttest-pictures # the same, of vttest
     nix build --file . checks.all            # every one that is a gate
 
 Every run happens in the build sandbox. The ptys, the sockets and the processes
@@ -111,8 +112,10 @@ it. Running it again gives the same stored failure until an input changes.
 `--rebuild` is the way to make it run again.
 
 `checks.all` is every gate at once, and `checks.all.run` is the report: each
-suite's output linked by name, and a summary of how each one ended. Two are
-left out of it, because neither is a gate: the fuzz hunt, and the vttest walk.
+suite's output linked by name, and a summary of how each one ended. Three are
+left out of it. Two are not gates: the fuzz hunt, and the vttest walk. The
+third, the pictures of vttest, is a gate but a slow one: minutes for one item
+of vttest's main menu, and hours for all of them.
 
 ### Narrowing a run
 
@@ -128,6 +131,8 @@ build from a file does and a flake does not:
     PTTERM_VTTEST_INCLUDE='^4 ' nix build --file . checks.ptterm-vttest.run
     PYMUX_VTERM_INCLUDE=unicode nix build --file . checks.pymux-vterm
     PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures
+    PYMUX_VTTEST_INCLUDE='^9 ' nix build --file . checks.pymux-vttest-pictures
+    PYMUX_VTTEST_TERMINALS=xterm,foot nix build --file . checks.pymux-vttest-pictures
 
 The suite of ptterm is three checks, split by what each test needs. About forty
 of its sixty files need nothing but python, and `checks.ptterm-unit` is those:
@@ -285,6 +290,35 @@ one at a time, and the setup menu changes what the run after it does.
 **Never send a key before the prompt is on the screen.** `holdit()` in vttest's
 `unix_io.c` throws away everything waiting on the input before it prints "Push
 <RETURN>", so a key sent early is a key that vanishes.
+
+### A picture of vttest
+
+The walk above stops at the cell. It says what ptterm holds, which is not what
+a terminal paints, and item 4 of vttest is exactly the case where the two come
+apart: a row of double size holds ordinary cells.
+
+`checks.pymux-vttest-pictures` gets past that. The walker also passes every
+byte vttest wrote to the terminal it runs in, so vttest draws on a real
+terminal while the same bytes go into the ptterm model that says when a screen
+is finished. The walk then stops at each screen and a harness outside takes its
+picture. It runs twice, once with a pymux pane in the chain and once without
+one, and subtracts the pairs.
+
+    nix build --file . checks.pymux-vttest-pictures.run
+    ls result/xterm/bare result/xterm/pymux result/xterm/differ
+
+The two runs have to draw the same screens or no picture of one lines up with a
+picture of the other, so the check compares the two lists of menu paths first
+and fails on that rather than on a pixel count. The walk is what makes that
+possible: two runs of it write the same list.
+
+xterm is the seat, which is the other way round from the pictures above. It is
+the only one of the three terminals here that draws a double sized line at all:
+foot draws every "ESC # 6" row ordinary and says nothing, and kitty logs
+"Unhandled Esc # code" for each of them.
+
+`tests/vttest-picture-differences.txt` records each difference that stands and
+says why, and a run is judged against it in both directions.
 
 [vttest]: https://invisible-island.net/vttest/
 

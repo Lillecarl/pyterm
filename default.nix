@@ -55,14 +55,17 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Two are left out. The fuzz hunt is not a gate: it finds deviations
-    # from kitty faster than they get fixed, so it would fail this most
-    # days. The vttest walk is not a gate either: it draws screens for a
-    # person to read, and it judges none of them.
+    # Three are left out. The fuzz hunt is not a gate: it finds
+    # deviations from kitty faster than they get fixed, so it would fail
+    # this most days. The vttest walk is not a gate either: it draws
+    # screens for a person to read, and it judges none of them. The
+    # pictures of vttest are a gate, but a slow one: minutes for one item
+    # of its main menu, and hours for all of them.
     all = pkgs.callPackage ./nix/tests.nix {
       suites = removeAttrs suites [
         "ptterm-fuzz"
         "ptterm-vttest"
+        "pymux-vttest-pictures"
       ];
     };
   };
@@ -107,6 +110,9 @@ rec {
     # The result is a directory of pictures, so a run always leaves
     # something to look at.
     pymux-pictures = pymux.checks.pictures;
+    # The same picture, of vttest. Not a gate: it is minutes of work
+    # for one item of vttest's main menu, and hours for all of them.
+    pymux-vttest-pictures = pymux.checks.vttestPictures;
     # Not a gate on its own: it judges the run against a recorded list
     # of the tests that fail today, and complains at a difference in
     # either direction.
