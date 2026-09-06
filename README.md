@@ -71,7 +71,7 @@ run needs the ptterm that this collection assembled:
 
     nix build --file . checks.pyte-unit
     nix build --file . checks.ptterm-unit   # nothing but python
-    nix build --file . checks.ptterm-panel  # against the other six terminals
+    nix build --file . checks.ptterm-panel  # against seven other terminals
     nix build --file . checks.ptterm-xcms   # colour specs, against the real Xlib
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
@@ -133,6 +133,9 @@ it is the one to run while working, and it pays for none of the emulators.
 
 `checks.ptterm-panel` reads a screen back from kitty, libvterm, WezTerm,
 Alacritty, Ghostty and xterm.js, and judges the screen of ptterm against them.
+It also runs xterm itself, on an Xvfb of its own, and reads that screen back
+with DECRQCRA. xterm answers a character and no attribute, so it takes no part
+in the vote: `ptterm/tests/DEVIATIONS.md` says where it answers instead.
 `checks.ptterm-xcms` starts an Xvfb and reads a colour spec with the real Xlib,
 because the colour parser of ptterm is a port of the colour management of Xlib
 and only the original says whether the port is right.
