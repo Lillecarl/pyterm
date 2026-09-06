@@ -172,6 +172,24 @@ so a comparison of ptterm against kitty lives in `ptterm`, not in `pymux`. Dev
 shells, and anything that is about the collection rather than one package,
 belong here.
 
+## Nothing here owes anybody backwards compatibility
+
+`pymux`, `ptterm` and `pyte` have no API to keep. Nobody imports them but
+this collection. So a name that misleads gets renamed, a function that
+takes the wrong arguments gets new ones, and a module that holds two jobs
+gets split. **If a change makes the code better, make it.** Do not add a
+wrapper to keep an old spelling alive, do not leave an alias behind, and do
+not write a deprecation.
+
+The vendored `pyte` is the clearest case. It is not upstream pyte and it
+cannot be: eight local patches already say so. Treat it as ours.
+
+`prompt-toolkit` is the exception, and it is a real one. Every patch there
+has to be one that upstream could take: minimal, in upstream's style, and
+about one thing. That is not backwards compatibility for its own sake, it
+is the price of not forking. A fix that needs a break belongs somewhere
+else — the interaction first, then an upstreamable patch, and never a hack.
+
 ## anyio, not asyncio
 
 New async code uses `anyio`. It has the same primitives, and a task group on
