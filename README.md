@@ -75,6 +75,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.ptterm-xcms   # colour specs, against the real Xlib
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
+    nix build --file . checks.ptterm-vttest # every screen vttest draws
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -110,8 +111,8 @@ it. Running it again gives the same stored failure until an input changes.
 `--rebuild` is the way to make it run again.
 
 `checks.all` is every gate at once, and `checks.all.run` is the report: each
-suite's output linked by name, and a summary of how each one ended. The fuzz
-hunt is left out of it, because it is not a gate.
+suite's output linked by name, and a summary of how each one ended. Two are
+left out of it, because neither is a gate: the fuzz hunt, and the vttest walk.
 
 ### Narrowing a run
 
@@ -124,6 +125,7 @@ build from a file does and a flake does not:
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
     PTTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.ptterm-esctest
     PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm
+    PTTERM_VTTEST_INCLUDE='^4 ' nix build --file . checks.ptterm-vttest.run
     PYMUX_VTERM_INCLUDE=unicode nix build --file . checks.pymux-vterm
     PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures
 
@@ -254,6 +256,37 @@ does not choose was never going to run, so it does not count as missing:
         nix build --file . checks.pymux-esctest.run
 
 [esctest2]: https://github.com/ThomasDickey/esctest2
+
+### The screens of vttest
+
+[vttest][vttest] is the other conformance program of Thomas Dickey, after Per
+Lindberg wrote it in 1985. It is nothing like esctest2. esctest2 reads the
+screen back with DECRQCRA and judges it, so it can be a gate. vttest draws a
+screen and asks a person whether what they see is right.
+
+So `checks.ptterm-vttest` judges no screen, and `checks.all` leaves it out. It
+is a walker: it enters every menu item, answers every "Push <RETURN>", and
+writes down what the screen held each time.
+
+    nix build --file . checks.ptterm-vttest.run
+    less result/screens.txt
+
+What comes out is every screen vttest can draw, with the menu path that reached
+it, the size of the screen, where the cursor stood, and which rows were drawn
+twice as big. That last one matters: item 4 of the main menu is entirely about
+rows of double size, and every cell in one looks ordinary in a text dump.
+
+The verdict does judge the walk itself. A run that drew nothing fails, and so
+does an exclusion in `NOT_OURS` that names no menu item.
+
+Two items need a person and `NOT_OURS` names them: the keyboard test reads keys
+one at a time, and the setup menu changes what the run after it does.
+
+**Never send a key before the prompt is on the screen.** `holdit()` in vttest's
+`unix_io.c` throws away everything waiting on the input before it prints "Push
+<RETURN>", so a key sent early is a key that vanishes.
+
+[vttest]: https://invisible-island.net/vttest/
 
 ### The test suite of libvterm
 

@@ -55,10 +55,15 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # The fuzz hunt is left out. It is not a gate: it finds deviations from
-    # kitty faster than they get fixed, so it would fail this most days.
+    # Two are left out. The fuzz hunt is not a gate: it finds deviations
+    # from kitty faster than they get fixed, so it would fail this most
+    # days. The vttest walk is not a gate either: it draws screens for a
+    # person to read, and it judges none of them.
     all = pkgs.callPackage ./nix/tests.nix {
-      suites = removeAttrs suites [ "ptterm-fuzz" ];
+      suites = removeAttrs suites [
+        "ptterm-fuzz"
+        "ptterm-vttest"
+      ];
     };
   };
 
@@ -89,6 +94,10 @@ rec {
     ptterm-instructions = ptterm.checks.instructions;
     # Not a gate: it finds deviations from kitty faster than they get fixed.
     ptterm-fuzz = ptterm.checks.fuzz;
+    # Not a gate either. vttest draws a screen and asks a person whether
+    # what they see is right, so this walks its menus and keeps every
+    # screen. Reading them is the work. Lillecarl/pymux#46.
+    ptterm-vttest = ptterm.checks.vttest;
     pymux-unit = pymux.checks.unit;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
