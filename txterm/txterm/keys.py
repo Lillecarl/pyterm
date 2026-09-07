@@ -7,7 +7,7 @@ sequence back, and in the encoding that *this* pane asked for, which is
 not always the one the outer terminal sent.
 
 So this file only undoes the naming. It turns a name back into the plain
-vt100 sequence, and `BetterScreen.encode_key` does the rest: the cursor
+vt100 sequence, and `Screen.encode_key` does the rest: the cursor
 keys of application mode, and the kitty keyboard protocol when the
 program turned it on. ptterm has the same pair, against
 prompt_toolkit's table.

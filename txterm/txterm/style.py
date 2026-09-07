@@ -28,13 +28,13 @@ not the id that joins its pieces.
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict
 
-from ptterm.colors import SgrColor
+from pyte.colors import SgrColor
 from rich.color import Color
 from rich.color_triplet import ColorTriplet
 from rich.style import Style
 
 if TYPE_CHECKING:
-    from ptterm.screen import Appearance
+    from pyte.screen import Appearance
 
 __all__ = ("color_of", "style_of")
 

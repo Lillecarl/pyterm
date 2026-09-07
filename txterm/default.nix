@@ -1,15 +1,15 @@
 # The package this repository builds. The suite that judges it lives in
 # `nix/checks.nix`, which declares its own inputs.
 #
-# Three dependencies, and one of them is a debt:
+# Three dependencies, and prompt-toolkit is not in the closure of any of them:
 #
 # - `textual` draws, and `rich` comes with it.
 # - `ptyhost` runs the program on a pty.
-# - `ptterm` holds the parser and the screen. That layer imports no toolkit
-#   and it belongs in `pyte`; it is here because that is where it was
-#   written. `tests/test_the_layers.py` names every module of it this
-#   package touches, and that list is what the move has to carry.
-#   Lillecarl/pymux#11.
+# - `pyte` parses and holds the screen.
+#
+# The third one was `ptterm` until the pure layer moved. That made the
+# prompt_toolkit widget a build dependency of the Textual one, and only a test
+# kept the toolkit out of the code. Lillecarl/pymux#11.
 #
 # Nothing else belongs in this repository: the dev shell and the collection
 # that assembles this with its siblings live in pyterm.
@@ -20,6 +20,7 @@
   callPackage,
   textual,
   ptyhost,
+  pyte,
   ptterm,
 }:
 let
@@ -35,7 +36,7 @@ let
     dependencies = [
       textual
       ptyhost
-      ptterm
+      pyte
     ];
 
     # The suite runs as `checks.unit`, against the installed package.
@@ -68,6 +69,9 @@ let
   # The conformance suite of xterm is built once, in ptterm, and pymux
   # takes it from there as well. A tool is not a suite: what changes here
   # is which terminal it judges.
+  #
+  # This is the only reason `ptterm` is an argument at all. It is a build
+  # input of a check and reaches the closure of nothing that runs.
   checks = callPackage ./nix/checks.nix {
     inherit package testSources;
     inherit (ptterm) esctest2;

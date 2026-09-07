@@ -6,7 +6,7 @@ and draws that screen. Three packages do the work, and this file is only
 the joint between them:
 
 - `ptyhost` runs the program. It parses nothing.
-- `ptterm.screen` parses and holds the cells. It draws nothing, and it
+- `pyte.screen` parses and holds the cells. It draws nothing, and it
   imports no toolkit.
 - `txterm.style` says how Rich spells a cell, and `txterm.keys` what a
   key of Textual sends.
@@ -18,10 +18,10 @@ import sys
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional
 
-from ptterm.graphics import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
-from ptterm.placeholders import PLACEHOLDER
-from ptterm.screen import PLAIN_APPEARANCE, BetterScreen, Cell
-from ptterm.stream import BetterStream
+from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
+from pyte.placeholders import PLACEHOLDER
+from pyte.screen import PLAIN_APPEARANCE, Screen, Cell
+from pyte.streams import Stream
 from ptyhost import Process
 from ptyhost.backends import Backend
 from rich.segment import Segment
@@ -177,7 +177,7 @@ class Terminal(Widget, can_focus=True):
         #
         # It is not called `screen`, because `Widget.screen` is the
         # Textual screen this widget is on.
-        self.emulator = BetterScreen(
+        self.emulator = Screen(
             0,
             0,
             write_process_input=lambda data: self.process.write_input(data),
@@ -189,7 +189,7 @@ class Terminal(Widget, can_focus=True):
             # truth for every widget that nobody has promised to move.
             may_resize=may_resize or (lambda: False),
         )
-        self.stream = BetterStream(self.emulator)
+        self.stream = Stream(self.emulator)
         self.stream.attach(self.emulator)
 
         #: The pty. It needs a running event loop, so it is made when

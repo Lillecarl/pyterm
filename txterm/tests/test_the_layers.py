@@ -1,5 +1,5 @@
 """
-Which module may import what, and the list the migration has to carry.
+Which module may import what.
 
 txterm is one layer: the front end for Textual. Everything under it
 belongs to another package, and the point of Lillecarl/pymux#82 is that
@@ -7,16 +7,16 @@ this package can exist at all — a cell used to hold a prompt_toolkit
 style string, so a cell held one renderer's spelling and a second front
 end was impossible.
 
-Two rules, and the second is the interesting one.
+Two rules.
 
-1. **No prompt_toolkit, anywhere.** `ptterm` is a prompt_toolkit widget
-   and this package imports its parser, so the toolkit is in the build
-   closure. Nothing here may reach for it.
-2. **The imports from `ptterm` are written down.** That layer is pure
-   and it belongs in `pyte`; it is in `ptterm` because that is where it
-   was written. `PURE_LAYER` is what this package needs from it, which
-   is what the move has to carry. A new name added here is a name added
-   to the move. Lillecarl/pymux#11.
+1. **No prompt_toolkit, anywhere.** It is not in the closure any more
+   either: the pure layer moved out of `ptterm` and into `pyte`, so the
+   toolkit is no longer a build dependency of this package. The rule
+   stays, because the closure is not what a rule is for.
+2. **The imports from `pyte` are written down.** A front end draws cells
+   and sends keys, so what it needs is the screen, the parser that feeds
+   it, and the two tables that say what a cell holds. `ptterm` takes
+   almost the same five, and its own copy of this file says so.
 """
 import ast
 from pathlib import Path
@@ -29,17 +29,16 @@ import txterm
 #: A check runs the tests against what it built.
 PACKAGE = Path(txterm.__file__).parent
 
-#: What this package takes from the pure layer of ptterm.
+#: What this package takes from the pure layer.
 #:
-#: **This is the migration manifest.** When the pure layer reaches
-#: `pyte`, these are the modules to carry and the imports here to
-#: rewrite. Nothing else of ptterm may appear.
+#: Nothing else of `pyte` may appear. A name added here says the front
+#: end grew, and that is worth reading in a diff.
 PURE_LAYER = {
-    "ptterm.colors",
-    "ptterm.graphics",
-    "ptterm.placeholders",
-    "ptterm.screen",
-    "ptterm.stream",
+    "pyte.colors",
+    "pyte.images",
+    "pyte.placeholders",
+    "pyte.screen",
+    "pyte.streams",
 }
 
 #: The toolkit this package draws with, and the one it may never touch.
@@ -88,37 +87,33 @@ def _root(name: str) -> str:
 @pytest.mark.parametrize("name", sorted(MODULES))
 def test_nothing_imports_prompt_toolkit(name):
     """
-    The whole point of the split.
-
-    `ptterm` is in the closure of this package, so the import would
-    work. That is exactly why a test has to say no: it would work, and
-    then a cell would carry two spellings again.
+    The whole point of the split. `ptterm` is not in the closure of this
+    package any more, so the import would not even resolve; the rule
+    stays because a rule is not the closure.
     """
     assert not {_root(module) for module in _imports(MODULES[name])} & NEVER
 
 
 @pytest.mark.parametrize("name", sorted(MODULES))
-def test_only_the_pure_layer_of_ptterm_is_used(name):
+def test_only_the_pure_layer_of_pyte_is_used(name):
     """
-    A module of ptterm that is not in `PURE_LAYER` is either a front end
-    of prompt_toolkit, which this package must not touch, or a piece of
-    the pure layer that nobody wrote down.
+    A module of `pyte` that is not in `PURE_LAYER` is either something
+    upstream left behind, or a piece of the screen that nobody wrote
+    down here.
     """
     taken = {
-        module
-        for module in _imports(MODULES[name])
-        if _root(module) == "ptterm"
+        module for module in _imports(MODULES[name]) if _root(module) == "pyte"
     }
     assert taken <= PURE_LAYER, (
-        "%s imports %s from ptterm; add it to PURE_LAYER, which is what "
-        "the move to pyte has to carry" % (name, sorted(taken - PURE_LAYER))
+        "%s imports %s from pyte; add it to PURE_LAYER"
+        % (name, sorted(taken - PURE_LAYER))
     )
 
 
-def test_the_manifest_is_what_the_package_really_needs():
+def test_the_list_is_what_the_package_really_needs():
     """
     And the other way round: a name in the list that nothing imports is
-    a name the move would carry for nothing.
+    a name that says the front end is bigger than it is.
 
     This is also the guard on the reading. A reader that found no import
     anywhere would pass both tests above and say nothing at all.
@@ -126,7 +121,7 @@ def test_the_manifest_is_what_the_package_really_needs():
     taken = set()
     for path in MODULES.values():
         taken |= {
-            module for module in _imports(path) if _root(module) == "ptterm"
+            module for module in _imports(path) if _root(module) == "pyte"
         }
     assert taken == PURE_LAYER
 
