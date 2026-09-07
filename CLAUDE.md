@@ -5,11 +5,36 @@ This file is the part that is easy to get wrong.
 
 ## What you are working in
 
-Five submodules, each a git repository colocated with jj, held together by an
-umbrella that records one commit per submodule. Four of them are the code:
-`pymux`, `ptterm`, `pyte` and `prompt-toolkit`. The fifth is `umbrella` itself,
-the tool that holds the other four together. `umbrella status` tells you the
-state of all five at once. Run it before you start and after you finish.
+Seven submodules, each a git repository colocated with jj, held together by an
+umbrella that records one commit per submodule. Six of them are the code, and
+each one claims one job:
+
+| | job |
+| --- | --- |
+| `pyte` | parse, and hold a screen |
+| `ptyhost` | run a program on a pty and carry its bytes |
+| `ptterm` | draw one terminal, with prompt-toolkit |
+| `txterm` | draw one terminal, with Textual |
+| `pymux` | arrange several of them |
+| `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
+
+The seventh is `umbrella` itself, the tool that holds the others together.
+`umbrella status` tells you the state of all seven at once. Run it before you
+start and after you finish.
+
+**A layer may reach the layers under it and never the ones above.** Three
+files hold that, one per layer: `pyte/tests/test_the_layers.py` says the
+screen imports no toolkit, no pty and no widget, and does no I/O;
+`ptterm/tests/test_the_layers.py` and `txterm/tests/test_the_layers.py` each
+name the five modules of `pyte` that widget imports, and say that neither
+widget ever reaches the other's toolkit.
+
+`pyte` is the screen now, not only the parser. Twelve modules moved there out
+of `ptterm`, which is eleven hundred lines of prompt_toolkit widget and
+nothing else. What upstream pyte left in `screens.py` is on its way out: the
+`Screen` that nothing here runs, the `HistoryScreen` whose job the new screen
+does better with `line_offset`, and the `DebugScreen` that is worth keeping
+because it powers `python -m pyte`.
 
 The mode is jj. Every submodule has a `.jj` directory, and jj owns them.
 

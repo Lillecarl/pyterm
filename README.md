@@ -1,17 +1,19 @@
 # pyterm
 
 A glorified git submodule collection. There is no code of its own here. What it
-holds is four repositories that are worked on together, a nix expression that
-builds each of them from its checkout, and the wiring that keeps the four in
+holds is six repositories that are worked on together, a nix expression that
+builds each of them from its checkout, and the wiring that keeps the six in
 step.
 
-| submodule | branch | upstream |
-| --- | --- | --- |
-| `pymux` | `graphics-protocol` | prompt-toolkit/pymux |
-| `ptterm` | `graphics-protocol` | prompt-toolkit/ptterm |
-| `pyte` | `graphics-protocol` | selectel/pyte |
-| `prompt-toolkit` | `render-performance` | prompt-toolkit/python-prompt-toolkit |
-| `umbrella` | `main` | Lillecarl/umbrella |
+| submodule | branch | upstream | job |
+| --- | --- | --- | --- |
+| `pymux` | `graphics-protocol` | prompt-toolkit/pymux | arrange several terminals |
+| `ptterm` | `graphics-protocol` | prompt-toolkit/ptterm | draw one with prompt-toolkit |
+| `txterm` | `main` | Lillecarl/txterm | draw one with Textual |
+| `ptyhost` | `main` | Lillecarl/ptyhost | run a program and carry its bytes |
+| `pyte` | `graphics-protocol` | selectel/pyte | parse, and hold a screen |
+| `prompt-toolkit` | `render-performance` | prompt-toolkit/python-prompt-toolkit | the toolkit under it all |
+| `umbrella` | `main` | Lillecarl/umbrella | hold the others together |
 
 Each submodule carries its own `default.nix`. That file holds the package and
 the tests that judge it, and nothing else. Sibling packages arrive as arguments
@@ -70,12 +72,15 @@ them names, because a test of ptterm against kitty is a test of ptterm, and the
 run needs the ptterm that this collection assembled:
 
     nix build --file . checks.pyte-unit
+    nix build --file . checks.ptyhost-unit  # real programs on real ptys
     nix build --file . checks.ptterm-unit   # nothing but python
     nix build --file . checks.ptterm-panel  # against seven other terminals
     nix build --file . checks.ptterm-xcms   # colour specs, against the real Xlib
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
     nix build --file . checks.ptterm-vttest # every screen vttest draws
+    nix build --file . checks.txterm-unit   # the Textual widget, drawn and driven
+    nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -123,9 +128,11 @@ build from a file does and a flake does not:
 
     PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux-unit
     PTTERM_TESTS=tests/test_scroll.py nix build --file . checks.ptterm-unit
+    TXTERM_TESTS=tests/test_drawing.py nix build --file . checks.txterm-unit
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
     PTTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.ptterm-esctest
+    TXTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.txterm-esctest
     PTTERM_VTERM_INCLUDE=movecursor nix build --file . checks.ptterm-vterm
     PTTERM_VTTEST_INCLUDE='^4 ' nix build --file . checks.ptterm-vttest.run
     PYMUX_VTERM_INCLUDE=unicode nix build --file . checks.pymux-vterm

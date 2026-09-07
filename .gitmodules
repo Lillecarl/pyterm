@@ -18,3 +18,11 @@
 	path = umbrella
 	url = git@github.com:Lillecarl/umbrella.git
 	branch = main
+[submodule "ptyhost"]
+	path = ptyhost
+	url = git@github.com:Lillecarl/ptyhost.git
+	branch = main
+[submodule "txterm"]
+	path = txterm
+	url = git@github.com:Lillecarl/txterm.git
+	branch = main

@@ -32,8 +32,23 @@ rec {
 
   prompt-toolkit = pkgs.python3Packages.callPackage ./prompt-toolkit { };
 
+  # The layer that runs a program on a pty. It depends on nothing, which
+  # is the point: two widgets need it, and neither may drag its toolkit
+  # in behind it. Lillecarl/pymux#85.
+  ptyhost = pkgs.python3Packages.callPackage ./ptyhost { };
+
   ptterm = pkgs.python3Packages.callPackage ./ptterm {
-    inherit prompt-toolkit pyte;
+    inherit prompt-toolkit ptyhost pyte;
+  };
+
+  # The second front end: the same screen, drawn with Textual. It takes
+  # the pure layer from ptterm and no prompt_toolkit comes with it, which
+  # is what Lillecarl/pymux#82 asks for.
+  txterm = pkgs.python3Packages.callPackage ./txterm {
+    inherit pyte ptyhost;
+    # Not a dependency of the package: its suite runs the conformance
+    # suite of xterm, which is built once in ptterm.
+    inherit ptterm;
   };
 
   pymux = pkgs.python3Packages.callPackage ./pymux {
@@ -73,6 +88,9 @@ rec {
   # needs nothing but python.
   suites = {
     pyte-unit = pyte.checks.unit;
+    # The pty layer, on its own. It runs real programs on real ptys,
+    # and one of its tests holds it to importing nothing at all.
+    ptyhost-unit = ptyhost.checks.unit;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.
@@ -100,6 +118,13 @@ rec {
     # what they see is right, so this walks its menus and keeps every
     # screen. Reading them is the work. Lillecarl/pymux#46.
     ptterm-vttest = ptterm.checks.vttest;
+    # The Textual widget: what it draws, read as the segments it
+    # returns, and a real program on a pty under Textual's own driver.
+    txterm-unit = txterm.checks.unit;
+    # The conformance suite of xterm again, this time as a program in a
+    # Textual widget. ptterm runs it on a bare pty with no toolkit, so
+    # the two lists together say what a front end adds.
+    txterm-esctest = txterm.checks.esctest;
     pymux-unit = pymux.checks.unit;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
