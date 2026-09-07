@@ -29,6 +29,12 @@ txterm htop
 - `style.py` — how Rich spells a cell.
 - `keys.py` — what a key of Textual sends.
 
+**A `Terminal` refuses a resize.** A program asks for one with DECSLPP,
+DECCOLM or XTWINOPS, and a widget cannot take room from the widgets
+beside it, so the answer is no and the modes that need it go away. An
+application that will really move the widget passes `may_resize` and
+`resize_func` and answers for itself.
+
 ## Where the rest of it is
 
 txterm draws and reads keys. Everything else already had a home:
