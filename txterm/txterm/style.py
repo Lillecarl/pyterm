@@ -28,6 +28,7 @@ not the id that joins its pieces.
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict
 
+from pyte.cells import appearance_of
 from pyte.colors import SgrColor
 from rich.color import Color
 from rich.color_triplet import ColorTriplet
@@ -118,6 +119,8 @@ def _spelled(appearance: "Appearance") -> Style:
 #: `render_line` join a run of cells by identity rather than by
 #: comparing two styles field by field.
 #:
-#: The size holds every appearance that a screen can hand out, because
-#: `appearance_of` keeps ten thousand.
-style_of = lru_cache(maxsize=10 * 1000)(_spelled)
+#: The size holds every appearance that a screen can hand out, so it is
+#: read off the cache that hands them out rather than written again
+#: here. A key of this cache is an `Appearance`, and `pyte.cells` keeps
+#: only that many of those alive.
+style_of = lru_cache(maxsize=appearance_of.size)(_spelled)

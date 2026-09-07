@@ -22,7 +22,7 @@ from typing import Callable, Dict, List, Optional
 from pyte.environment import prepare
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
-from pyte.cells import PLAIN_APPEARANCE, Cell
+from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
 from pyte.screen import Screen
 from pyte.streams import Stream
 from ptyhost import Process
@@ -56,7 +56,10 @@ _NOT_FOR_A_SCREEN = frozenset(
 )
 
 
-@lru_cache(maxsize=10 * 1000)
+#: The size is `style_of`'s, because a key here is one of its answers:
+#: a style comes from an appearance, and `pyte.cells` keeps only so
+#: many of those alive. The two turnings double it.
+@lru_cache(maxsize=2 * appearance_of.size)
 def _turned(style: Style, reverse: bool) -> Style:
     """
     One style with the reverse decided.
@@ -371,6 +374,14 @@ class Terminal(Widget, can_focus=True):
     #: grows and the rows that leave it never come back, so what is
     #: remembered of them is dead weight. Emptying the whole of it costs
     #: one frame, and a frame is what this saves thousands of.
+    #:
+    #: Ten thousand is a scrollback depth that people configure: tmux
+    #: keeps two thousand by default and kitty is commonly set to fifty
+    #: thousand, so `ptterm/tests/measure_instructions.py` measures at
+    #: 2000, 10000 and 50000. Under this depth the map holds a whole
+    #: history and is never emptied. Over it, a person who scrolls the
+    #: whole way pays one frame each time it fills, which is the trade
+    #: this number picks.
     _REMEMBER_AT_MOST = 10 * 1000
 
     def render_line(self, y: int) -> Strip:
