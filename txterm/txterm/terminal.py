@@ -119,6 +119,18 @@ class Terminal(Widget, can_focus=True):
     :param osc_func: Called with the code and the payload of an OSC
         sequence that only the terminal of the user can serve. (The
         clipboard, a notification, the shape of the pointer.)
+    :param resize_func: Called with the lines and the columns that the
+        program asks for, when it sends DECSLPP or a window resize.
+        Either one is None when the program leaves that side alone. A
+        widget cannot take room from the widgets beside it, so whoever
+        laid it out decides.
+    :param may_resize: Returns whether that ask would be granted. The
+        private modes that only exist where a program can have a
+        different page go away when it says no, so a program learns at
+        once instead of laying its output out for room it will not get.
+        **The default is no**, because a widget in a layout cannot
+        resize itself; an application that will move the widget passes
+        something that says yes.
     """
 
     DEFAULT_CSS = """
@@ -147,6 +159,8 @@ class Terminal(Widget, can_focus=True):
         backend: Optional[Backend] = None,
         bell_func: Optional[Callable[[], None]] = None,
         osc_func: Optional[Callable[[str, str], None]] = None,
+        resize_func: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+        may_resize: Optional[Callable[[], bool]] = None,
         name: Optional[str] = None,
         id: Optional[str] = None,
         classes: Optional[str] = None,
@@ -169,6 +183,11 @@ class Terminal(Widget, can_focus=True):
             write_process_input=lambda data: self.process.write_input(data),
             bell_func=bell_func,
             osc_func=osc_func,
+            resize_func=resize_func,
+            # A widget sits in a layout that somebody else owns, so it
+            # cannot take room from its neighbours. Saying no is the
+            # truth for every widget that nobody has promised to move.
+            may_resize=may_resize or (lambda: False),
         )
         self.stream = BetterStream(self.emulator)
         self.stream.attach(self.emulator)
