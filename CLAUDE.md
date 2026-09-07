@@ -23,18 +23,24 @@ The seventh is `umbrella` itself, the tool that holds the others together.
 start and after you finish.
 
 **A layer may reach the layers under it and never the ones above.** Three
-files hold that, one per layer: `pyte/tests/test_the_layers.py` says the
-screen imports no toolkit, no pty and no widget, and does no I/O;
-`ptterm/tests/test_the_layers.py` and `txterm/tests/test_the_layers.py` each
-name the five modules of `pyte` that widget imports, and say that neither
-widget ever reaches the other's toolkit.
+files hold that, one per layer: `pyte/tests/test_the_layers.py` sorts every
+module of `pyte` into `PURE`, which imports no toolkit, no pty and no widget
+and does no I/O, or `TOOLS`, which may touch a file; `ptterm/tests/test_the_layers.py`
+and `txterm/tests/test_the_layers.py` each name in `FROM_PYTE` the modules of
+`pyte` that widget imports, and say that neither widget ever reaches the
+other's toolkit.
 
 `pyte` is the screen now, not only the parser. Twelve modules moved there out
 of `ptterm`, which is eleven hundred lines of prompt_toolkit widget and
-nothing else. What upstream pyte left in `screens.py` is on its way out: the
-`Screen` that nothing here runs, the `HistoryScreen` whose job the new screen
-does better with `line_offset`, and the `DebugScreen` that is worth keeping
-because it powers `python -m pyte`.
+nothing else, and the tests that judge a screen went with them.
+
+**A test lives with the code it judges, and what a test judges is what it
+reads back.** So the panel stays in `ptterm`, because `kitty_oracle.py` reads
+a cell through `ptterm.style.style_of` and therefore judges how ptterm spells
+a cell. So do esctest, vttest and the libvterm suite, because each reads the
+screen back through a real fork: they judge a screen on a pty, and the lowest
+layer that has both is the widget. Bringing one of them down to `pyte` would
+make that package's checks depend on `ptyhost`, which is above it.
 
 The mode is jj. Every submodule has a `.jj` directory, and jj owns them.
 

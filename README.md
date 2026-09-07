@@ -71,11 +71,11 @@ A package exposes its own tests through `passthru.checks`. This repository gives
 them names, because a test of ptterm against kitty is a test of ptterm, and the
 run needs the ptterm that this collection assembled:
 
-    nix build --file . checks.pyte-unit
+    nix build --file . checks.pyte-unit     # the screen, and nothing but python
+    nix build --file . checks.pyte-xcms     # colour specs, against the real Xlib
     nix build --file . checks.ptyhost-unit  # real programs on real ptys
     nix build --file . checks.ptterm-unit   # nothing but python
     nix build --file . checks.ptterm-panel  # against seven other terminals
-    nix build --file . checks.ptterm-xcms   # colour specs, against the real Xlib
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
     nix build --file . checks.ptterm-vttest # every screen vttest draws
@@ -127,7 +127,8 @@ Several checks read the environment. That needs impure evaluation, which a
 build from a file does and a flake does not:
 
     PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux-unit
-    PTTERM_TESTS=tests/test_scroll.py nix build --file . checks.ptterm-unit
+    PYTE_TESTS=tests/test_scroll.py nix build --file . checks.pyte-unit
+    PTTERM_TESTS=tests/test_the_widget.py nix build --file . checks.ptterm-unit
     TXTERM_TESTS=tests/test_drawing.py nix build --file . checks.txterm-unit
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
@@ -140,18 +141,27 @@ build from a file does and a flake does not:
     PYMUX_VTTEST_INCLUDE='^9 ' nix build --file . checks.pymux-vttest-pictures
     PYMUX_VTTEST_TERMINALS=xterm,foot nix build --file . checks.pymux-vttest-pictures
 
-The suite of ptterm is three checks, split by what each test needs. About forty
-of its sixty files need nothing but python, and `checks.ptterm-unit` is those:
-it is the one to run while working, and it pays for none of the emulators.
+**A test lives with the code it judges.** The tests that drive a screen and
+read its cells back are `pyte`'s, and there are about ninety files of them:
+`checks.pyte-unit` is the one to run while working on the screen, and
+`checks.pyte-xcms` starts an Xvfb and reads a colour spec with the real Xlib,
+because `pyte/xcms.py` is a port of the colour management of Xlib and only the
+original says whether the port is right.
+
+What is left in ptterm judges the widget. The suite is two checks, split by
+what each test needs. Seventeen of its thirty-six files need nothing but
+python, and `checks.ptterm-unit` is those; it pays for none of the emulators.
 
 `checks.ptterm-panel` reads a screen back from kitty, libvterm, WezTerm,
 Alacritty, Ghostty and xterm.js, and judges the screen of ptterm against them.
 It also runs xterm itself, on an Xvfb of its own, and reads that screen back
 with DECRQCRA. xterm answers a character and no attribute, so it takes no part
 in the vote: `ptterm/tests/DEVIATIONS.md` says where it answers instead.
-`checks.ptterm-xcms` starts an Xvfb and reads a colour spec with the real Xlib,
-because the colour parser of ptterm is a port of the colour management of Xlib
-and only the original says whether the port is right.
+
+The three suites that drive a program on a pty stay with ptterm as well:
+esctest, vttest and the test files of libvterm all read the screen back through
+a real fork, so they judge a screen on a pty, and the lowest layer that has
+both is the widget.
 
 No file is listed anywhere. A test belongs to the group whose oracle it
 imports, and `ptterm/tests/conftest.py` reads that from the source before

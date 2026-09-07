@@ -88,6 +88,10 @@ rec {
   # needs nothing but python.
   suites = {
     pyte-unit = pyte.checks.unit;
+    # The colour specs, judged against the real Xlib. `pyte/xcms.py` is a
+    # port of the colour management of Xlib, and only a comparison against
+    # the original says whether the port is right.
+    pyte-xcms = pyte.checks.xcms;
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
     ptyhost-unit = ptyhost.checks.unit;
@@ -95,11 +99,12 @@ rec {
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.
     prompt-toolkit-unit = prompt-toolkit.checks.unit;
-    # Three, split by what they need. `ptterm-unit` needs nothing but
-    # python, and it is about forty of the sixty test files.
+    # Two, split by what they need. `ptterm-unit` needs nothing but
+    # python, and it is seventeen of the thirty-six test files. The
+    # tests that judge the screen rather than the widget moved to
+    # `pyte-unit` and `pyte-xcms`. Lillecarl/pymux#11.
     ptterm-unit = ptterm.checks.unit;
     ptterm-panel = ptterm.checks.panel;
-    ptterm-xcms = ptterm.checks.xcms;
     # The conformance suite of xterm, on a pty of its own. It judges the
     # run against a recorded list of the tests that fail today, and
     # complains at a difference in either direction.
