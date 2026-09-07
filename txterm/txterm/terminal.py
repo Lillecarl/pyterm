@@ -1,0 +1,350 @@
+"""
+A terminal in a Textual widget.
+
+It runs a program on a pty, feeds what the program writes to a screen,
+and draws that screen. Three packages do the work, and this file is only
+the joint between them:
+
+- `ptyhost` runs the program. It parses nothing.
+- `ptterm.screen` parses and holds the cells. It draws nothing, and it
+  imports no toolkit.
+- `txterm.style` says how Rich spells a cell, and `txterm.keys` what a
+  key of Textual sends.
+
+`ptterm/terminal.py` is the same joint for prompt_toolkit. Neither reads
+a word of the other, which is what Lillecarl/pymux#82 asks for.
+"""
+import sys
+from functools import lru_cache
+from typing import Callable, Dict, List, Optional
+
+from ptterm.placeholders import PLACEHOLDER
+from ptterm.screen import PLAIN_APPEARANCE, BetterScreen, Cell
+from ptterm.stream import BetterStream
+from ptyhost import Process
+from ptyhost.backends import Backend
+from rich.segment import Segment
+from rich.style import Style
+from textual import events
+from textual.message import Message
+from textual.strip import Strip
+from textual.widget import Widget
+
+from .keys import data_of
+from .style import style_of
+
+__all__ = ["Terminal"]
+
+#: The size a pty gets before anything has been drawn. Nothing should
+#: read it: `on_resize` arrives before the first frame. It is here so
+#: that a widget that is never laid out still starts its program on a
+#: pty of a sane size.
+DEFAULT_SIZE = (80, 24)
+
+#: Reversed, and not reversed. Three things reverse a cell and each one
+#: turns the last: "SGR 7" on the cell, DECSCNM over the whole screen,
+#: and the cursor standing on it. libvterm calls that an xor and it is
+#: the same answer here.
+_REVERSE = Style(reverse=True)
+_NOT_REVERSE = Style(reverse=False)
+
+#: The characters that must not reach the terminal of the user as they
+#: stand: the C0 controls, delete, and the C1 controls. The parser eats
+#: all of these, so one in a cell is a fault here; drawing it would let
+#: the terminal of the user read it as a control of its own, and the
+#: screen after that is anybody's guess.
+_NOT_FOR_A_SCREEN = frozenset(
+    chr(code) for code in list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0))
+)
+
+
+@lru_cache(maxsize=10 * 1000)
+def _turned(style: Style, reverse: bool) -> Style:
+    """
+    One style with the reverse decided.
+
+    The answers are remembered, so a run of cells that all turn the same
+    way is still one object and `render_line` joins it by identity.
+    """
+    return style + (_REVERSE if reverse else _NOT_REVERSE)
+
+
+def _visible_char(char: str) -> str:
+    """
+    What to draw for a cell.
+
+    A unicode placeholder stands for a cell of an image, and the
+    embedder draws the image itself. The character must not reach the
+    screen: a terminal that does not know it paints a box, and the
+    combining characters that carry the row and the column pile up on
+    top of it. A space keeps the cell.
+
+    The second half of a double width character is an empty string, and
+    it goes through as one: the first half is two cells wide already, so
+    the two together take the room they should.
+    """
+    if char.startswith(PLACEHOLDER):
+        return " "
+    if char in _NOT_FOR_A_SCREEN:
+        return " "
+    return char
+
+
+def create_backend(
+    command: List[str], before_exec_func: Optional[Callable[[], None]] = None
+) -> Backend:
+    "A pty running `command`, for the platform this is."
+    if sys.platform.startswith("win"):
+        from ptyhost.backends.win32 import Win32Backend
+
+        return Win32Backend()
+
+    from ptyhost.backends.posix import PosixBackend
+
+    return PosixBackend.from_command(command, before_exec_func=before_exec_func)
+
+
+class Terminal(Widget, can_focus=True):
+    """
+    A program on a pty, drawn in a Textual widget.
+
+    :param command: The program and its arguments.
+    :param before_exec_func: Called in the child, right before `exec`.
+    :param backend: A pty of your own. `command` is ignored when this is
+        given, which is how a test drives the widget with no child.
+    :param bell_func: Called when the program rings the bell.
+    :param osc_func: Called with the code and the payload of an OSC
+        sequence that only the terminal of the user can serve. (The
+        clipboard, a notification, the shape of the pointer.)
+    """
+
+    DEFAULT_CSS = """
+    Terminal {
+        width: 1fr;
+        height: 1fr;
+    }
+    """
+
+    class Exited(Message):
+        "The program in a terminal has ended."
+
+        def __init__(self, terminal: "Terminal") -> None:
+            super().__init__()
+            self.terminal = terminal
+
+        @property
+        def control(self) -> "Terminal":
+            return self.terminal
+
+    def __init__(
+        self,
+        command: Optional[List[str]] = None,
+        *,
+        before_exec_func: Optional[Callable[[], None]] = None,
+        backend: Optional[Backend] = None,
+        bell_func: Optional[Callable[[], None]] = None,
+        osc_func: Optional[Callable[[str, str], None]] = None,
+        name: Optional[str] = None,
+        id: Optional[str] = None,
+        classes: Optional[str] = None,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes)
+
+        self._backend = backend or create_backend(
+            command or ["/bin/bash"], before_exec_func
+        )
+
+        # The screen belongs to the front end and not to the pty: a
+        # `Process` runs a program and pumps its bytes, and what those
+        # bytes mean is decided here. Lillecarl/pymux#85.
+        #
+        # It is not called `screen`, because `Widget.screen` is the
+        # Textual screen this widget is on.
+        self.emulator = BetterScreen(
+            0,
+            0,
+            write_process_input=lambda data: self.process.write_input(data),
+            bell_func=bell_func,
+            osc_func=osc_func,
+        )
+        self.stream = BetterStream(self.emulator)
+        self.stream.attach(self.emulator)
+
+        #: The pty. It needs a running event loop, so it is made when
+        #: the widget mounts and not when it is built.
+        self._process: Optional[Process] = None
+
+        #: Whether the program has been forked yet.
+        #:
+        #: Not `_running`: Textual keeps the state of the message pump
+        #: of every widget under that name, and it is true from the
+        #: moment the widget mounts. A terminal that read it would
+        #: never start its program and would draw an empty screen for
+        #: ever, with nothing to say why.
+        self._program_started = False
+
+    @property
+    def process(self) -> Process:
+        "The program in this widget. It exists once the widget mounts."
+        if self._process is None:
+            raise RuntimeError("this terminal has not been mounted yet")
+        return self._process
+
+    # -- the life of the program ------------------------------------------
+
+    def on_mount(self) -> None:
+        self._process = Process(
+            backend=self._backend,
+            receive=self.stream.feed,
+            invalidate=self.refresh,
+            done_callback=lambda: self.post_message(self.Exited(self)),
+            # A pane that nobody is looking at parses when the loop has
+            # nothing better to do. Focus is what "looking at" means.
+            has_priority=lambda: self.has_focus,
+        )
+        self._start(*self.size)
+
+    def on_unmount(self) -> None:
+        if self._process is not None:
+            self._process.kill()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._start(event.size.width, event.size.height)
+
+    def _start(self, width: int, height: int) -> None:
+        """
+        Tell the pty and the screen how big the pane is, and start the
+        program the first time there is a size to start it on.
+
+        **The size comes before the start.** The child writes as soon as
+        it is forked, so a program that draws before a resize reaches it
+        would draw at the wrong width. `Process.start` says the same.
+        """
+        if self._process is None or width <= 0 or height <= 0:
+            return
+
+        self._process.set_size(width, height)
+        self.emulator.resize(lines=height, columns=width)
+        self.emulator.lines = height
+        self.emulator.columns = width
+
+        if not self._program_started:
+            self._process.start()
+            self._program_started = True
+
+    # -- what the user types ----------------------------------------------
+
+    def on_key(self, event: events.Key) -> None:
+        """
+        Send the key to the program.
+
+        Every key goes, and none of them is a binding of the app: a
+        terminal is where "tab" and "ctrl+c" mean what the program in it
+        says they mean. `event.stop` keeps the key from bubbling up to
+        the screen and the app, which is where those bindings live.
+
+        `Terminal` cannot stop the two bindings that Textual checks
+        before the focused widget sees a key at all. An app that hosts
+        one of these has to clear them itself; `txterm.app` does.
+        """
+        event.stop()
+        event.prevent_default()
+
+        data = data_of(event)
+        if data:
+            self.process.write_input(self.emulator.encode_key(data))
+
+    def on_paste(self, event: events.Paste) -> None:
+        "Hand pasted text over, bracketed when the program asked for it."
+        event.stop()
+        event.prevent_default()
+        self.process.write_input(self.emulator.wrap_paste(event.text))
+
+    # -- drawing ------------------------------------------------------------
+
+    def _cursor_column(self, y: int) -> Optional[int]:
+        """
+        The column the cursor stands on in row `y` of the page, or None
+        when the cursor is not on that row.
+
+        A pane that is not focused draws no cursor. Several panes each
+        drawing one would say that the keyboard reaches all of them.
+
+        The column is the one the cursor stands on, and never the one it
+        waits to wrap into: `reported_column` is the same fold that a
+        program reads with DSR, so the cursor is drawn where the program
+        is told it stands.
+        """
+        emulator = self.emulator
+        if not emulator.page.show_cursor or not self.has_focus:
+            return None
+        if emulator.pt_cursor_position.y - emulator.line_offset != y:
+            return None
+        return emulator.reported_column
+
+    def render_line(self, y: int) -> Strip:
+        """
+        One row of the page, as Rich segments.
+
+        A row is a run of cells that draw the same way, so the segments
+        are those runs and not the cells: a frame of eighty by
+        twenty-four is two thousand cells and, for most programs, a few
+        dozen runs. `style_of` hands the same object back for the same
+        appearance, so joining a run is an identity test.
+        """
+        emulator = self.emulator
+        width = self.size.width
+        if width <= 0:
+            return Strip.blank(0)
+
+        # The bottom of the screen is what a pane shows. `line_offset`
+        # is the first row of it, and the buffer above that is the
+        # history.
+        row: Dict[int, Cell] = emulator.page.data_buffer.get(
+            emulator.line_offset + y, {}
+        )
+        # DECSCNM reverses the whole screen: every cell of it, and the
+        # blank ones as well.
+        reverse_video = emulator.has_reverse_video
+        cursor_column = self._cursor_column(y)
+
+        segments: List[Segment] = []
+        text: List[str] = []
+        current: Optional[Style] = None
+
+        for column in range(width):
+            cell = row.get(column)
+            if cell is None:
+                char = " "
+                appearance = PLAIN_APPEARANCE
+            elif column == width - 1 and cell.width > 1:
+                # A double width character cannot stand in the last
+                # column: its second half would be a column the row does
+                # not have, and the strip would be one cell too wide.
+                char = " "
+                appearance = cell.appearance
+            else:
+                char = _visible_char(cell.char)
+                appearance = cell.appearance
+
+            style = style_of(appearance)
+            reverse = appearance.rendition.reverse ^ reverse_video ^ (
+                column == cursor_column
+            )
+            if reverse != appearance.rendition.reverse:
+                style = _turned(style, reverse)
+
+            if style is not current:
+                if text:
+                    segments.append(Segment("".join(text), current))
+                    text = []
+                current = style
+            text.append(char)
+
+        if text:
+            segments.append(Segment("".join(text), current))
+
+        # The style of the widget goes underneath, and the style of a
+        # cell over it. A cell says only what a program asked for, so
+        # everything else is the ground the widget paints.
+        return Strip(segments, width).apply_style(self.visual_style.rich_style)
