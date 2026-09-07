@@ -225,6 +225,25 @@ async def test_the_pty_hears_the_size_of_the_pane():
         assert (terminal.emulator.columns, terminal.emulator.lines) == SIZE
 
 
+async def test_a_border_is_not_part_of_the_pane():
+    """
+    A resize carries the whole region the widget was given, and the
+    content is what is inside the border. A pty told the outer number
+    would give a program two columns and two rows that no frame draws.
+    """
+
+    class Framed(TerminalApp):
+        CSS = "Terminal { border: solid white; }"
+
+    app = Framed(backend=NoBackend())
+    async with app.run_test(size=SIZE):
+        terminal = app.query_one(Terminal)
+        inside = (SIZE[0] - 2, SIZE[1] - 2)
+        assert terminal._backend.sizes[-1] == inside
+        assert (terminal.emulator.columns, terminal.emulator.lines) == inside
+        assert terminal.render_line(0).cell_length == inside[0]
+
+
 async def test_the_widget_paints_its_own_ground():
     """
     A cell says only what a program asked for. Everything else comes

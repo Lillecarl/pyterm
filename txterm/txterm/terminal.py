@@ -18,6 +18,7 @@ import sys
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional
 
+from ptterm.graphics import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from ptterm.placeholders import PLACEHOLDER
 from ptterm.screen import PLAIN_APPEARANCE, BetterScreen, Cell
 from ptterm.stream import BetterStream
@@ -34,12 +35,6 @@ from .keys import data_of
 from .style import style_of
 
 __all__ = ["Terminal"]
-
-#: The size a pty gets before anything has been drawn. Nothing should
-#: read it: `on_resize` arrives before the first frame. It is here so
-#: that a widget that is never laid out still starts its program on a
-#: pty of a sane size.
-DEFAULT_SIZE = (80, 24)
 
 #: Reversed, and not reversed. Three things reverse a cell and each one
 #: turns the last: "SGR 7" on the cell, DECSCNM over the whole screen,
@@ -101,7 +96,15 @@ def create_backend(
 
     from ptyhost.backends.posix import PosixBackend
 
-    return PosixBackend.from_command(command, before_exec_func=before_exec_func)
+    # The size of a cell goes into the size of the pty, so that a
+    # program that draws images reads the same answer there as
+    # "CSI 16 t" gives it. The screen holds that number, so the screen
+    # passes it down and the pty layer claims nothing about pixels.
+    return PosixBackend.from_command(
+        command,
+        before_exec_func=before_exec_func,
+        cell=(ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT),
+    )
 
 
 class Terminal(Widget, can_focus=True):
@@ -209,7 +212,17 @@ class Terminal(Widget, can_focus=True):
             self._process.kill()
 
     def on_resize(self, event: events.Resize) -> None:
-        self._start(event.size.width, event.size.height)
+        """
+        The pane changed size.
+
+        **`self.size` and not `event.size`.** The event carries the
+        whole region the widget was given, and `render_line` draws the
+        content area inside it. A border of one takes a column on each
+        side and a row above and below, so a pty told the outer number
+        would give a program two columns and two rows that no frame
+        ever draws.
+        """
+        self._start(*self.size)
 
     def _start(self, width: int, height: int) -> None:
         """

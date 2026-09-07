@@ -36,6 +36,7 @@ PACKAGE = Path(txterm.__file__).parent
 #: rewrite. Nothing else of ptterm may appear.
 PURE_LAYER = {
     "ptterm.colors",
+    "ptterm.graphics",
     "ptterm.placeholders",
     "ptterm.screen",
     "ptterm.stream",
