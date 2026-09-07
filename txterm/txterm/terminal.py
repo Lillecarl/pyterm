@@ -223,6 +223,21 @@ class Terminal(Widget, can_focus=True):
         #: the widget mounts and not when it is built.
         self._process: Optional[Process] = None
 
+        #: What this widget drew for each row of the page, and the write
+        #: count of the screen that it drew it at. A row whose count has
+        #: not moved is a row it does not build again.
+        #:
+        #: The state is here and not on the screen, because a screen has
+        #: more than one reader and no way to know how many: `ptterm`
+        #: draws the same screen with prompt_toolkit, and pymux gives
+        #: several clients one pane. Lillecarl/pymux#126.
+        self._drawn: Dict[int, Strip] = {}
+        self._drawn_at: Dict[int, int] = {}
+
+        #: What every remembered row was drawn under. None of it belongs
+        #: to a row, so a change to any of it empties the whole memory.
+        self._drawn_under: Optional[tuple] = None
+
         #: Whether the program has been forked yet.
         #:
         #: Not `_running`: Textual keeps the state of the message pump
@@ -341,6 +356,12 @@ class Terminal(Widget, can_focus=True):
             return None
         return emulator.reported_column
 
+    #: How many rows this widget remembers having drawn. The history
+    #: grows and the rows that leave it never come back, so what is
+    #: remembered of them is dead weight. Emptying the whole of it costs
+    #: one frame, and a frame is what this saves thousands of.
+    _REMEMBER_AT_MOST = 10 * 1000
+
     def render_line(self, y: int) -> Strip:
         """
         One row of the page, as Rich segments.
@@ -350,22 +371,63 @@ class Terminal(Widget, can_focus=True):
         twenty-four is two thousand cells and, for most programs, a few
         dozen runs. `style_of` hands the same object back for the same
         appearance, so joining a run is an identity test.
+
+        **A row is built once and kept until the screen writes it
+        again.** The screen counts every write it makes to a row, and
+        this widget keeps the count it drew each row at, so a frame
+        after a program wrote one line draws one line.
+        Lillecarl/pymux#126.
         """
         emulator = self.emulator
         width = self.size.width
         if width <= 0:
             return Strip.blank(0)
 
+        # DECSCNM, the width of the pane and the style the widget paints
+        # under a row all reach every row and belong to none of them.
+        ground = self.visual_style.rich_style
+        under = (width, emulator.has_reverse_video, ground)
+        if under != self._drawn_under:
+            self._drawn.clear()
+            self._drawn_at.clear()
+            self._drawn_under = under
+        elif len(self._drawn) > self._REMEMBER_AT_MOST:
+            self._drawn.clear()
+            self._drawn_at.clear()
+
         # The bottom of the screen is what a pane shows. `line_offset`
         # is the first row of it, and the buffer above that is the
         # history.
-        row: Dict[int, Cell] = emulator.page.data_buffer.get(
-            emulator.line_offset + y, {}
-        )
+        number = emulator.line_offset + y
+        cursor_column = self._cursor_column(y)
+        if cursor_column is None:
+            # The row the cursor stands on is the one row whose answer
+            # depends on something outside it, so it is never kept.
+            version = emulator.written_at.get(number, 0)
+            if self._drawn_at.get(number) == version:
+                return self._drawn[number]
+        else:
+            version = None
+
+        strip = self._build(number, width, cursor_column, ground)
+        if version is not None:
+            self._drawn[number] = strip
+            self._drawn_at[number] = version
+        return strip
+
+    def _build(
+        self,
+        number: int,
+        width: int,
+        cursor_column: Optional[int],
+        ground: Style,
+    ) -> Strip:
+        "One row of the page, built from its cells."
+        emulator = self.emulator
+        row: Dict[int, Cell] = emulator.page.data_buffer.get(number, {})
         # DECSCNM reverses the whole screen: every cell of it, and the
         # blank ones as well.
         reverse_video = emulator.has_reverse_video
-        cursor_column = self._cursor_column(y)
 
         segments: List[Segment] = []
         text: List[str] = []
@@ -406,4 +468,4 @@ class Terminal(Widget, can_focus=True):
         # The style of the widget goes underneath, and the style of a
         # cell over it. A cell says only what a program asked for, so
         # everything else is the ground the widget paints.
-        return Strip(segments, width).apply_style(self.visual_style.rich_style)
+        return Strip(segments, width).apply_style(ground)
