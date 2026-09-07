@@ -28,7 +28,7 @@
 #
 # The first follows from the resize: DECNCSM is about what DECCOLM
 # clears, and nothing here changes columns. The second is not
-# understood yet.
+# understood yet, and is Lillecarl/pymux#124.
 #
 # To write this file again:
 #     nix build --file . checks.txterm-esctest.run
