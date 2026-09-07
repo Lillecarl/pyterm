@@ -13,7 +13,7 @@ reads `TERM` and looks the entry up in the database. A program that
 gets that far has found a real entry, which is the thing that matters:
 naming an entry that is not installed is worse than naming xterm.
 """
-from pyte.screen import TERMINAL_NAME
+from pyte.terminfo import TERMINAL_NAME
 from txterm import Terminal, TerminalApp
 
 from test_running_a_shell import SIZE, program, until
