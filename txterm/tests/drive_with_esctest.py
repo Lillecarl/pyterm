@@ -1,0 +1,375 @@
+"""
+Run esctest2 inside a txterm widget, and compare the result with a
+recorded list.
+
+esctest2 judges a terminal from the inside: it runs as a program in that
+terminal, writes control sequences and reads the reports that come back.
+Nothing in it knows what txterm is.
+
+**This is the proof that the screen layer is really shared.** ptterm
+runs the same suite on a bare `Process`, with no toolkit anywhere
+(`ptterm/tests/drive_with_esctest.py`). Here the same screen sits inside
+a Textual widget, inside a Textual application, on Textual's own event
+loop: the suite is a program in a pane, and the pane is drawn by a
+second front end. A name that fails here and passes there is txterm's,
+and there should be very few of them. Lillecarl/pymux#82.
+
+**A widget answers no resize.** ptterm's host owns its pty and can take
+any size the suite asks for. A widget sits in a layout that somebody
+else owns, so `Terminal` says no by default, and the suite is not told
+that the window operations of xterm are on. That is the whole reason
+the two lists differ, and it is the same reason `pymux` has a list of
+its own.
+
+Run it:
+
+    nix build --file . checks.txterm-esctest
+
+Narrow it to one class while hunting one failure. A narrowed run is
+judged too: a name in the list that the regular expression does not
+choose was never going to run, so it does not count as missing.
+
+    TXTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.txterm-esctest
+
+Every run writes the list it saw and the log that says why, whatever the
+verdict, because the run of a check does not fail when the suite fails:
+
+    nix build --file . checks.txterm-esctest.run
+    less result/esctest.log
+    cp result/failures.txt txterm/tests/esctest-failures.txt
+
+Three variables reach this file from `txterm/nix/checks.nix`:
+`TXTERM_ESCTEST` names the directory that holds `esctest.py`, and the
+check does nothing when it is not set. `TXTERM_ESCTEST_INCLUDE` is the
+regular expression of test names to run. `TXTERM_ESCTEST_OUT` names the
+directory to write the list and the log into.
+"""
+import asyncio
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+from txterm import Terminal, TerminalApp
+
+HERE = Path(__file__).parent
+
+#: The tests that fail today, one name per line.
+BASELINE = HERE / "esctest-failures.txt"
+
+#: The size of the pane. The suite asks for a screen of its own in its
+#: reset, and this pane refuses, so this is the size every test sees.
+COLUMNS, ROWS = 80, 25
+
+#: How long a report may take before the suite gives up on it, in
+#: seconds. A sequence that goes unanswered costs this much every time
+#: a test asks for it.
+REPORT_TIMEOUT = "2"
+
+#: How long the whole run may take.
+RUN_TIMEOUT = 900.0
+
+#: The tests this terminal has no business running, and the reason for
+#: each. A name that matches one of these regular expressions is never
+#: run.
+#:
+#: An exclusion is not a recorded failure. A failure says "txterm
+#: differs from xterm here". An exclusion says the question does not
+#: apply to a terminal of this shape.
+#:
+#: A pattern that matches no test fails the check. An exclusion nobody
+#: can see is how a suite quietly stops covering something.
+NOT_OURS = (
+    (
+        r"^XtermWinopsTests\.test_XtermWinops_(IconifyDeiconfiy|MoveToXY)",
+        "a widget draws inside somebody else's window, so it has none "
+        "to move, to iconify, or to report the position of.",
+    ),
+)
+
+#: The program on the pty. It runs the suite and exits.
+#:
+#: This is `ptterm/tests/drive_with_esctest.py`'s runner without the
+#: window operations: the pane refuses a resize, so the suite is left
+#: expecting them to be off.
+RUNNER = '''
+import os, re, select, sys, tty
+
+# Nobody reads this screen after the run, and a traceback drawn on it
+# goes away with the process. Put it where the check can find it.
+sys.stderr = open(os.environ["ESCTEST_LOG"] + ".stderr", "w", buffering=1)
+
+sys.path.insert(0, os.environ["ESCTEST_DIR"])
+os.chdir(os.environ["ESCTEST_DIR"])
+
+# esctest.py runs itself when it is imported: the last line of the file
+# calls main(). So the import is the run, and the arguments have to be
+# in place before it. "^$" matches no test, which makes that run empty
+# and leaves the suite set up and ready to be driven.
+sys.argv = ["esctest.py",
+            "--expected-terminal=xterm",
+            # Which xterm this answers as, where the two differ. xterm
+            # 383 split reverse wraparound in two, and the screen
+            # follows the split.
+            "--xterm-reverse-wrap=383",
+            "--no-print-logs",
+            "--logfile=" + os.environ["ESCTEST_LOG"],
+            "--timeout=" + os.environ["ESCTEST_TIMEOUT"],
+            "--include=^$"]
+
+import escargs, escio, esclog, esctest
+
+if escio.stdin_fd is None:
+    # The import ran nothing, so the file has grown a main guard since.
+    esctest.init()
+
+# That empty run ended with a shutdown, which takes the terminal out of
+# raw mode. And now the real selection of tests.
+tty.setraw(escio.stdin_fd)
+escargs.args.include = os.environ["ESCTEST_INCLUDE"]
+
+
+def drain():
+    "Throw away every report that the test before this one left."
+    while select.select([0], [], [], 0.05)[0]:
+        if not os.read(0, 65536):
+            break
+
+
+excluded = os.environ["ESCTEST_EXCLUDE"]
+
+passed = failed = known = 0
+try:
+    for name, method in esctest.MatchingNamesAndMethods():
+        if excluded and re.search(excluded, name):
+            # The driver reads this line, and fails when a pattern
+            # writes none of them.
+            esclog.LogInfo("Left out: " + name)
+            continue
+        drain()
+        status = esctest.RunTest(name, method)
+        if status is None:
+            known += 1
+        elif status:
+            passed += 1
+        else:
+            failed += 1
+    esclog.LogInfo("*** %d passed, %d known bugs, %d failed ***"
+                   % (passed, known, failed))
+finally:
+    escio.Shutdown()
+'''
+
+
+class Failed(AssertionError):
+    pass
+
+
+class Trial(TerminalApp):
+    """
+    One pane, running the suite, and nothing else on the screen.
+
+    The application stays up until the suite ends. `TerminalApp` quits
+    on its own then, and this waits for that rather than for a clock.
+    """
+
+    def __init__(self, command) -> None:
+        super().__init__(command)
+        self.ended = asyncio.Event()
+
+    def on_terminal_exited(self, event: Terminal.Exited) -> None:
+        self.ended.set()
+
+
+def read_baseline():
+    "The tests that are known to fail, as a set of names."
+    names = set()
+    for line in BASELINE.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            names.add(line)
+    return names
+
+
+def keep(directory: Path, failed, log: str) -> None:
+    """
+    Keep the list of failures and the log that says why.
+
+    Every run writes both, whatever the verdict. The log matters as much
+    as the list: a run happens in the build sandbox, and the names alone
+    do not say what the screen did wrong.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "failures.txt").write_text(
+        "# The esctest2 tests that failed with the suite inside a txterm\n"
+        "# widget, on Textual's own event loop.\n"
+        "#\n"
+        "# ptterm/tests/esctest-failures.txt is the same suite on a bare\n"
+        "# pty, with no toolkit at all. A name here and not there is\n"
+        "# txterm's own, and there should be very few.\n"
+        "#\n"
+        "# This is what the run saw. To make it what the check expects:\n"
+        "#     nix build --file . checks.txterm-esctest.run\n"
+        "#     cp result/failures.txt txterm/tests/esctest-failures.txt\n"
+        + "".join(name + "\n" for name in sorted(failed))
+    )
+    (directory / "esctest.log").write_text(log)
+
+
+def failures_in(log: str):
+    """
+    The tests that failed, as a set of names.
+
+    The suite writes one line per failure while it runs. Those are read
+    rather than the list it prints at the end, because a run that dies
+    halfway still wrote them.
+    """
+    return set(re.findall(r"^\*\*\* TEST (\S+) FAILED:", log, re.MULTILINE))
+
+
+def tests_that_ran(log: str):
+    "Every test the suite started, as a set of names."
+    return set(re.findall(r"^Run test: (\S+)$", log, re.MULTILINE))
+
+
+def left_out(log: str):
+    "Every test that `NOT_OURS` kept the suite from starting."
+    return set(re.findall(r"^Left out: (\S+)$", log, re.MULTILINE))
+
+
+async def drive(runner: Path) -> None:
+    "Run the suite in a pane, under Textual's headless driver."
+    app = Trial([sys.executable, str(runner)])
+    async with app.run_test(size=(COLUMNS, ROWS)):
+        await asyncio.wait_for(app.ended.wait(), RUN_TIMEOUT)
+
+
+def run(tmp: Path, directory: Path) -> str:
+    "Run the suite against txterm and return what it logged."
+    runner = tmp / "esctest_runner.py"
+    runner.write_text(RUNNER)
+
+    log = tmp / "esctest.log"
+
+    # The child inherits this environment through `execv`, so it is set
+    # here and not passed.
+    os.environ["ESCTEST_DIR"] = str(directory)
+    os.environ["ESCTEST_LOG"] = str(log)
+    os.environ["ESCTEST_TIMEOUT"] = REPORT_TIMEOUT
+    os.environ["ESCTEST_INCLUDE"] = os.environ.get("TXTERM_ESCTEST_INCLUDE", ".*")
+    os.environ["ESCTEST_EXCLUDE"] = "|".join(pattern for pattern, _ in NOT_OURS)
+    os.environ["TERM"] = "xterm-256color"
+    os.environ["LANG"] = "C.UTF-8"
+
+    try:
+        asyncio.run(drive(runner))
+    except BaseException:
+        stderr = Path(str(log) + ".stderr")
+        if stderr.exists():
+            print("--- what the suite wrote to stderr ---")
+            print(stderr.read_text(errors="replace")[-4000:])
+        if log.exists():
+            print("--- the last of the esctest log ---")
+            print(log.read_text(errors="replace")[-4000:])
+        raise
+
+    return log.read_text(errors="replace")
+
+
+def report(log: str, include: str) -> int:
+    """
+    Compare the run with the recorded list. Returns the exit status.
+
+    A difference in either direction is a failure, and the message says
+    how to write the list again.
+
+    `include` is the regular expression that chose which tests ran. A
+    name in the list that it does not choose was never going to run, so
+    it is not missing.
+    """
+    ran = tests_that_ran(log)
+    failed = failures_in(log)
+    known = read_baseline()
+    chosen = {name for name in known if re.search(include, name)}
+    out = left_out(log)
+
+    print("esctest: %d tests ran, %d failed, %d left out"
+          % (len(ran), len(failed), len(out)))
+    for pattern, reason in NOT_OURS:
+        print("esctest: left out %s, because %s"
+              % (", ".join(sorted(name for name in out
+                                  if re.search(pattern, name))) or "nothing",
+                 reason))
+
+    if not ran:
+        print("esctest: the suite ran nothing at all")
+        return 1
+
+    new = sorted(failed - known)
+    fixed = sorted((known & ran) - failed)
+    missing = sorted(chosen - ran - out)
+
+    # An exclusion that names nothing is stale, and one that names a
+    # test the list also holds contradicts itself. A narrowed run
+    # chooses too few tests to say either, so it says neither.
+    stale = []
+    if include == ".*":
+        stale = [pattern for pattern, _ in NOT_OURS
+                 if not any(re.search(pattern, name) for name in out)]
+    both = sorted(out & known)
+
+    for name in new:
+        print("esctest: FAILS NOW, and did not before: " + name)
+    for name in fixed:
+        print("esctest: PASSES NOW, so the list is out of date: " + name)
+    for name in missing:
+        print("esctest: named in the list, but the suite never ran it: " + name)
+    for pattern in stale:
+        print("esctest: NOT_OURS leaves out %r, and no test has that name."
+              % pattern)
+    for name in both:
+        print("esctest: left out, and named in the list as well: " + name)
+
+    if stale or both:
+        print("\nesctest: NOT_OURS in %s no longer describes the suite."
+              % Path(__file__).name)
+        return 1
+
+    if new or fixed or missing:
+        print(
+            "\nesctest: %s no longer describes the run. Write it again with:\n"
+            "    nix build --file . checks.txterm-esctest.run\n"
+            "    cp result/failures.txt txterm/tests/%s\n"
+            "and read result/esctest.log for what each one did."
+            % (BASELINE.name, BASELINE.name)
+        )
+        return 1
+
+    print("esctest: the run matches %s." % BASELINE.name)
+    return 0
+
+
+def main() -> int:
+    directory = os.environ.get("TXTERM_ESCTEST", "")
+    if not directory:
+        print("esctest: TXTERM_ESCTEST is not set, so there is nothing to run.")
+        return 0
+
+    include = os.environ.get("TXTERM_ESCTEST_INCLUDE", ".*")
+
+    tmp = Path(tempfile.mkdtemp(prefix="txterm-esctest-"))
+    log = run(tmp, Path(directory))
+
+    # Keep the list and the log first, and judge afterwards. The run of
+    # this check does not fail because the suite failed, so what it
+    # leaves is there to read either way.
+    out = os.environ.get("TXTERM_ESCTEST_OUT", "")
+    if out:
+        keep(Path(out), failures_in(log), log)
+
+    return report(log, include)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

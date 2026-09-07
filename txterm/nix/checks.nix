@@ -15,6 +15,7 @@
   callPackage,
   package,
   testSources,
+  esctest2,
 }:
 let
   inherit (callPackage ./suite.nix { }) suite;
@@ -34,6 +35,15 @@ let
   #     TXTERM_TESTS=tests/test_drawing.py \
   #       nix build --file . checks.txterm-unit
   selection = builtins.getEnv "TXTERM_TESTS";
+
+  # Which esctest2 tests run. A regular expression matched against the
+  # name, for instance
+  # `TXTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.txterm-esctest`.
+  esctestInclude =
+    let
+      value = builtins.getEnv "TXTERM_ESCTEST_INCLUDE";
+    in
+    if value == "" then ".*" else value;
 
   prepare = ''
     cp -r ${testSources}/tests .
@@ -58,4 +68,28 @@ in
     env = { inherit selection; };
     setup = prepare;
   } "python -m pytest $selection -q -p no:cacheprovider";
+
+  # The conformance suite of xterm, running as a program inside a txterm
+  # widget, inside a Textual application, on Textual's own event loop.
+  #
+  # ptterm runs the same suite on a bare pty with no toolkit anywhere.
+  # **The two lists together are the proof that the screen layer is
+  # shared**: a name that fails here and passes there is txterm's own.
+  # Lillecarl/pymux#82.
+  #
+  # It is not a pass or fail of its own. The run is judged against
+  # `tests/esctest-failures.txt`, and a difference either way fails.
+  esctest = suite {
+    name = "txterm-esctest";
+    inputs = [
+      pythonWithTests
+      esctest2
+    ];
+    env = { inherit esctestInclude; };
+    setup = prepare + ''
+      export TXTERM_ESCTEST=${esctest2}/share/esctest2
+      export TXTERM_ESCTEST_INCLUDE="$esctestInclude"
+      export TXTERM_ESCTEST_OUT="$out"
+    '';
+  } "python tests/drive_with_esctest.py";
 }

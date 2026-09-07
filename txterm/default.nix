@@ -65,6 +65,12 @@ let
     ];
   };
 
-  checks = callPackage ./nix/checks.nix { inherit package testSources; };
+  # The conformance suite of xterm is built once, in ptterm, and pymux
+  # takes it from there as well. A tool is not a suite: what changes here
+  # is which terminal it judges.
+  checks = callPackage ./nix/checks.nix {
+    inherit package testSources;
+    inherit (ptterm) esctest2;
+  };
 in
 package
