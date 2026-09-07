@@ -403,7 +403,10 @@ class Terminal(Widget, can_focus=True):
         if cursor_column is None:
             # The row the cursor stands on is the one row whose answer
             # depends on something outside it, so it is never kept.
-            version = emulator.written_at.get(number, 0)
+            # A row with no count of its own carries the one that
+            # `touch_everything` last set, so a reset or a page swap
+            # moves every row at once and costs nothing to say.
+            version = emulator.written_at.get(number, emulator.everything_at)
             if self._drawn_at.get(number) == version:
                 return self._drawn[number]
         else:
