@@ -34,7 +34,7 @@ from rich.color_triplet import ColorTriplet
 from rich.style import Style
 
 if TYPE_CHECKING:
-    from pyte.screen import Appearance
+    from pyte.cells import Appearance
 
 __all__ = ("color_of", "style_of")
 

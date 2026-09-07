@@ -22,7 +22,8 @@ from typing import Callable, Dict, List, Optional
 from pyte.environment import prepare
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
-from pyte.screen import PLAIN_APPEARANCE, Screen, Cell
+from pyte.cells import PLAIN_APPEARANCE, Cell
+from pyte.screen import Screen
 from pyte.streams import Stream
 from ptyhost import Process
 from ptyhost.backends import Backend

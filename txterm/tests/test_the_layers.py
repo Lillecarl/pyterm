@@ -39,6 +39,7 @@ PACKAGE = Path(txterm.__file__).parent
 #: Nothing else of `pyte` may appear. A name added here says the front
 #: end grew, and that is worth reading in a diff.
 FROM_PYTE = {
+    "pyte.cells",
     "pyte.colors",
     "pyte.environment",
     "pyte.images",
