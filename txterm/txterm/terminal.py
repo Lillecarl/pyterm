@@ -158,6 +158,10 @@ class Terminal(Widget, can_focus=True):
         **The default is no**, because a widget in a layout cannot
         resize itself; an application that will move the widget passes
         something that says yes.
+    :param get_history_limit: Returns how many rows of scrollback this
+        widget keeps. The default is two thousand, which is what tmux
+        keeps. It is a function and not a number, so the option can
+        change while the program runs.
     """
 
     DEFAULT_CSS = """
@@ -188,6 +192,7 @@ class Terminal(Widget, can_focus=True):
         osc_func: Optional[Callable[[str, str], None]] = None,
         resize_func: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
         may_resize: Optional[Callable[[], bool]] = None,
+        get_history_limit: Optional[Callable[[], int]] = None,
         name: Optional[str] = None,
         id: Optional[str] = None,
         classes: Optional[str] = None,
@@ -215,6 +220,11 @@ class Terminal(Widget, can_focus=True):
             # cannot take room from its neighbours. Saying no is the
             # truth for every widget that nobody has promised to move.
             may_resize=may_resize or (lambda: False),
+            # How deep the scrollback goes. The application decides,
+            # because it is the application that offers the option. It
+            # is a function, so `Screen` reads it on every prune and a
+            # change reaches a widget that is already running.
+            get_history_limit=get_history_limit,
         )
         self.stream = Stream(self.emulator)
         self.stream.attach(self.emulator)
