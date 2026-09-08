@@ -9,6 +9,7 @@ It exists to be driven. A suite that puts a real terminal in front of
 txterm needs a program to run, and "a widget" is not one.
 Lillecarl/pymux#82.
 """
+
 from typing import List, Optional
 
 from ptyhost.backends import Backend

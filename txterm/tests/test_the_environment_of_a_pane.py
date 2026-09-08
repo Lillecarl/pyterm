@@ -13,6 +13,7 @@ reads `TERM` and looks the entry up in the database. A program that
 gets that far has found a real entry, which is the thing that matters:
 naming an entry that is not installed is worse than naming xterm.
 """
+
 from pyte.terminfo import TERMINAL_NAME
 from txterm import Terminal, TerminalApp
 
@@ -51,9 +52,7 @@ async def test_a_program_may_write_a_colour():
     Without this a program falls back to the palette of `TERM` and
     quantises a 24 bit colour to an index before this screen sees it.
     """
-    app = TerminalApp(
-        program("import os\nprint('DEPTH=' + os.environ['COLORTERM'])")
-    )
+    app = TerminalApp(program("import os\nprint('DEPTH=' + os.environ['COLORTERM'])"))
     async with app.run_test(size=SIZE):
         await until(app.query_one(Terminal), "DEPTH=truecolor")
 
@@ -66,8 +65,7 @@ async def test_the_name_of_the_outer_terminal_is_gone(monkeypatch):
     monkeypatch.setenv("KITTY_WINDOW_ID", "1")
     app = TerminalApp(
         program(
-            "import os\n"
-            "print('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"
+            "import os\nprint('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"
         )
     )
     async with app.run_test(size=SIZE):

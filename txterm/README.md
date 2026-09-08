@@ -7,9 +7,11 @@ what the program writes.
 from textual.app import App, ComposeResult
 from txterm import Terminal
 
+
 class Shell(App):
     def compose(self) -> ComposeResult:
         yield Terminal(["bash"])
+
 
 Shell().run()
 ```

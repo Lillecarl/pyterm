@@ -9,6 +9,7 @@ This is ptterm's `tests/no_backend.py` with the two things `Process`
 asks of a backend that ptterm's widget never needed: a future that says
 the program ended, and a `kill`.
 """
+
 import asyncio
 
 __all__ = ("NoBackend",)

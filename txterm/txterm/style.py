@@ -25,6 +25,7 @@ prompt_toolkit draws two of the three. Rich has no field for them.
 `hyperlink_id` goes the same way: Rich carries the target of a link and
 not the id that joins its pieces.
 """
+
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict
 

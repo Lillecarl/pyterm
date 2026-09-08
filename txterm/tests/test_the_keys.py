@@ -6,6 +6,7 @@ reading and not about the sequences. A version of Textual that renames a
 key or moves the table fails here, loudly, instead of leaving a terminal
 that quietly drops the arrow keys.
 """
+
 import pytest
 from textual import events
 from txterm.keys import KEY_DATA, data_of

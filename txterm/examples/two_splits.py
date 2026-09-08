@@ -17,6 +17,7 @@ two questions a multiplexer has to answer first show up:
 
 Lillecarl/pymux#82.
 """
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal

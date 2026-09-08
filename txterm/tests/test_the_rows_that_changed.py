@@ -15,6 +15,7 @@ side by side over the same bytes: one keeps what it drew, and one is
 emptied before every frame so that it builds everything. Every row of
 every frame has to match.
 """
+
 from no_backend import NoBackend
 from txterm import Terminal, TerminalApp
 from pyte import escape
@@ -51,12 +52,12 @@ CHUNKS = [
     "the first line\r\nthe second\r\nthe third",
     csi(escape.CUP, 1, 1) + "over the first",
     csi(escape.SGR, 7) + "reversed" + csi(escape.SGR, 0) + " and not",
-    "\r\n" * 12,                    # Scroll a long way.
+    "\r\n" * 12,  # Scroll a long way.
     csi(escape.DECSTBM, 2, 4) + csi(escape.CUP, 3, 1) + "inside a region\r\n\r\n\r\n",
-    csi(escape.DECSTBM),                       # And the region away again.
-    csi(escape.CUP) + csi(escape.ED, 2),                # Clear the screen.
-    sharp(Sharp.DECALN),                       # DECALN: fill it with E.
-    set_mode(PrivateMode.REVERSE_VIDEO),                     # DECSCNM: reverse the whole screen.
+    csi(escape.DECSTBM),  # And the region away again.
+    csi(escape.CUP) + csi(escape.ED, 2),  # Clear the screen.
+    sharp(Sharp.DECALN),  # DECALN: fill it with E.
+    set_mode(PrivateMode.REVERSE_VIDEO),  # DECSCNM: reverse the whole screen.
     "more text after the reverse",
     reset_mode(PrivateMode.REVERSE_VIDEO),
     (
@@ -65,12 +66,9 @@ CHUNKS = [
         + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
     ),
     (
-        csi(escape.CUP, 5, 10)
-        + "late"
-        + csi(escape.IL, 2)
-        + csi(escape.DL, 1)
+        csi(escape.CUP, 5, 10) + "late" + csi(escape.IL, 2) + csi(escape.DL, 1)
     ),  # IL and DL under the cursor.
-    csi(escape.CUP, 1, 1) + csi(escape.DCH, 3) + csi(escape.ICH, 4),      # DCH and ICH.
+    csi(escape.CUP, 1, 1) + csi(escape.DCH, 3) + csi(escape.ICH, 4),  # DCH and ICH.
     "a line that is much longer than forty columns and wraps twice over",
 ]
 

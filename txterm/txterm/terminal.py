@@ -14,6 +14,7 @@ the joint between them:
 `ptterm/terminal.py` is the same joint for prompt_toolkit. Neither reads
 a word of the other, which is what Lillecarl/pymux#82 asks for.
 """
+
 import os
 import sys
 from functools import lru_cache
@@ -474,8 +475,8 @@ class Terminal(Widget, can_focus=True):
                 appearance = cell.appearance
 
             style = style_of(appearance)
-            reverse = appearance.rendition.reverse ^ reverse_video ^ (
-                column == cursor_column
+            reverse = (
+                appearance.rendition.reverse ^ reverse_video ^ (column == cursor_column)
             )
             if reverse != appearance.rendition.reverse:
                 style = _turned(style, reverse)

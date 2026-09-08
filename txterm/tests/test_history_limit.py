@@ -11,6 +11,7 @@ widget that is already running: `Screen` calls it on every prune.
 The widget runs in an application of its own, because `TerminalApp`
 passes no limit and this is the argument under test.
 """
+
 from textual.app import App, ComposeResult
 
 from no_backend import NoBackend
@@ -36,9 +37,7 @@ class OneTerminal(App):
         self._get_history_limit = get_history_limit
 
     def compose(self) -> ComposeResult:
-        yield Terminal(
-            backend=NoBackend(), get_history_limit=self._get_history_limit
-        )
+        yield Terminal(backend=NoBackend(), get_history_limit=self._get_history_limit)
 
 
 def scroll(made, rows: int) -> None:

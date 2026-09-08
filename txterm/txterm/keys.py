@@ -18,6 +18,7 @@ and the two would disagree the day Textual learns a key.
 Lillecarl/pymux#119 is that same disagreement, between the two tables
 that already exist.
 """
+
 from typing import Dict
 
 from textual import events

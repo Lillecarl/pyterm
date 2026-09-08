@@ -11,6 +11,7 @@ reaper closes the pty without draining it (Lillecarl/pymux#121). A test
 that ends its program at once is a test that fails once in a dozen runs
 for a reason that has nothing to do with what it asks.
 """
+
 import asyncio
 import sys
 
@@ -94,9 +95,7 @@ async def test_tab_reaches_the_program():
     program decides what tab means, so the widget stops the key before
     the screen and the app see it.
     """
-    app = TerminalApp(
-        program("import sys\nprint('GOT %r' % sys.stdin.read(1))")
-    )
+    app = TerminalApp(program("import sys\nprint('GOT %r' % sys.stdin.read(1))"))
     async with app.run_test(size=SIZE) as pilot:
         terminal = app.query_one(Terminal)
         await pilot.press("tab", "enter")
