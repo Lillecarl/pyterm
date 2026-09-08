@@ -20,6 +20,7 @@ from txterm import Terminal, TerminalApp
 from pyte import escape
 from pyte.modes import PrivateMode
 from pyte.sequences import csi, reset_mode
+from pyte.sequences import Sharp, sharp
 
 #: The size of the pane in every test here.
 SIZE = (40, 10)
@@ -53,7 +54,7 @@ CHUNKS = [
     "\x1b[2;4r\x1b[3;1Hinside a region\r\n\r\n\r\n",
     csi(escape.DECSTBM),                       # And the region away again.
     "\x1b[H\x1b[2J",                # Clear the screen.
-    "\x1b#8",                       # DECALN: fill it with E.
+    sharp(Sharp.DECALN),                       # DECALN: fill it with E.
     "\x1b[?5h",                     # DECSCNM: reverse the whole screen.
     "more text after the reverse",
     reset_mode(PrivateMode.REVERSE_VIDEO),
