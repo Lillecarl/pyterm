@@ -15,6 +15,8 @@ from rich.style import Style
 from txterm import Terminal, TerminalApp
 from pyte.modes import PrivateMode
 from pyte.sequences import set_mode
+from pyte import escape
+from pyte.sequences import csi
 
 #: The size of the pane in every test here.
 SIZE = (20, 5)
@@ -76,7 +78,7 @@ async def test_a_colour_of_the_palette_stays_a_number():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[31mred\x1b[m\r\n")
+        terminal.stream.feed(csi(escape.SGR, 31) + "red" + csi(escape.SGR) + "\r\n")
         red = styles_of(terminal.render_line(0))[0]
         assert red.color == Color.from_ansi(1)
 
@@ -94,7 +96,7 @@ async def test_bold_and_underline_reach_rich():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[1;4mloud\x1b[m\r\n")
+        terminal.stream.feed(csi(escape.SGR, 1, 4) + "loud" + csi(escape.SGR) + "\r\n")
         loud = styles_of(terminal.render_line(0))[0]
         assert loud.bold
         assert loud.underline
@@ -105,7 +107,7 @@ async def test_a_double_underline_is_the_one_rich_has():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[21mtwice\x1b[m\r\n")
+        terminal.stream.feed(csi(escape.SGR, 21) + "twice" + csi(escape.SGR) + "\r\n")
         twice = styles_of(terminal.render_line(0))[0]
         assert twice.underline2
 
@@ -172,7 +174,7 @@ async def test_a_reversed_cell_under_the_cursor_turns_back():
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
         # The cursor stands on the third column, which is reversed.
-        terminal.stream.feed("ab\x1b[7m \x1b[3G")
+        terminal.stream.feed("ab" + csi(escape.SGR, 7) + " " + csi(escape.CHA, 3))
         segments = list(terminal.render_line(0))
         assert segments[1].text == " "
         assert not segments[1].style.reverse

@@ -48,19 +48,19 @@ def frame(terminal: Terminal, forget: bool):
 #: one is fed to both widgets, and a frame is taken after each.
 CHUNKS = [
     "the first line\r\nthe second\r\nthe third",
-    "\x1b[1;1Hover the first",
-    "\x1b[7mreversed\x1b[0m and not",
+    csi(escape.CUP, 1, 1) + "over the first",
+    csi(escape.SGR, 7) + "reversed" + csi(escape.SGR, 0) + " and not",
     "\r\n" * 12,                    # Scroll a long way.
-    "\x1b[2;4r\x1b[3;1Hinside a region\r\n\r\n\r\n",
+    csi(escape.DECSTBM, 2, 4) + csi(escape.CUP, 3, 1) + "inside a region\r\n\r\n\r\n",
     csi(escape.DECSTBM),                       # And the region away again.
-    "\x1b[H\x1b[2J",                # Clear the screen.
+    csi(escape.CUP) + csi(escape.ED, 2),                # Clear the screen.
     sharp(Sharp.DECALN),                       # DECALN: fill it with E.
     "\x1b[?5h",                     # DECSCNM: reverse the whole screen.
     "more text after the reverse",
     reset_mode(PrivateMode.REVERSE_VIDEO),
     "\x1b[?1049h" "the other page" "\x1b[?1049l",
     "\x1b[5;10Hlate\x1b[2L\x1b[1M",  # IL and DL under the cursor.
-    "\x1b[1;1H\x1b[3P\x1b[4@",      # DCH and ICH.
+    csi(escape.CUP, 1, 1) + csi(escape.DCH, 3) + csi(escape.ICH, 4),      # DCH and ICH.
     "a line that is much longer than forty columns and wraps twice over",
 ]
 
@@ -102,7 +102,7 @@ async def test_a_row_that_was_written_is_built_again():
         once = terminal.render_line(0)
         # The cursor leaves the row afterwards, because the row it
         # stands on is never kept.
-        terminal.stream.feed("\x1b[1;1Hagain\x1b[5;1H")
+        terminal.stream.feed(csi(escape.CUP, 1, 1) + "again" + csi(escape.CUP, 5, 1))
         again = terminal.render_line(0)
         assert again is not once
         assert terminal.render_line(0) is again
