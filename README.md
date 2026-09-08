@@ -34,6 +34,20 @@ This repository owns the assembly. It decides which checkout answers for
 missing. It also colocates each submodule as a jj repository and installs the
 hooks described below.
 
+**`.gitmodules` names the submodules over https, and it has to.** Nix follows
+those URLs when a flake asks for `?submodules=1`, whatever the URL of this
+repository was, so an SSH URL there makes every one of them need a key. A
+machine without one -- CI, a fresh container, somebody else's laptop -- then
+cannot evaluate a configuration that pins pyterm at all, which is most of what
+the home-manager module below is for.
+
+If you push to these repositories, tell git to send https to SSH once:
+
+    git config --global url."git@github.com:".pushInsteadOf "https://github.com/"
+
+Fetching stays anonymous and pushing goes over your key. A checkout that
+already exists keeps the remotes it has; only a fresh clone reads these URLs.
+
 ## Building
 
     nix build --file . pymux    # or pyte, ptterm, prompt-toolkit, umbrella
