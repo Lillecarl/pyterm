@@ -15,6 +15,8 @@ import asyncio
 import sys
 
 from txterm import Terminal, TerminalApp
+from pyte.modes import PrivateMode
+from pyte.sequences import set_mode
 
 #: How long a test may wait for a program to say something, in seconds.
 TIMEOUT = 5.0
@@ -161,7 +163,7 @@ async def test_a_paste_is_bracketed_when_the_program_asked():
     )
     async with app.run_test(size=SIZE) as pilot:
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[?2004h")
+        terminal.stream.feed(set_mode(PrivateMode.BRACKETED_PASTE))
         terminal.post_message(events.Paste("ping"))
         await pilot.press("enter")
         await until(terminal, "GOT '\\x1b[200~ping\\x1b[201~")

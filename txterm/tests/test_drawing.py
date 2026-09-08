@@ -13,6 +13,8 @@ from no_backend import NoBackend
 from rich.color import Color
 from rich.style import Style
 from txterm import Terminal, TerminalApp
+from pyte.modes import PrivateMode
+from pyte.sequences import set_mode
 
 #: The size of the pane in every test here.
 SIZE = (20, 5)
@@ -184,7 +186,7 @@ async def test_the_whole_screen_reverses_with_decscnm():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[?5h")
+        terminal.stream.feed(set_mode(PrivateMode.REVERSE_VIDEO))
         for style in styles_of(terminal.render_line(4)):
             assert style.reverse
 

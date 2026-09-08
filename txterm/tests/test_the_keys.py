@@ -9,6 +9,8 @@ that quietly drops the arrow keys.
 import pytest
 from textual import events
 from txterm.keys import KEY_DATA, data_of
+from pyte import escape
+from pyte.sequences import csi
 
 
 def press(key: str, character=None) -> events.Key:
@@ -18,10 +20,10 @@ def press(key: str, character=None) -> events.Key:
 @pytest.mark.parametrize(
     "key,data",
     [
-        ("up", "\x1b[A"),
-        ("down", "\x1b[B"),
-        ("right", "\x1b[C"),
-        ("left", "\x1b[D"),
+        ("up", csi(escape.CUU)),
+        ("down", csi(escape.CUD)),
+        ("right", csi(escape.CUF)),
+        ("left", csi(escape.CUB)),
         ("home", "\x1b[1~"),
         ("escape", "\x1b"),
         ("backspace", "\x7f"),

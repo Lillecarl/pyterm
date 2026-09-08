@@ -17,6 +17,9 @@ every frame has to match.
 """
 from no_backend import NoBackend
 from txterm import Terminal, TerminalApp
+from pyte import escape
+from pyte.modes import PrivateMode
+from pyte.sequences import csi, reset_mode
 
 #: The size of the pane in every test here.
 SIZE = (40, 10)
@@ -48,12 +51,12 @@ CHUNKS = [
     "\x1b[7mreversed\x1b[0m and not",
     "\r\n" * 12,                    # Scroll a long way.
     "\x1b[2;4r\x1b[3;1Hinside a region\r\n\r\n\r\n",
-    "\x1b[r",                       # And the region away again.
+    csi(escape.DECSTBM),                       # And the region away again.
     "\x1b[H\x1b[2J",                # Clear the screen.
     "\x1b#8",                       # DECALN: fill it with E.
     "\x1b[?5h",                     # DECSCNM: reverse the whole screen.
     "more text after the reverse",
-    "\x1b[?5l",
+    reset_mode(PrivateMode.REVERSE_VIDEO),
     "\x1b[?1049h" "the other page" "\x1b[?1049l",
     "\x1b[5;10Hlate\x1b[2L\x1b[1M",  # IL and DL under the cursor.
     "\x1b[1;1H\x1b[3P\x1b[4@",      # DCH and ICH.
@@ -119,6 +122,6 @@ async def test_the_row_the_cursor_stands_on_is_never_kept():
         with_the_cursor = frame(terminal, forget=False)
 
         # The cursor moves along a row that nothing writes to.
-        terminal.stream.feed("\x1b[1;20H")
+        terminal.stream.feed(csi(escape.CUP, 1, 20))
         assert frame(terminal, forget=False) == frame(terminal, forget=True)
         assert frame(terminal, forget=False) != with_the_cursor
