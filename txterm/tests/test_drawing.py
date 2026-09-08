@@ -62,7 +62,13 @@ async def test_cells_that_draw_the_same_way_are_one_segment():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("ab\x1b[31mcd\x1b[m\r\n")
+        terminal.stream.feed(
+            "ab"
+            + csi(escape.SGR, 31)
+            + "cd"
+            + csi(escape.SGR)
+            + "\r\n"
+        )
         assert [segment.text for segment in terminal.render_line(0)] == [
             "ab",
             "cd",
@@ -87,7 +93,12 @@ async def test_a_colour_a_program_named_itself_is_a_triplet():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b[38;2;18;52;86mown\x1b[m\r\n")
+        terminal.stream.feed(
+            csi(escape.SGR, 38, 2, 18, 52, 86)
+            + "own"
+            + csi(escape.SGR)
+            + "\r\n"
+        )
         own = styles_of(terminal.render_line(0))[0]
         assert own.color.triplet == (0x12, 0x34, 0x56)
 

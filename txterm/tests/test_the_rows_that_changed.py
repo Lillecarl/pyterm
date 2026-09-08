@@ -21,6 +21,7 @@ from pyte import escape
 from pyte.modes import PrivateMode
 from pyte.sequences import csi, reset_mode
 from pyte.sequences import Sharp, sharp
+from pyte.sequences import set_mode
 
 #: The size of the pane in every test here.
 SIZE = (40, 10)
@@ -55,11 +56,20 @@ CHUNKS = [
     csi(escape.DECSTBM),                       # And the region away again.
     csi(escape.CUP) + csi(escape.ED, 2),                # Clear the screen.
     sharp(Sharp.DECALN),                       # DECALN: fill it with E.
-    "\x1b[?5h",                     # DECSCNM: reverse the whole screen.
+    set_mode(PrivateMode.REVERSE_VIDEO),                     # DECSCNM: reverse the whole screen.
     "more text after the reverse",
     reset_mode(PrivateMode.REVERSE_VIDEO),
-    "\x1b[?1049h" "the other page" "\x1b[?1049l",
-    "\x1b[5;10Hlate\x1b[2L\x1b[1M",  # IL and DL under the cursor.
+    (
+        set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + "the other page"
+        + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+    ),
+    (
+        csi(escape.CUP, 5, 10)
+        + "late"
+        + csi(escape.IL, 2)
+        + csi(escape.DL, 1)
+    ),  # IL and DL under the cursor.
     csi(escape.CUP, 1, 1) + csi(escape.DCH, 3) + csi(escape.ICH, 4),      # DCH and ICH.
     "a line that is much longer than forty columns and wraps twice over",
 ]
