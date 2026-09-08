@@ -198,6 +198,7 @@ build from a file does and a flake does not:
 
     PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux-unit
     PYTE_TESTS=tests/test_scroll.py nix build --file . checks.pyte-unit
+    PROMPT_TOOLKIT_TESTS=tests/test_layout.py nix build --file . checks.prompt-toolkit-unit
     PTTERM_TESTS=tests/test_the_widget.py nix build --file . checks.ptterm-unit
     TXTERM_TESTS=tests/test_drawing.py nix build --file . checks.txterm-unit
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
