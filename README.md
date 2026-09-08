@@ -131,6 +131,7 @@ build from a file does and a flake does not:
     PTTERM_TESTS=tests/test_the_widget.py nix build --file . checks.ptterm-unit
     TXTERM_TESTS=tests/test_drawing.py nix build --file . checks.txterm-unit
     PTTERM_FUZZ=20000 nix build --file . checks.ptterm-fuzz
+    PYMUX_PTY_CHECKS=a_pane_that_changes_nothing nix build --file . checks.pymux-pty
     PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest
     PTTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.ptterm-esctest
     TXTERM_ESCTEST_INCLUDE=BSTests nix build --file . checks.txterm-esctest
