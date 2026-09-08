@@ -70,16 +70,19 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Three are left out, and none of them is a gate. The fuzz hunt
+    # Four are left out, and none of them is a gate. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
-    # judge a real terminal, and that part is not settled yet.
+    # judge a real terminal, and that part is not settled yet. The
+    # roaming property tests draw a fresh example every run, which is
+    # the one thing a gate may not do.
     all = pkgs.callPackage ./nix/tests.nix {
       suites = removeAttrs suites [
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-vttest-pictures"
+        "pyte-roaming"
       ];
     };
   };
@@ -88,6 +91,10 @@ rec {
   # needs nothing but python.
   suites = {
     pyte-unit = pyte.checks.unit;
+    # The property tests of pyte, off a fresh seed. Not a gate: the
+    # gate pins the draw so that a green run means the same thing
+    # twice, and this is the run that still finds something new.
+    pyte-roaming = pyte.checks.roaming;
     # The colour specs, judged against the real Xlib. `pyte/xcms.py` is a
     # port of the colour management of Xlib, and only a comparison against
     # the original says whether the port is right.

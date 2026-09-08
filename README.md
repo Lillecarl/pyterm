@@ -117,9 +117,9 @@ it. Running it again gives the same stored failure until an input changes.
 `--rebuild` is the way to make it run again.
 
 `checks.all` is every gate at once, and `checks.all.run` is the report: each
-suite's output linked by name, and a summary of how each one ended. Three are
-left out of it, and none of the three is a gate: the fuzz hunt, the vttest
-walk, and the pictures of vttest.
+suite's output linked by name, and a summary of how each one ended. Four are
+left out of it, and none of the four is a gate: the fuzz hunt, the vttest
+walk, the pictures of vttest, and the roaming property tests.
 
 ### Narrowing a run
 
@@ -140,6 +140,13 @@ build from a file does and a flake does not:
     PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures
     PYMUX_VTTEST_INCLUDE='^9 ' nix build --file . checks.pymux-vttest-pictures
     PYMUX_VTTEST_TERMINALS=xterm,foot nix build --file . checks.pymux-vttest-pictures
+    PYTE_HYPOTHESIS_SEED=1743 nix build --file . checks.pyte-roaming
+
+**A property test draws the same examples every run here.** `checks.pyte-unit`
+loads hypothesis's pinned profile, so a green gate means the same thing twice.
+`checks.pyte-roaming` runs the same property tests off a fresh seed and is not
+a gate. It takes the clock for its seed, so each build is a new hunt, and
+`PYTE_HYPOTHESIS_SEED` names one that a person wants back.
 
 **A test lives with the code it judges.** The tests that drive a screen and
 read its cells back are `pyte`'s, and there are about ninety files of them:
