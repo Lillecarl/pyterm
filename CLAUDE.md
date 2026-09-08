@@ -149,18 +149,23 @@ That writes `.claude/settings.local.json`, which is local and not committed.
 `nix build --file . pymux` reads the working copies, so you do not need to
 commit to test a change.
 
-**A flake is not first class here.** `flake.nix` exposes the packages and
-nothing else, so that somebody can install pymux with one command. It does not
-expose the checks or the dev shell, and it is not the way to build or test
-this collection. Two reasons, and both are real:
+**A flake is not first class here.** `flake.nix` exposes the packages and the
+home-manager module, so that somebody can install pymux with one command and
+configure it. It does not expose the checks or the dev shell, and it is not
+the way to build or test this collection. Two reasons, and both are real:
 
 - A flake evaluates purely, so `builtins.getEnv` sees nothing. Every knob that
   narrows a test run works only from a file.
 - A flake sees only what git tracks, and the contents of a submodule are not
   that, so even a package build needs `nix build '.?submodules=1#pymux'`.
 
-Do not add outputs to `flake.nix` to make something reachable. Add it to
-`default.nix`, where everything already is.
+**Nothing is defined in `flake.nix`.** Both of those outputs are attributes of
+`default.nix` that the flake passes through, so a person with no flake reaches
+the same things: `(import ./. { }).pymux`, and
+`imports = [ ./nix/home-manager.nix ]`. A flake output is a way to reach what
+`default.nix` holds, never the place a thing is written. So write it in
+`default.nix`, and add a line to `flake.nix` only when somebody outside this
+collection has to reach it.
 
 The tests are `nix build --file . checks.<name>`, and `checks.all` runs every
 one that is a gate. Run the one for what you touched before you land.
