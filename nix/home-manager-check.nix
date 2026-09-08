@@ -82,6 +82,10 @@ let
         mode-keys = "vi";
         default-terminal = "xterm-256color";
         status-left = "[#h:#S] ";
+        # The other half of the quoting. `escapeShellArg` spells a single
+        # quote as `'\''`, which shlex reads as a close, an escaped quote
+        # and an open. Nothing else here says whether it survives.
+        status-right = "it's #h";
         # A setting of null writes no line. `bell` is a real option, so a
         # line for it would be accepted and the judge would not see it;
         # the grep below is what sees it.

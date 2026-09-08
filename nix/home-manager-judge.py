@@ -32,6 +32,9 @@ EXPECTED = {
     # The one that holds a "#", a ":" and a trailing space. It says
     # whether the quoting survived the whole way.
     "status-left": ("status_left", "[#h:#S] "),
+    # And the one that holds a single quote, which is the character the
+    # quoting has to escape rather than only wrap.
+    "status-right": ("status_right", "it's #h"),
 }
 
 
