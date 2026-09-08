@@ -1,9 +1,14 @@
-# A home-manager module for pymux, so `~/.pymux.conf` is generated.
+# A home-manager module for pymux, so its configuration file is generated.
 #
-# pymux reads that file at startup: one command per line, the same shape as
-# `pymux/examples/example-config.conf`. Until now a person who manages the
-# rest of their home with Nix had to write and place that one file by hand.
-# Lillecarl/pymux#190.
+# pymux reads `$XDG_CONFIG_HOME/pymux/pymux.conf` at startup: one command per
+# line, the same shape as `pymux/examples/example-config.conf`. Until now a
+# person who manages the rest of their home with Nix had to write and place
+# that one file by hand. Lillecarl/pymux#190.
+#
+# It writes the XDG path and not `~/.pymux.conf`, which pymux also reads and
+# reads second. home-manager's own `programs.tmux` does the same for tmux,
+# and a dotfile straight in the home directory is what XDG exists to stop.
+# Lillecarl/pymux#196.
 #
 # **This is a path, not a flake output.** It is a plain module file, so
 #
@@ -123,12 +128,12 @@ in
       { home.packages = lib.optional (cfg.package != null) cfg.package; }
 
       {
-        home.file.".pymux.conf".text = lib.mkBefore (
+        xdg.configFile."pymux/pymux.conf".text = lib.mkBefore (
           header + lib.optionalString (settingLines != [ ]) ("\n" + lib.concatLines settingLines)
         );
       }
 
-      { home.file.".pymux.conf".text = lib.mkAfter cfg.extraConfig; }
+      { xdg.configFile."pymux/pymux.conf".text = lib.mkAfter cfg.extraConfig; }
     ]
   );
 }

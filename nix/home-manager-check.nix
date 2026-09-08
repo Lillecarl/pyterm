@@ -6,12 +6,12 @@
 # values back. `nix/home-manager-judge.py` is that half.
 #
 # **The stubs stand in for home-manager.** `home.packages` and
-# `home.file` are all this module writes, so those two are all the module
-# system needs to evaluate it. Taking home-manager as an input would make
-# this collection need it to run its own tests, and what is judged here is
-# the module's own logic: the lines it writes, and the quoting of them.
+# `xdg.configFile` are all this module writes, so those two are all the
+# module system needs to evaluate it. Taking home-manager as an input would
+# make this collection need it to run its own tests, and what is judged here
+# is the module's own logic: the lines it writes, and the quoting of them.
 #
-# So this does not prove that `home.file.<name>.text` is spelled the way
+# So this does not prove that `xdg.configFile.<name>.text` is spelled the way
 # home-manager spells it. Only an evaluation against home-manager itself
 # says that, and that is a thing to do once by hand rather than a gate that
 # drags a second module system into every run.
@@ -39,7 +39,7 @@ let
         default = [ ];
       };
 
-      options.home.file = lib.mkOption {
+      options.xdg.configFile = lib.mkOption {
         default = { };
         type = lib.types.attrsOf (
           lib.types.submodule {
@@ -97,7 +97,7 @@ let
     };
   };
 
-  conf = writeText "pymux.conf" written.home.file.".pymux.conf".text;
+  conf = writeText "pymux.conf" written.xdg.configFile."pymux/pymux.conf".text;
 
   # The module installs what it was given, and the option holds a package
   # rather than a string.

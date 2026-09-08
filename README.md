@@ -72,9 +72,10 @@ than the last commit, which is usually what you want while working.
 
 ## Configuring pymux with home-manager
 
-pymux reads `~/.pymux.conf` at startup: one command per line, the shape of
-`pymux/examples/example-config.conf`. `nix/home-manager.nix` writes that file,
-so it is generated and not placed by hand.
+pymux reads `$XDG_CONFIG_HOME/pymux/pymux.conf` at startup, and `~/.pymux.conf`
+after it: one command per line, the shape of
+`pymux/examples/example-config.conf`. `nix/home-manager.nix` writes the first
+of those, so it is generated and not placed by hand.
 
 It is a plain module file, so a path is the whole import:
 
