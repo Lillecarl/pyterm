@@ -79,17 +79,20 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Four are left out, and none of them is a gate. The fuzz hunt
+    # Five are left out, and none of them is a gate. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
     # judge a real terminal, and that part is not settled yet. The
-    # roaming property tests draw a fresh example every run, which is
-    # the one thing a gate may not do.
+    # pictures of pymux's chrome judge nothing at all yet, because
+    # there is no recorded image to judge them against. The roaming
+    # property tests draw a fresh example every run, which is the one
+    # thing a gate may not do.
     all = pkgs.callPackage ./nix/tests.nix {
       suites = removeAttrs suites [
         "ptterm-fuzz"
         "ptterm-vttest"
+        "pymux-chrome-pictures"
         "pymux-vttest-pictures"
         "pyte-roaming"
       ];
@@ -159,6 +162,12 @@ rec {
     # the judging is not, and it is minutes of work for one item of
     # vttest's main menu.
     pymux-vttest-pictures = pymux.checks.vttestPictures;
+    # A picture of what pymux draws around a pane: the status line, a
+    # title bar, the command palette, a strip. Not a gate either, and
+    # it judges nothing: the chrome is the thing pymux adds, so there
+    # is no bare side to subtract from. Reading the pictures is the
+    # work. Lillecarl/pymux#161.
+    pymux-chrome-pictures = pymux.checks.chromePictures;
     # Not a gate on its own: it judges the run against a recorded list
     # of the tests that fail today, and complains at a difference in
     # either direction.
