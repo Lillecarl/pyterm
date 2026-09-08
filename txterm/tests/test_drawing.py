@@ -17,6 +17,8 @@ from pyte.modes import PrivateMode
 from pyte.sequences import set_mode
 from pyte import escape
 from pyte.sequences import csi
+from pyte.osc import Osc
+from pyte.sequences import osc
 
 #: The size of the pane in every test here.
 SIZE = (20, 5)
@@ -127,7 +129,12 @@ async def test_a_link_travels_as_a_link():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed("\x1b]8;;https://example.com\x1b\\here\x1b]8;;\x1b\\\r\n")
+        terminal.stream.feed(
+            osc(Osc.HYPERLINK, "", "https://example.com")
+            + "here"
+            + osc(Osc.HYPERLINK, "", "")
+            + "\r\n"
+        )
         here = styles_of(terminal.render_line(0))[0]
         assert here.link == "https://example.com"
 
