@@ -59,6 +59,15 @@ rec {
     inherit (pkgs) mesa;
   };
 
+  # The home-manager module, so `~/.pymux.conf` is generated rather than
+  # placed by hand. Lillecarl/pymux#190.
+  #
+  # It is a path and nothing else, so `imports = [ ... ]` takes it straight.
+  # `flake.nix` passes this same attribute through, which is why the module
+  # is defined here: a flake output is a way for somebody else to reach
+  # what this file holds, never the place a thing is written.
+  homeManagerModules.default = ./nix/home-manager.nix;
+
   # Each package carries the tests that judge it, behind passthru. This is
   # where they get names, so `nix build --file . checks.ptterm-unit` works from
   # here.
@@ -162,6 +171,13 @@ rec {
     # gate here: a pane of its own for each of the 40, and one of the
     # recordings is a third of a megabyte.
     pymux-alacritty = pymux.checks.alacritty;
+    # The home-manager module, judged by pymux. Nix writes the
+    # configuration file the module generates, and pymux reads it through
+    # the same `source-file` a real startup runs. It is named for this
+    # repository and not for pymux, because the module lives here.
+    pyterm-home-manager = pkgs.callPackage ./nix/home-manager-check.nix {
+      inherit pymux;
+    };
   };
 
   shell = pkgs.callPackage ./pkgs/shell {

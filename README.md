@@ -51,10 +51,15 @@ display servers that only a test needs.
 Builds read the submodule working copies, so an edit in any of them builds
 without a commit or a push.
 
-**A flake is not first class here.** `flake.nix` exposes the packages so that
-somebody can install pymux with one command, and nothing else. The checks and
-the dev shell are not there on purpose: a flake evaluates purely, so the knobs
-below that narrow a run would be invisible to it. Build and test from the file.
+**A flake is not first class here.** `flake.nix` exposes the packages and the
+home-manager module, so that somebody can install pymux with one command and
+configure it, and nothing else. The checks and the dev shell are not there on
+purpose: a flake evaluates purely, so the knobs below that narrow a run would
+be invisible to it. Build and test from the file.
+
+Neither of those two is defined there. Both are attributes of `default.nix`
+that the flake passes through, so a person with no flake reaches the same
+things.
 
 **A flake build has to ask for the submodules by name.** Flakes see only what
 git tracks, and a submodule's contents are not that, so a plain `nix build .#`
@@ -64,6 +69,55 @@ fails with "Path 'prompt-toolkit' ... is not tracked by Git":
 
 A build from a file has no such problem, and it reads the working copies rather
 than the last commit, which is usually what you want while working.
+
+## Configuring pymux with home-manager
+
+pymux reads `~/.pymux.conf` at startup: one command per line, the shape of
+`pymux/examples/example-config.conf`. `nix/home-manager.nix` writes that file,
+so it is generated and not placed by hand.
+
+It is a plain module file, so a path is the whole import:
+
+    imports = [ /path/to/pyterm/nix/home-manager.nix ];
+
+`flake.nix` names the same file as `homeManagerModules.default`, for a person
+who takes this repository as a flake input:
+
+    pyterm.url = "git+https://github.com/Lillecarl/pyterm?submodules=1";
+
+`?submodules=1` matters here too. The default of the module's `package` option
+builds pymux out of the source the module came from, and a flake without the
+submodules has no source to build.
+
+Two options carry the configuration:
+
+    programs.pymux = {
+      enable = true;
+      settings = {
+        prefix = "C-a";
+        base-index = 1;
+        mode-keys = "vi";
+        status-left = "[#h:#S] ";
+      };
+      extraConfig = ''
+        bind-key "|" split-window -h
+        bind-key "-" -- split-window -v
+      '';
+    };
+
+`settings` writes one `set-option` line for each entry, under pymux's own
+names, which are the ones in `pymux/pymux/options.py`. There is no typed
+option per setting, because that list already exists and a second one here
+would go stale. `true` and `false` become `on` and `off`, a number becomes
+itself, a string is quoted, and `null` writes no line at all.
+
+`extraConfig` is added after the settings. Key bindings go there: `bind-key`
+takes a command and its own arguments, and a Nix option cannot spell that
+better than the line itself does.
+
+`checks.pyterm-home-manager` judges the module. Nix writes the file it
+generates, and pymux reads it through the same `source-file` a real startup
+runs, then says what each value became.
 
 ## Tests
 
@@ -88,6 +142,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
     nix build --file . checks.pymux-vttest-pictures # the same, of vttest
+    nix build --file . checks.pyterm-home-manager # the module, judged by pymux
     nix build --file . checks.all            # every one that is a gate
 
 Every run happens in the build sandbox. The ptys, the sockets and the processes
