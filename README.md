@@ -24,6 +24,12 @@ submodule points back at this repository.
 This repository owns the assembly. It decides which checkout answers for
 `ptterm`, it names the tests, and it holds the dev shell.
 
+**`docs/the-model.md` says what the six are, in one place**: the words we use
+for each thing, what each layer holds, and how one keystroke and one frame
+travel through all of them. Read it before a conversation about architecture,
+because several words here mean two things -- "window", "screen", "layout" and
+"terminal" each name something in pymux and something else in prompt_toolkit.
+
 ## Getting a checkout
 
     git clone --recurse-submodules git@github.com:Lillecarl/pyterm.git
