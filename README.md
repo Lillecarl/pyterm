@@ -215,10 +215,12 @@ build from a file does and a flake does not:
     PYTE_HYPOTHESIS_SEED=1743 nix build --file . checks.pyte-roaming
 
 **A property test draws the same examples every run here.** `checks.pyte-unit`
-loads hypothesis's pinned profile, so a green gate means the same thing twice.
-`checks.pyte-roaming` runs the same property tests off a fresh seed and is not
-a gate. It takes the clock for its seed, so each build is a new hunt, and
-`PYTE_HYPOTHESIS_SEED` names one that a person wants back.
+and `checks.pymux-unit` both load hypothesis's pinned profile, so a green gate
+means the same thing twice. `checks.pyte-roaming` runs pyte's property tests
+off a fresh seed and is not a gate. It takes the clock for its seed, so each
+build is a new hunt, and `PYTE_HYPOTHESIS_SEED` names one that a person wants
+back. pymux has no hunt of its own yet; `--hypothesis-profile=roaming` is the
+same thing by hand.
 
 **A test lives with the code it judges.** The tests that drive a screen and
 read its cells back are `pyte`'s, and there are about ninety files of them:
