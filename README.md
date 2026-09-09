@@ -633,8 +633,19 @@ and not how many bytes it saw. So the gate feeds a little and the knobs feed a
 lot. The workload is Alacritty's recordings again, through the same
 `Stream.feed` a pty would call.
 
+**Both routes run**, because a client can arrive two ways and they hold
+different things. `in-process` is `Pymux.add_client`, with no socket and no
+connection: it covers the panes, the screens, the windows and the layout.
+`connection` puts a real `ServerConnection` over the queues of `pipes.memory`,
+which is the transport of `pymux integrated`, so the background tasks, the pipe
+input and the client state the server makes are all real. A round cannot tell
+them apart, so a leak on one route is the same round passing on the other. The
+second route found three the first could not see: a shared `AppSession`, a
+restored SIGWINCH handler, and a connection the session never let go of.
+
     PYMUX_LEAKS_BYTES=1000000 PYMUX_LEAKS_PANES=16 PYMUX_LEAKS_ROUNDS=8 \
       nix build --file . checks.pymux-leaks     # about 350 MB
+    PYMUX_LEAKS_ROUTE=connection nix build --file . checks.pymux-leaks
 
 **One trap is worth knowing before you read a red run.** Killing a pane frees
 nothing by itself: the child is reaped on the loop, the reap closes the slave
@@ -642,6 +653,16 @@ side of the pty, the master then reads the end of the file, and only then is the
 reader taken off the loop. Until that last step the loop's selector holds the
 callback that holds the pane. The first version of this check killed and looked
 straight away, and called every pane a leak.
+
+A detach on the `connection` route has the same shape one layer up: closing the
+client end asks the connection to close, and the application it drew with stops
+on a later turn of the loop. Both waits are in `tests/what_leaks.py`, and both
+are the reason a red run is worth believing.
+
+**The question is asked while the session is still standing**, which is what
+makes a leak into the server visible at all. It used to be asked after the
+round's `Pymux` had gone as well, so a pane left in `Arrangement.windows` or a
+client left in `Pymux._client_states` died with the session and passed.
 
 ### Where the time of a frame goes
 
