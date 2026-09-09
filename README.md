@@ -151,6 +151,8 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.txterm-unit   # the Textual widget, drawn and driven
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
+    nix build --file . checks.pymux-frame   # what a frame costs, in instructions
+    nix build --file . checks.pymux-profile # where the time of a frame goes
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
@@ -546,6 +548,41 @@ interpreter upgrade means recording the budgets again.
     PTTERM_INSTRUCTIONS_INCLUDE=vim nix build --file . checks.ptterm-instructions
     PTTERM_INSTRUCTIONS_TOLERANCE=2 nix build --file . checks.ptterm-instructions
     cp result/instruction-budgets.txt ptterm/tests/instruction-budgets.txt
+
+### What arranging several of them costs
+
+`checks.pymux-frame` is the same idea one layer up. That one measures what a
+pane costs; this one measures what a *window* costs: laying it out, filling the
+gaps with borders, and drawing the frame around the panes. One pane, four and
+sixteen, in each layout, and the panes themselves are empty so that nothing of
+ptterm is in the number.
+
+One line of it is not a cost. **"(plans)" counts how many times a frame
+measures where the panes are, and a frame needs one.** Everything drawn inside
+a frame asks the layout the same question -- a title bar names the pane on each
+side of its own, so a window of sixteen panes asks sixty-four times -- and each
+of those used to measure the whole window again. That was 950k instructions
+against a frame of 55k. Now the frame's plan is worked out once and read.
+
+    PYMUX_FRAME_INCLUDE=strip nix build --file . checks.pymux-frame
+    PYMUX_FRAME_TOLERANCE=2 nix build --file . checks.pymux-frame
+    cp result/frame-budgets.txt pymux/tests/frame-budgets.txt
+
+### Where the time of a frame goes
+
+`checks.pymux-profile` is the other half, and it is **not a gate and judges
+nothing**: it samples the stack with pyinstrument while a real server draws for
+a real client, so a person reading it sees which function the seconds are in. A
+count says whether something got dearer; a profile says where.
+
+Server and client are in one process, which is what `pymux integrated` is, so a
+frame is followed the whole way instead of up to a socket. Three phases, because
+"what a frame costs" is three questions: frames with nothing changed, frames
+after a program printed a line, and frames after a key moved the focus.
+
+    PYMUX_PROFILE_PANES=16 nix build --file . checks.pymux-profile.run
+    less result/log
+    $BROWSER result/idle.html
 
 ## umbrella
 

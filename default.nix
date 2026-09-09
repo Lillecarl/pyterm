@@ -79,7 +79,9 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Five are left out, and none of them is a gate. The fuzz hunt
+    # Six are left out, and none of them is a gate. The profile is
+    # instrumentation: it samples a wall clock, which says nothing
+    # twice in a sandbox beside other jobs. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
@@ -93,6 +95,7 @@ rec {
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
+        "pymux-profile"
         "pymux-vttest-pictures"
         "pyte-roaming"
       ];
@@ -150,6 +153,19 @@ rec {
     # the two lists together say what a front end adds.
     txterm-esctest = txterm.checks.esctest;
     pymux-unit = pymux.checks.unit;
+    # What it costs to lay a window out and draw the frame around its
+    # panes, in bytecode instructions. The sibling of
+    # `ptterm-instructions`, one layer up: that one measures what a
+    # pane costs, and this one measures what arranging several of them
+    # costs. It holds each count to a budget, so a change that makes a
+    # frame much more expensive fails here instead of being felt later.
+    pymux-frame = pymux.checks.frame;
+    # Where the time of a frame goes, sampled with pyinstrument while a
+    # real server draws for a real client. Not a gate and it judges
+    # nothing: a sampling profiler reports wall clock, and this sandbox
+    # runs beside other jobs. It is instrumentation, and reading it is
+    # the work.
+    pymux-profile = pymux.checks.profile;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
     # process and no socket between them.
