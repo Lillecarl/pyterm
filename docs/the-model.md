@@ -274,7 +274,15 @@ client: the background, then `DynamicBody`, which returns the body of
 the window this client is on, and inside it `PlanContainer`. The
 container asks its layout to `measure` a plan, asks `look_at` where the
 view sits, paints the `chrome` into the gaps, and writes each slot's
-shown pane at its rectangle less the offset. The title bars are floats
+shown pane at its rectangle less the offset.
+
+**The plan is also what sizes a pane.** A pane whose rectangle reaches
+no part of the view is not drawn at all, and a program does not stop
+needing to know how big it is, so the container tells every pane its
+rectangle whether it draws it or not. It used to arrive through the
+drawing -- prompt_toolkit hands a size to `create_content` -- and the
+end to end checks are what noticed: a column scrolled off the left
+kept reporting the size of the whole terminal. The title bars are floats
 that draw last; each one asks `the_pane_beside`, which reads **the plan
 this frame already measured**. Then the status line, the message
 toolbar and any popup draw over the top, and the renderer diffs and
