@@ -154,6 +154,8 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
     nix build --file . checks.ptterm-vttest # every screen vttest draws
+    nix build --file . checks.ptterm-instructions # what parsing costs, in instructions
+    nix build --file . checks.ptterm-footprint # what a scrollback costs to hold
     nix build --file . checks.txterm-unit   # the Textual widget, drawn and driven
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
@@ -574,6 +576,37 @@ against a frame of 55k. Now the frame's plan is worked out once and read.
     PYMUX_FRAME_INCLUDE=strip nix build --file . checks.pymux-frame
     PYMUX_FRAME_TOLERANCE=2 nix build --file . checks.pymux-frame
     cp result/frame-budgets.txt pymux/tests/frame-budgets.txt
+
+### What a scrollback costs to hold
+
+`checks.ptterm-footprint` is the other half of the same question. The two
+checks above measure what a history costs to **touch**: a linefeed, a reflow, a
+frame. This measures what it costs to **keep**. A person raises `history-limit`
+to read a long build log, opens sixteen panes and leaves them for a week, and
+the machine either has the room or it swaps.
+
+Bytes are a fair unit for the same reason an instruction count is. `tracemalloc`
+reports what Python allocated, and the same objects on the same interpreter take
+the same room on every machine. Resident memory does not: it holds the
+interpreter, the arenas it has not given back, and every other job in the
+sandbox.
+
+The figure to read is **a row**, and it is marginal on purpose. A filled pane
+holds the history *and* the pane, so dividing the whole by the depth charges a
+row for a share of the screen, the parser and the widget's caches. The
+difference between two depths is the history alone.
+
+    plain    50000 rows   25.3 MB     540 B a row
+    wrapped  50000 rows   77.6 MB     1.6 KB a row
+
+The log also names the twelve allocation sites that hold the most, so a number
+a person does not like points at a line of code. That is how
+Lillecarl/pymux#227 was found: `Row` held a closure over the blank cell, which
+cost more per row than the cells did.
+
+    PTTERM_FOOTPRINT_INCLUDE=2000 nix build --file . checks.ptterm-footprint
+    PTTERM_FOOTPRINT_TOLERANCE=10 nix build --file . checks.ptterm-footprint
+    cp result/footprint-budgets.txt ptterm/tests/footprint-budgets.txt
 
 ### What is still alive afterwards
 
