@@ -51,7 +51,8 @@ question is asked in.
 | **plan** (`Plan`) | one answer to "where is everything": a rectangle per slot, plus the services -- `at`, `slot_of`, `neighbour`, `trace`, `reading_order` |
 | **gap** | cells a layout leaves between two rectangles. A hole in the plan, and where a border goes |
 | **chrome** | what fills a gap, as `Line`s. A pane knows nothing about borders; the layout says where they go and `PlanContainer` paints them |
-| **view** | the part of the plane one client sees. Today an offset on `PlanContainer`; a `View` object comes in slice 5 |
+| **view** (`View`) | the part of the plane one client sees: an offset and a size. One per client and window, held by `DynamicBody`, so it outlives the containers |
+| **window-size** | which client's terminal a window's plane is sized by: `smallest`, `largest`, `latest`, or `manual`. The plan is shared, the views are not |
 | **the bar above / the bar below** | the two title bars of a pane. The one above names the panes to its left and right; the one below names the panes above and below it |
 
 So "the rectangle is split" means: this slot has a neighbour on that
@@ -179,22 +180,29 @@ The biggest one. Read it as three trees that meet in one container.
 
 **Where the panes go**, which is the layout engine:
 
-    plane.py    Rect, Slot, Plan, Side, Line -- the geometry, and no
-                behaviour. It imports two NamedTuples and nothing else
+    plane.py    Rect, Slot, Plan, View, Side, Line -- the geometry, and
+                almost no behaviour. It imports two NamedTuples and
+                nothing else
     tiling.py   the walk from a tree of splits to a plan, shared by
                 the two layouts that have a tree
-    divided.py  Divided -- an exact tiling of the view. The default
+    divided.py  Divided -- an exact tiling of the plane. The default
     strip.py    Strip -- a row of columns that may be wider than the
                 view, and scrolls. niri's model
-    zoomed.py   Zoomed(inner) -- a wrapper: one pane fills the view and
+    zoomed.py   Zoomed(inner) -- a wrapper: one pane fills the plane and
                 what it wraps is untouched
 
 Each layout answers three questions and there is no base class yet, on
 purpose -- one written before the third subclass would be a guess:
 
-    measure(available) -> Plan      where the panes are
+    measure(plane) -> Plan          where the panes are
     chrome(plan) -> list[Line]      what fills the gaps it left
-    look_at(plan, offset, size, focus) -> Point   where the view goes
+    look_at(plan, view, focus) -> Point   where the view goes
+
+**The plan is measured for the plane, and drawn in the view.** Those
+are one rectangle while every client is the same size, and two as soon
+as they are not. `View.moved_onto` holds the three rules every layout
+follows: a rectangle already in the view moves nothing, one too big to
+show whole shows its start, and the view stays on the plane.
 
 `Plane` and `Masonry` are the two that do not exist yet.
 
@@ -272,9 +280,15 @@ the middle, and a test can drive the client and read the server.
 the frame before. The renderer walks the container tree of that
 client: the background, then `DynamicBody`, which returns the body of
 the window this client is on, and inside it `PlanContainer`. The
-container asks its layout to `measure` a plan, asks `look_at` where the
-view sits, paints the `chrome` into the gaps, and writes each slot's
-shown pane at its rectangle less the offset.
+container asks its layout to `measure` a plan **for the plane**, asks
+`look_at` where this client's view sits on it, paints the `chrome` into
+the gaps, and writes each slot's shown pane at its rectangle less the
+offset.
+
+How big the plane is comes from `Pymux.the_size_of_the_plane`, which
+reads the window's `window-size`. How much of it this client can see is
+`LayoutManager.the_room_this_client_has`, which is its own terminal.
+Two clients of different sizes therefore draw one plan and two views.
 
 **The plan is also what sizes a pane.** A pane whose rectangle reaches
 no part of the view is not drawn at all, and a program does not stop
