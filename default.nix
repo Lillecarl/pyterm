@@ -139,6 +139,9 @@ rec {
     # seconds. It holds each count to a budget, so a change that makes the
     # parser much slower fails here instead of being felt later.
     ptterm-instructions = ptterm.checks.instructions;
+    # And what a scrollback costs to hold, rather than to touch. Bytes
+    # are the same on every machine, so a budget file holds them.
+    ptterm-footprint = ptterm.checks.footprint;
     # Not a gate: it finds deviations from kitty faster than they get fixed.
     ptterm-fuzz = ptterm.checks.fuzz;
     # Not a gate either. vttest draws a screen and asks a person whether
