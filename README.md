@@ -161,6 +161,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
+    nix build --file . checks.pymux-latency # what pymux costs a keystroke
     nix build --file . checks.pymux-profile # where the time of a frame goes
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -663,6 +664,50 @@ are the reason a red run is worth believing.
 makes a leak into the server visible at all. It used to be asked after the
 round's `Pymux` had gone as well, so a pane left in `Arrangement.windows` or a
 client left in `Pymux._client_states` died with the session and passed.
+
+### What pymux costs a keystroke
+
+Every check above says whether pymux draws the right cells. None of them says
+whether it draws them soon enough, and for a multiplexer that is the quality the
+whole argument is about. `checks.pymux-latency` is that number.
+
+One keystroke gives three, and they add up. **input** is the key going into the
+client's pty until the program in the pane reads it: the client, the socket and
+the server's pipe input. **output** is the program writing until the frame
+reaches the client's terminal: the parser, the screen, the renderer and the
+diff. **round trip** is both, which is what a person sees when they hold a key
+down. The program in the pane timestamps its own two moments into a file, so the
+cut between the halves is exact rather than inferred.
+
+The same program then runs on a **bare pty**, with nothing between it and the
+master. Without that the number says nothing, because a millisecond belongs to
+the machine that read it.
+
+    bare  round trip     0.05 ms at the median
+    pymux round trip     3.85 ms at the median, 7.6 at p99
+
+    input                1.1 ms of it
+    output               2.7 ms of it
+
+**The gap is not what the fork costs.** A bare pty has no renderer, no diff and
+no layout, so it is the fork *and* everything pymux draws — which is the honest
+reading, and still the useful one: it is what a person gives up by running a
+multiplexer at all.
+
+Two things the first run said. **The output half is more than twice the input
+half**, so the render path is where the time is and the keyboard path is not
+worth tuning. And **the two transports are the same**: `PYMUX_ROUTE=integrated`
+carries packets in queues instead of over a unix socket, and its median round
+trip is inside the run-to-run noise of the socket's. The socket is not what
+costs.
+
+Not a gate, and nothing judges it: a wall clock belongs to the machine that read
+it, and this runs in a sandbox beside other jobs. Read the distribution rather
+than a mean — the tail is what a person notices.
+
+    nix build --file . checks.pymux-latency.run
+    PYMUX_LATENCY_SAMPLES=500 nix build --file . checks.pymux-latency.run
+    PYMUX_ROUTE=integrated nix build --file . checks.pymux-latency.run
 
 ### Where the time of a frame goes
 

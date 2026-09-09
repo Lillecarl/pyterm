@@ -79,9 +79,10 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Six are left out, and none of them is a gate. The profile is
-    # instrumentation: it samples a wall clock, which says nothing
-    # twice in a sandbox beside other jobs. The fuzz hunt
+    # Seven are left out, and none of them is a gate. The profile and
+    # the latency measurement both read a wall clock, which says
+    # nothing twice in a sandbox beside other jobs; they are
+    # instrumentation, and reading them is the work. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
@@ -95,6 +96,7 @@ rec {
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
+        "pymux-latency"
         "pymux-profile"
         "pymux-vttest-pictures"
         "pyte-roaming"
@@ -176,6 +178,12 @@ rec {
     # runs beside other jobs. It is instrumentation, and reading it is
     # the work.
     pymux-profile = pymux.checks.profile;
+    # What pymux costs a keystroke, against the same program on a bare
+    # pty. Not a gate either, and for the same reason the profile is
+    # not: a millisecond belongs to the machine that read it. It is
+    # the third of the three numbers Lillecarl/pymux#8 asked for, and
+    # the only one an instruction count cannot give.
+    pymux-latency = pymux.checks.latency;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
     # process and no socket between them.
