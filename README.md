@@ -679,10 +679,19 @@ is `Renderer.render`, which lays the window out, draws it, **diffs it against
 the last frame** and writes the escape sequences — the diff and the writing are
 what a keystroke pays and a recording does not.
 
-    key                266429 instructions      445 us
-    parse                 263 instructions        1 us
-    render             230568 instructions     1671 us
-    all of it          497260 instructions     2118 us
+    key                 68117 instructions      468 us
+    parse                 263 instructions        6 us
+    render             230568 instructions     1716 us
+    all of it          298948 instructions     2190 us
+
+**A whole keystroke runs before anything is counted**, because every stage has
+once-only work behind it that a keystroke does not pay: the renderer's first
+frame paints the whole screen rather than one cell, and the first key press
+builds the merged key bindings for the layout. Counted cold, the press came to
+266,429 instructions in 468 microseconds — half a billion instructions a
+second, where the render in the same run says 132 million. **A rate that is not
+possible is how both of those were found**: two different pieces of work were
+being compared.
 
 **Nothing runs the event loop**, which is what makes it a gate. A loop exists,
 because arming the key processor's flush timer needs one, but it never turns —
