@@ -160,6 +160,13 @@ rec {
     # costs. It holds each count to a budget, so a change that makes a
     # frame much more expensive fails here instead of being felt later.
     pymux-frame = pymux.checks.frame;
+    # What pymux still holds after a pane, a window or a client has
+    # gone. A multiplexer runs for weeks, so a pane's worth of objects
+    # kept on every `kill-pane` is a leak nobody sees until the machine
+    # swaps. A weak reference to everything a round makes says exactly
+    # what survived, and the object count says what grows without
+    # dying.
+    pymux-leaks = pymux.checks.leaks;
     # Where the time of a frame goes, sampled with pyinstrument while a
     # real server draws for a real client. Not a gate and it judges
     # nothing: a sampling profiler reports wall clock, and this sandbox

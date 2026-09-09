@@ -158,6 +158,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
+    nix build --file . checks.pymux-leaks   # what is still alive after a teardown
     nix build --file . checks.pymux-profile # where the time of a frame goes
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -573,6 +574,41 @@ against a frame of 55k. Now the frame's plan is worked out once and read.
     PYMUX_FRAME_INCLUDE=strip nix build --file . checks.pymux-frame
     PYMUX_FRAME_TOLERANCE=2 nix build --file . checks.pymux-frame
     cp result/frame-budgets.txt pymux/tests/frame-budgets.txt
+
+### What is still alive afterwards
+
+`checks.pymux-leaks` asks the question none of the others do: what does pymux
+still hold once a pane, a window or a client has gone? A multiplexer runs for
+weeks, so a pane's worth of objects kept on every `kill-pane` is a leak nobody
+sees until the machine swaps.
+
+Two questions, and the first is exact. **Is it dead?** A weak reference to every
+object a round makes -- the pane, the widget, the screen, the process, the
+window, the client, its application -- and after the teardown every one of them
+has to be gone. That has no tolerance. `tests/what_holds_it.py` walks
+`gc.get_referrers` outward and names what holds a survivor, so a red run points
+at a line rather than at a program.
+
+**Does it plateau?** Some leaks keep nothing dead: a list that grows a row per
+write holds only live objects and still eats the machine. So the same work runs
+twice and the count of tracked objects has to come out the same. There is no
+budget file for it, because there is no legitimate growth -- a healthy type is
+zero on both sides.
+
+**A leak shows at any volume**, because the question is whether an object died
+and not how many bytes it saw. So the gate feeds a little and the knobs feed a
+lot. The workload is Alacritty's recordings again, through the same
+`Stream.feed` a pty would call.
+
+    PYMUX_LEAKS_BYTES=1000000 PYMUX_LEAKS_PANES=16 PYMUX_LEAKS_ROUNDS=8 \
+      nix build --file . checks.pymux-leaks     # about 350 MB
+
+**One trap is worth knowing before you read a red run.** Killing a pane frees
+nothing by itself: the child is reaped on the loop, the reap closes the slave
+side of the pty, the master then reads the end of the file, and only then is the
+reader taken off the loop. Until that last step the loop's selector holds the
+callback that holds the pane. The first version of this check killed and looked
+straight away, and called every pane a leak.
 
 ### Where the time of a frame goes
 
