@@ -165,6 +165,12 @@ rec {
     # costs. It holds each count to a budget, so a change that makes a
     # frame much more expensive fails here instead of being felt later.
     pymux-frame = pymux.checks.frame;
+    # What one keystroke costs, counted rather than timed: the key
+    # going out to the pane's pty, the answer parsed, and the
+    # renderer's diff and escape sequences coming back. It is the
+    # gateable half of `pymux-latency`, which measures the same path
+    # on a clock and therefore judges nothing.
+    pymux-keystroke = pymux.checks.keystroke;
     # What pymux still holds after a pane, a window or a client has
     # gone. A multiplexer runs for weeks, so a pane's worth of objects
     # kept on every `kill-pane` is a leak nobody sees until the machine

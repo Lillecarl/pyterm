@@ -161,7 +161,8 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
-    nix build --file . checks.pymux-latency # what pymux costs a keystroke
+    nix build --file . checks.pymux-keystroke # a keystroke, in instructions
+    nix build --file . checks.pymux-latency # the same keystroke, in milliseconds
     nix build --file . checks.pymux-profile # where the time of a frame goes
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -664,6 +665,40 @@ are the reason a red run is worth believing.
 makes a leak into the server visible at all. It used to be asked after the
 round's `Pymux` had gone as well, so a pane left in `Arrangement.windows` or a
 client left in `Pymux._client_states` died with the session and passed.
+
+### The same keystroke, counted rather than timed
+
+`checks.pymux-keystroke` is the gateable half of the section below. A wall clock
+cannot fail a build, and bytecode can: the same code over the same bytes gives
+the same count on every machine. Carl put it as "number go up = bad".
+
+Three stages, and neither of the counters above covered two of them. **key** is
+a key press through the client's key processor, into the binding, and out to the
+pane's pty. **parse** is the answer arriving through `Stream.feed`. **render**
+is `Renderer.render`, which lays the window out, draws it, **diffs it against
+the last frame** and writes the escape sequences — the diff and the writing are
+what a keystroke pays and a recording does not.
+
+    key                266429 instructions      445 us
+    parse                 263 instructions        1 us
+    render             230568 instructions     1671 us
+    all of it          497260 instructions     2118 us
+
+**Nothing runs the event loop**, which is what makes it a gate. A loop exists,
+because arming the key processor's flush timer needs one, but it never turns —
+so the pane's program cannot write to the screen and no frame can change for a
+reason the file did not choose. `status-right` is emptied for the same reason:
+the default draws a clock, and a frame either side of a second is two diffs.
+
+Read it against the section below. The work takes 2.1 ms here, in one process
+with no socket and no loop; the same keystroke measured across three processes
+takes 3.85 ms. **The difference is what an instruction count cannot see** — the
+transport, and every moment nothing was running. Counting turns of the event
+loop is the measurement for that half, and it is Lillecarl/pymux#232.
+
+    nix build --file . checks.pymux-keystroke.run
+    PYMUX_KEYSTROKE_INCLUDE=render nix build --file . checks.pymux-keystroke
+    cp result/keystroke-budgets.txt pymux/tests/keystroke-budgets.txt
 
 ### What pymux costs a keystroke
 
