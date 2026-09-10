@@ -722,11 +722,47 @@ from 12%, and it is not a budget to tune.
     PYMUX_BUSY_PROGRAMS=cmatrix nix build --file . checks.pymux-busy.run
     PYMUX_BUSY_SECONDS=20 nix build --file . checks.pymux-busy.run
     PYMUX_BUSY_CEILING=0.3 nix build --file . checks.pymux-busy
+    PYMUX_BUSY_CAPS="0 10 30 60" nix build --file . checks.pymux-busy.run
 
 **The question is asked while the session is still standing**, which is what
 makes a leak into the server visible at all. It used to be asked after the
 round's `Pymux` had gone as well, so a pane left in `Arrangement.windows` or a
 client left in `Pymux._client_states` died with the session and passed.
+
+### How many frames a second a window is worth
+
+The section above is a window nobody looks at. This is the other half: a pane
+that animates in the window somebody *is* looking at, which is drawn, and where
+a frame costs about 19 ms of CPU at 187x59.
+
+`set-window-option frame-rate <n>` caps it. It defaults to **30**, and `0` means
+as many as the server can draw, which is what pymux did before the option
+existed. cmatrix, watched, measured by the second half of `checks.pymux-busy`:
+
+| cap | of one core | frames a second |
+| --- | --- | --- |
+| none | 93% | 45.6 |
+| 60 | 94% | 45.6 |
+| 30 | 66% | 28.2 |
+| 10 | 32% | 9.8 |
+
+Three things that table says. **The cost is linear in the frame rate** — about
+1.6% of a core per frame, over a floor of about 19%. **That floor is the
+parsing**, and it is the same 19% the unwatched cmatrix costs above, which is
+what says the two measurements agree. And **a cap above the natural rate does
+nothing**: cmatrix asks for 45.6 frames a second, so capping at 60 is capping at
+nothing.
+
+**It is a window option because a window is what a client looks at.** The one
+with cmatrix in it can be told to draw ten times a second while the one being
+read stays sharp. `set-window-option -g frame-rate <n>` says what every new
+window starts with, and changes none that is open.
+
+**It costs no typing latency.** `min_redraw_interval` is prompt_toolkit's own
+knob and it *holds* a redraw that arrives too soon rather than dropping it, so
+no frame is lost. `checks.pymux-latency` reads 3.07 ms added at the median with
+the cap, against 3.22 ms without it. A cap bites only when frames are asked for
+faster than the cap, and a person types nowhere near thirty times a second.
 
 ### The same keystroke, counted rather than timed
 
