@@ -792,22 +792,27 @@ It drives the program `checks.pymux-latency` drives, over a real
 `ServerConnection`, on an event loop that counts `_run_once`. Each turn also
 names the callbacks it ran, so a total that moved points at a hop.
 
-**A keystroke is eight turns**, five hundred times out of five hundred on an
+**A keystroke is seven turns**, three hundred times out of three hundred on an
 idle machine:
 
     the server reads the "in" packet            1
     the application takes the key, and writes
       it to the pane's pty                      1
     the pane answers, and the screen changes    1
-    prompt_toolkit postpones the redraw         3
+    prompt_toolkit postpones the redraw         2
     the frame goes out as an "out" packet       1
     the client's reader takes it                1
 
-Under sixteen processes of `yes` it is eight about six times in ten and eleven
-the rest. A keystroke asks for a frame twice — the key press invalidates, and
-the pane's answer invalidates. When the answer lands before the loop polls
-again, one redraw carries both; when it misses that poll, the redraw of the key
-press runs by itself and draws nothing, and the answer pays for a second one.
+It was eight until the postponement stopped asking whether the loop was idle
+and scheduling the thing that answered "no" (prompt-toolkit `69a25452`). This
+budget is what proved that patch: a bare event loop reaches the same number
+either way, because the arithmetic only differs when other work is ready.
+
+Under load it grows by the cost of one more redraw. A keystroke asks for a
+frame twice — the key press invalidates, and the pane's answer invalidates.
+When the answer lands before the loop polls again, one redraw carries both;
+when it misses that poll, the redraw of the key press runs by itself and draws
+nothing, and the answer pays for a second one.
 
 So the check holds the **shortest** keystroke of a run and judges nothing else:
 load can only add the second redraw, never take a turn away.
