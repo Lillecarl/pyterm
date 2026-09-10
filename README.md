@@ -188,16 +188,21 @@ that is really attached.
 `known_hosts`, the way `ssh` does. There is no server mode, no keys of pymux's
 own, and no authentication to design.
 
-**With no path it is the first server of the user who logs in**, which is
-`/tmp/pymux.sock.<user>.0`: a server with no name takes the lowest free number,
-so the first one on a machine is always zero, and most machines have one. That
-is a guess, and the only one that can be made from here — reading which sockets
-are really there means globbing a directory on the far side, which needs a
-command run over the connection. Name the path when the guess is wrong.
+**Nothing runs on the other machine.** Not a shell, not a pymux, not even to
+find out which socket to open. `ssh://host` with no path lists the sockets over
+SFTP, which is a subsystem sshd provides itself, filters the listing to the ones
+that really are sockets, and takes the newest — which is what `pymux attach`
+with no `-S` means on this machine, and for the same reason: nothing writes to a
+socket file after the bind, so its time is the time the server started. The user
+is the one that was really authenticated, so `~/.ssh/config` naming a different
+one is already applied.
 
-**It attaches; it does not start anything.** `ssh://` names a socket that is
-already there. Spawning a server needs that same command on the far side, and
-is the other half of Lillecarl/pymux#90.
+A machine whose sshd offers no SFTP falls back to `/tmp/pymux.sock.<user>.0`,
+where the first server of a user listens. Name the path when that is wrong.
+
+**It attaches; it does not start anything.** `ssh://` names a machine that is
+already running a server. Spawning one is the other half of
+Lillecarl/pymux#90.
 
 ## Tests
 
