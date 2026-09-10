@@ -166,6 +166,39 @@ Home key, no Insert and no function row. It has no key of its own, so bind one:
 generates, and pymux reads it through the same `source-file` a real startup
 runs, then says what each value became.
 
+## Attaching to a server on another machine
+
+    pymux -S ssh://dynhetz attach
+    pymux -S ssh://carl@dynhetz:2222/tmp/pymux.sock.carl.0 attach
+    pymux -S ssh://dynhetz list-sessions
+
+The panes run there and are drawn here. **The server gains nothing and knows
+nothing about this**: it keeps its unix socket, and openssh carries that socket
+over a channel of its own, `direct-streamlocal@openssh.com`, which `asyncssh`
+opens with `conn.open_unix_connection(path)`. So the far side is a stock sshd
+and the packets are the same packets. Lillecarl/pymux#90.
+
+**Why not `ssh host -t pymux attach`.** That starts a shell to start a client to
+reach a socket on the far side, and the terminal in the middle is openssh's.
+With the client opening the socket itself the pane is drawn here, so everything
+this machine has stays reachable: its clipboard, its files, and the keyboard
+that is really attached.
+
+**Nothing to configure.** asyncssh reads the agent, the keys in `~/.ssh`, and
+`known_hosts`, the way `ssh` does. There is no server mode, no keys of pymux's
+own, and no authentication to design.
+
+**With no path it is the first server of the user who logs in**, which is
+`/tmp/pymux.sock.<user>.0`: a server with no name takes the lowest free number,
+so the first one on a machine is always zero, and most machines have one. That
+is a guess, and the only one that can be made from here — reading which sockets
+are really there means globbing a directory on the far side, which needs a
+command run over the connection. Name the path when the guess is wrong.
+
+**It attaches; it does not start anything.** `ssh://` names a socket that is
+already there. Spawning a server needs that same command on the far side, and
+is the other half of Lillecarl/pymux#90.
+
 ## Tests
 
 A package exposes its own tests through `passthru.checks`. This repository gives
