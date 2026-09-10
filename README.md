@@ -136,6 +136,32 @@ itself, a string is quoted, and `null` writes no line at all.
 takes a command and its own arguments, and a Nix option cannot spell that
 better than the line itself does.
 
+### How a key is written
+
+Either way. `C-a` is the spelling tmux uses, and `ctrl+a` is the chord
+spelling, where `+` joins the keys pressed together. `bind-key`, `send-keys`
+and the `prefix` option all read both.
+
+The chord spelling reaches keys the other one cannot name. `ctrl+home`,
+`shift+f5` and `ctrl+shift+end` are three, and there are twenty-two more:
+tmux's table here writes out ctrl on the four arrows and on no other key
+that a terminal spells out. `send-keys C-Home` used to type the six letters
+into the pane, because a name that reads as nothing is sent as the text it is.
+
+    bind-key ctrl+home  send-keys C-Home
+    send-keys ctrl+shift+end
+    send-keys escape a            # two presses, in order
+
+`pymux/pymux/key_spelling.py` holds the grammar, and
+`pymux/tests/test_key_spelling.py` walks every name the older spelling reaches
+and re-spells it, so the two say the same thing.
+
+`compose-key` opens a box that completes those names and sends the key to the
+pane. It is for a keyboard that cannot type the key at all: a laptop with no
+Home key, no Insert and no function row. It has no key of its own, so bind one:
+
+    bind-key k compose-key
+
 `checks.pyterm-home-manager` judges the module. Nix writes the file it
 generates, and pymux reads it through the same `source-file` a real startup
 runs, then says what each value became.
