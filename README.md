@@ -886,6 +886,17 @@ of the target. So a pymux server answers for itself.
     pymux counters      # what it has done, and what asked for each frame
     pymux dump-stacks   # every thread, every task, and what each waits for
     pymux profile 5     # where its time goes, as text and as HTML
+    pymux set-option log-level debug   # and back with `info`
+
+**The log level moves while the server runs.** `--log-level` is read once,
+before the server starts, which is the wrong moment: a person turns debug
+logging on because a server is already misbehaving, and a restart takes the
+thing they wanted to look at with it. `set-option log-level debug` reaches a
+server that is already running, and writes a line saying when it changed, so the
+log itself records the moment. pymux has no `show-options`, so the level is in
+the first paragraph of `counters` and `profile`:
+
+    log /home/you/.local/state/pymux/server.log, at debug
 
 **`counters` is usually enough.** "Eleven frames a second" says a server is
 busy; "eleven frames a second, and every one because an application asked" says
