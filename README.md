@@ -832,6 +832,73 @@ after a program printed a line, and frames after a key moved the focus.
     less result/log
     $BROWSER result/idle.html
 
+## Asking a running server what it is doing
+
+Everything above measures a server that a check started. **A server a person
+left running for a week is the one that goes wrong**, and until recently
+nothing could ask it anything: the log said what it had done, and nothing said
+what it was doing now.
+
+py-spy is the usual answer and it often cannot be used. It needs `ptrace`, and
+a machine with `kernel.yama.ptrace_scope` at 1 gives that only to an ancestor
+of the target. So a pymux server answers for itself.
+
+    pymux counters      # what it has done, and what asked for each frame
+    pymux dump-stacks   # every thread, every task, and what each waits for
+    pymux profile 5     # where its time goes, as text and as HTML
+
+**`counters` is usually enough.** "Eleven frames a second" says a server is
+busy; "eleven frames a second, and every one because an application asked" says
+what is doing it, which is the whole diagnosis. The `Woke` reasons are what
+carry it.
+
+    --- what it has done, over 2d 4h 11m ---
+
+                                       total per second
+    frames out                        832104      11.03
+    characters in them             418022913       5541
+
+    what asked for a frame             total per second
+    an application asked for a frame  831992      11.02
+    a client reported its size            83       0.00
+
+**`dump-stacks` adds the half a thread dump cannot show.** One thread runs the
+event loop, so a thread dump of a server says "the loop is polling" and no
+more. The work of a server is in its asyncio tasks, and this names each one and
+the line it is waiting on.
+
+**`profile` watches without stopping.** It returns at once and the server keeps
+serving; the loop stops the profiler a few seconds later and writes the file.
+It is pyinstrument with `async_mode="disabled"`, which is the mode that
+interleaves every coroutine rather than following one context, and the tasks
+are written beside it — so the profile says which code burned the processor and
+the tasks say what everything else was waiting for.
+
+### When the loop is too wedged to answer
+
+A command needs a loop that still turns, and a wedged loop is exactly when a
+stack is worth having. So a server also takes **`SIGUSR1`**, through
+`faulthandler`, whose handler is C and runs when the interpreter is stuck
+inside a call no Python code will return from.
+
+    kill -USR1 $(pgrep -f 'pymux.*server')
+    less ~/.local/state/pymux/stacks-<pid>.log
+
+It gives less than `dump-stacks` and it gives it always. Everything lands
+beside the log, because a dump is read with the log around it.
+
+### Attaching a real debugger
+
+Python 3.14 can attach one to a running process — `python -m pdb -p <pid>`,
+and `sys.remote_exec` under it (PEP 768). That needs `ptrace` of the server,
+which the machines above deny, and a server can say otherwise:
+
+    pymux set-option allow-remote-debugging on
+
+**Off by default, and it is not a small permission.** It lets any process
+running as you read this server's memory and write to it, and a server holds
+every pane's scrollback. The three commands above need none of it.
+
 ## umbrella
 
 [umbrella](https://github.com/Lillecarl/umbrella) is what makes a collection
