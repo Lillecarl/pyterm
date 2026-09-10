@@ -198,11 +198,17 @@ class Terminal(Widget, can_focus=True):
         resize_func: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
         may_resize: Optional[Callable[[], bool]] = None,
         get_history_limit: Optional[Callable[[], int]] = None,
+        unreadable_key_func: Optional[Callable[[object, int, str], None]] = None,
         name: Optional[str] = None,
         id: Optional[str] = None,
         classes: Optional[str] = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
+        # Called for a key this pane reads as something else, or not at
+        # all. The same hook ptterm takes, so a key that does not fit
+        # reads alike whichever widget drew the pane.
+        # Lillecarl/pymux#238.
+        self.unreadable_key_func = unreadable_key_func
 
         self._backend = backend or create_backend(
             command or ["/bin/bash"], before_exec_func
@@ -341,7 +347,9 @@ class Terminal(Widget, can_focus=True):
 
         data = data_of(event)
         if data:
-            self.process.write_input(self.emulator.encode_key(data))
+            self.process.write_input(
+                self.emulator.encode_key(data, report=self.unreadable_key_func)
+            )
 
     def on_paste(self, event: events.Paste) -> None:
         "Hand pasted text over, bracketed when the program asked for it."
