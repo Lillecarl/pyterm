@@ -187,6 +187,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
+    nix build --file . checks.pymux-busy    # what a pane nobody looks at costs
     nix build --file . checks.pymux-keystroke # a keystroke, in instructions
     nix build --file . checks.pymux-latency # the same keystroke, in milliseconds
     nix build --file . checks.pymux-turns   # the same keystroke, in loop turns
@@ -685,8 +686,42 @@ straight away, and called every pane a leak.
 
 A detach on the `connection` route has the same shape one layer up: closing the
 client end asks the connection to close, and the application it drew with stops
-on a later turn of the loop. Both waits are in `tests/what_leaks.py`, and both
-are the reason a red run is worth believing.
+on a later turn of the loop. And a callback that asyncio has already queued holds
+everything it closes over until it runs, so the check waits for the loop's queue
+to empty as well. All three waits are in `tests/what_leaks.py`, and they are the
+reason a red run is worth believing.
+
+### What a pane nobody looks at costs
+
+`checks.pymux-busy` runs a real animating program in a window the client does not
+look at, and measures how much of one core the server takes. cmatrix in a
+background window used to peg a core and draw five frames in five seconds, while
+`ptyhost` polled for an idle loop that never comes (Lillecarl/pymux#253):
+
+| program | before | after | frames drawn in 5s |
+| --- | --- | --- | --- |
+| cmatrix | 100% of a core | 19% | 5 -> 26 |
+| nyancat | 100% | 10% | 4 -> 26 |
+| pipes | 100% | 8% | 4 -> 26 |
+| tty-clock | 100% | 7% | 4 -> 26 |
+
+**The programs are real ones out of nixpkgs, and that is the point.** A writer in
+a `python -c` loop does not reproduce the fault: unthrottled it saturates the
+parser on its own, and throttled it reads the same either way. What reproduces it
+is a program writing a screenful at a steady rate.
+
+**And something has to be animating in the window that is watched.** That is what
+keeps the loop's queue full. With an idle watched pane the fault hides
+completely, and the first shape of this check measured 7% either way and would
+have called the bug fixed.
+
+The unit is a fraction of one core, which is a second, which belongs to the
+machine that counted it. So the ceiling is loose on purpose: it separates 100%
+from 12%, and it is not a budget to tune.
+
+    PYMUX_BUSY_PROGRAMS=cmatrix nix build --file . checks.pymux-busy.run
+    PYMUX_BUSY_SECONDS=20 nix build --file . checks.pymux-busy.run
+    PYMUX_BUSY_CEILING=0.3 nix build --file . checks.pymux-busy
 
 **The question is asked while the session is still standing**, which is what
 makes a leak into the server visible at all. It used to be asked after the

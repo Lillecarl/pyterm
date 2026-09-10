@@ -178,6 +178,14 @@ rec {
     # what survived, and the object count says what grows without
     # dying.
     pymux-leaks = pymux.checks.leaks;
+    # What a pane that animates costs when nobody is looking at it. It
+    # runs the real programs -- cmatrix, tty-clock, nyancat, pipes --
+    # because a writer in a loop does not write the way one of those
+    # does, and the fault it caught only shows for a program that
+    # writes a screenful at a steady rate. The unit is a fraction of
+    # one core, so the ceiling is loose: it separates 100% from 12%,
+    # and is not a budget to tune.
+    pymux-busy = pymux.checks.busy;
     # Where the time of a frame goes, sampled with pyinstrument while a
     # real server draws for a real client. Not a gate and it judges
     # nothing: a sampling profiler reports wall clock, and this sandbox
