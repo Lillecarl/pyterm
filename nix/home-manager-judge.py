@@ -59,9 +59,8 @@ def main(path):
             )
 
     # The binding the check put in `extraConfig`. It proves that the lines
-    # after the settings arrive as commands and not as text. The key of
-    # `custom_bindings` is (needs prefix, key name).
-    if (True, "|") not in pymux.key_bindings_manager.custom_bindings:
+    # after the settings arrive as commands and not as text.
+    if pymux.key_bindings_manager.the_binding_on("|", needs_prefix=True) is None:
         problems.append("extraConfig: the bind-key line bound nothing")
 
     if problems:
