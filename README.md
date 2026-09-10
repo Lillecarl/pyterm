@@ -189,6 +189,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
     nix build --file . checks.pymux-keystroke # a keystroke, in instructions
     nix build --file . checks.pymux-latency # the same keystroke, in milliseconds
+    nix build --file . checks.pymux-turns   # the same keystroke, in loop turns
     nix build --file . checks.pymux-profile # where the time of a frame goes
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
@@ -778,6 +779,42 @@ than a mean — the tail is what a person notices.
     nix build --file . checks.pymux-latency.run
     PYMUX_LATENCY_SAMPLES=500 nix build --file . checks.pymux-latency.run
     PYMUX_ROUTE=integrated nix build --file . checks.pymux-latency.run
+
+### How many turns of the event loop a keystroke costs
+
+The gap between the two numbers above was 45% of a keystroke, and neither of
+them could say what it was: an instruction count counts work, and waiting is
+the absence of work. `checks.pymux-turns` is the number that can. It goes up
+when pymux hands control back and waits, and the code decides it rather than
+the machine.
+
+It drives the program `checks.pymux-latency` drives, over a real
+`ServerConnection`, on an event loop that counts `_run_once`. Each turn also
+names the callbacks it ran, so a total that moved points at a hop.
+
+**A keystroke is eight turns**, five hundred times out of five hundred on an
+idle machine:
+
+    the server reads the "in" packet            1
+    the application takes the key, and writes
+      it to the pane's pty                      1
+    the pane answers, and the screen changes    1
+    prompt_toolkit postpones the redraw         3
+    the frame goes out as an "out" packet       1
+    the client's reader takes it                1
+
+Under sixteen processes of `yes` it is eight about six times in ten and eleven
+the rest. A keystroke asks for a frame twice — the key press invalidates, and
+the pane's answer invalidates. When the answer lands before the loop polls
+again, one redraw carries both; when it misses that poll, the redraw of the key
+press runs by itself and draws nothing, and the answer pays for a second one.
+
+So the check holds the **shortest** keystroke of a run and judges nothing else:
+load can only add the second redraw, never take a turn away.
+
+    nix build --file . checks.pymux-turns.run
+    PYMUX_TURNS_SAMPLES=1000 nix build --file . checks.pymux-turns.run
+    PYMUX_TURNS_TRACE=3 nix build --file . checks.pymux-turns.run
 
 ### Where the time of a frame goes
 

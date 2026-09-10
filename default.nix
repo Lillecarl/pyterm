@@ -190,6 +190,13 @@ rec {
     # the third of the three numbers Lillecarl/pymux#8 asked for, and
     # the only one an instruction count cannot give.
     pymux-latency = pymux.checks.latency;
+    # How many turns of the event loop one keystroke costs. The number
+    # in between the other two: an instruction count sees work and no
+    # waiting, a millisecond sees the waiting and belongs to one
+    # machine, and a turn of the loop is decided by the code. It holds
+    # the shortest keystroke of the run to a number, because a loaded
+    # machine can only add turns and never take one away.
+    pymux-turns = pymux.checks.turns;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
     # process and no socket between them.
