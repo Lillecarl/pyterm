@@ -37,6 +37,12 @@ rec {
   # in behind it. Lillecarl/pymux#85.
   ptyhost = pkgs.python3Packages.callPackage ./ptyhost { };
 
+  # The test equipment the collection's suites share: the seats, the
+  # drivers, the budgets. It takes the floor the widgets take and never
+  # a layer above it, so every repository's checks can take it as an
+  # input without a cycle. Lillecarl/pymux#274.
+  pyterm-pytest = pkgs.python3Packages.callPackage ./pyterm-pytest { };
+
   ptterm = pkgs.python3Packages.callPackage ./ptterm {
     inherit prompt-toolkit ptyhost pyte;
   };
@@ -120,6 +126,10 @@ rec {
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
     ptyhost-unit = ptyhost.checks.unit;
+    # The equipment the suites share: the seats, the drivers, the
+    # budgets. Its own gate is the ceiling; the suites that use it are
+    # the real judges.
+    pyterm-pytest-unit = pyterm-pytest.checks.unit;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.
