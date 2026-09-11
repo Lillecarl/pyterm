@@ -940,11 +940,19 @@ count says whether something got dearer; a profile says where.
 Server and client are in one process, which is what `pymux integrated` is, so a
 frame is followed the whole way instead of up to a socket. Three phases, because
 "what a frame costs" is three questions: frames with nothing changed, frames
-after a program printed a line, and frames after a key moved the focus.
+after a program printed a line, and frames after a key moved the focus. A fourth
+feeds a few scattered cells a frame, which is what an animating pane is, and a
+fifth runs a real program in the pane and times render and parse inside the live
+loop.
 
     PYMUX_PROFILE_PANES=16 nix build --file . checks.pymux-profile.run
     less result/log
     $BROWSER result/idle.html
+
+    PYMUX_PROFILE_ROWS=59 PYMUX_PROFILE_COLUMNS=187 PYMUX_PROFILE_PHASES=sparse \
+      nix build --file . checks.pymux-profile.run
+    PYMUX_PROFILE_ANIMATED="cmatrix -u 2" PYMUX_PROFILE_ANIMATED_SECONDS=6 \
+      nix build --file . checks.pymux-profile.run
 
 ## Asking a running server what it is doing
 
