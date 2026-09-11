@@ -205,6 +205,9 @@ rec {
     # the shortest keystroke of the run to a number, because a loaded
     # machine can only add turns and never take one away.
     pymux-turns = pymux.checks.turns;
+    # TEMPORARY scratch measurement for Lillecarl/pymux#258. Remove it
+    # with the script and the check it runs.
+    pymux-wire = pymux.checks.wire;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
     # process and no socket between them.
