@@ -98,6 +98,7 @@ rec {
         "pymux-chrome-pictures"
         "pymux-latency"
         "pymux-profile"
+        "pymux-theme-pictures"
         "pymux-vttest-pictures"
         "pyte-roaming"
       ];
@@ -226,6 +227,10 @@ rec {
     # is no bare side to subtract from. Reading the pictures is the
     # work. Lillecarl/pymux#161.
     pymux-chrome-pictures = pymux.checks.chromePictures;
+    # Every theme, with the demo application in the pane: the whole
+    # gallery in `$out`, for a person to read side by side. Not a gate
+    # either. Lillecarl/pymux#194, Lillecarl/pymux#195.
+    pymux-theme-pictures = pymux.checks.themePictures;
     # Not a gate on its own: it judges the run against a recorded list
     # of the tests that fail today, and complains at a difference in
     # either direction.
