@@ -67,6 +67,8 @@ rec {
     # package set `mesa` is a python binding that nixpkgs has marked
     # broken, so it has to come from here.
     inherit (pkgs) mesa;
+    # The readers of the clipboard fence.
+    inherit (pkgs) wl-clipboard xclip;
   };
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
@@ -113,6 +115,41 @@ rec {
         "pyte-roaming"
       ];
     };
+  };
+
+  # The site: the galleries of everything pymux draws, laid out for a
+  # person to read in a browser. The picture checks are galleries
+  # already -- runs whose output is a tree of pictures beside their
+  # logs -- and this is the page around them: one section per check.
+  # The GitHub Action deploys it, so the pictures are read without a
+  # checkout of the collection.
+  site = pkgs.callPackage ./nix/site.nix {
+    sections = [
+      {
+        name = "panes";
+        title = "A terminal, without and with pymux";
+        text = "Every fixture photographed twice: the program bare in the terminal, and the same program in a pane. The difference between the two is what pymux adds, and the still checks are judged against the recorded counts of exactly these differences.";
+        run = checks.pymux-pictures.run;
+      }
+      {
+        name = "chrome";
+        title = "The chrome";
+        text = "What pymux draws around a pane: the status line, a pane's title bar, the command palette, the overlay pane, the clock. This check judges nothing; reading the pictures is the work.";
+        run = checks.pymux-chrome-pictures.run;
+      }
+      {
+        name = "themes";
+        title = "The themes";
+        text = "Every theme `set-option theme` takes, in six terminals: the three dark ones and the same three on a light background, with the demo application in the pane. A theme that left the chrome hardcoded would show here.";
+        run = checks.pymux-theme-pictures.run;
+      }
+      {
+        name = "vttest";
+        title = "vttest, in a pane";
+        text = "The walker drives vttest through its screens with pymux in the chain. The screens that differ are recorded in tests/vttest-picture-differences.txt, each with the reason above it.";
+        run = checks.pymux-vttest-pictures.run;
+      }
+    ];
   };
 
   # A suite is named `<package>-<what it covers>`, and `unit` is the one that
