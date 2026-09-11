@@ -22,6 +22,8 @@ let
       };
 in
 rec {
+  inherit pkgs;
+  
   umbrella = (import umbrellaSource { inherit pkgs; }).umbrella;
 
   # Each submodule carries its own package definition and takes its siblings
@@ -59,6 +61,8 @@ rec {
 
   pymux = pkgs.python3Packages.callPackage ./pymux {
     inherit prompt-toolkit ptterm;
+    # The shared rig, whose seats the picture scripts borrow.
+    inherit pyterm-pytest;
     # The one that draws, which its checks need for kitty. In the python
     # package set `mesa` is a python binding that nixpkgs has marked
     # broken, so it has to come from here.
