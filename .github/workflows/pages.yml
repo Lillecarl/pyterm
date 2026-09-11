@@ -27,12 +27,20 @@ jobs:
         timeout-minutes: 10
       - uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+          # <nixpkgs> is what default.nix imports, and the runner has
+          # no channel of its own: the action fetches the unstable
+          # channel and puts it on NIX_PATH.
+          nix_path: nixpkgs=channel:nixpkgs-unstable
         timeout-minutes: 15
       - name: Build the galleries and the page around them
         run: nix build --file . site -o site --print-build-logs
         timeout-minutes: 110
+      - uses: actions/configure-pages@v5
+        with:
+          # The repo has no Pages set by hand; the run asks for it, so
+          # the first push is the whole of the setup.
+          enablement: true
+        timeout-minutes: 10
       - name: Prepare the Pages artifact
         run: |
           mkdir public
