@@ -26,3 +26,6 @@
 	path = txterm
 	url = https://github.com/Lillecarl/txterm.git
 	branch = main
+[submodule "pyterm-pytest"]
+	path = pyterm-pytest
+	url = https://github.com/Lillecarl/pyterm-pytest.git
