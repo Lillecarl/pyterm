@@ -148,7 +148,7 @@ rec {
         # Lillecarl/pymux#284.
         run = pkgs.symlinkJoin {
           name = "pymux-theme-pictures";
-          paths = builtins.map (combo: combo.value.run) (
+          paths = builtins.map (combo: combo.run) (
             builtins.attrValues pymux.checks.themePictureCombos
           );
         };
