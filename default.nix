@@ -141,7 +141,17 @@ rec {
         name = "themes";
         title = "The themes";
         text = "Every theme `set-option theme` takes, in six terminals: the three dark ones and the same three on a light background, with the demo application in the pane. A theme that left the chrome hardcoded would show here.";
-        run = checks.pymux-theme-pictures.run;
+        # The gallery builds in pieces, one derivation per terminal
+        # and per batch of themes, and the page sees them gathered:
+        # the pieces write disjoint trees, and a rerun of the site
+        # rebuilds only the combos that failed.
+        # Lillecarl/pymux#284.
+        run = pkgs.symlinkJoin {
+          name = "pymux-theme-pictures";
+          paths = builtins.map (combo: combo.value.run) (
+            builtins.attrValues pymux.checks.themePictureCombos
+          );
+        };
       }
       {
         name = "vttest";
