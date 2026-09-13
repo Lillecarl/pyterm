@@ -17,11 +17,11 @@
       "type": "github"
     },
     "ptyhost": {
-      "lastModified": 1789311021,
-      "narHash": "sha256-L60Brl36StEy6vIWannQ8EfCeyqBBbORefJcVrnwGPc=",
+      "lastModified": 1789311456,
+      "narHash": "sha256-5uaePv4QP2FZp59A00096gWysMBO9zz0hGbkljZbSUo=",
       "owner": "Lillecarl",
       "repo": "ptyhost",
-      "rev": "7aba6cc59810eff39497ba66a04677f5aea02884",
+      "rev": "2fd5f2c078ec1851b326d5287b824fbe59ac20f8",
       "type": "github"
     },
     "pymux": {
