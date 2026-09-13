@@ -2,64 +2,61 @@
   pkgs ? import <nixpkgs> { },
 }:
 let
-  # umbrella drives this collection: it keeps a submodule commit that no remote
-  # has out of the pointers recorded here, and makes worktreespaces that share
-  # storage instead of cloning every repository again.
+  # The eight sources the umbrella owns, each one a directory.
   #
-  # It is a submodule too, so it can be edited in place like the rest. It is
-  # also the tool that checks the submodules out, so a clone made without them
-  # has to be able to build it anyway: when the directory is not there, fall
-  # back to the commit this repository pins.
-  umbrellaSource =
-    if builtins.pathExists ./umbrella/default.nix then
-      ./umbrella
-    else
-      pkgs.fetchFromGitHub {
-        owner = "Lillecarl";
-        repo = "umbrella";
-        rev = "2302d8d376a8ce415fe544416958ba24f05922f6";
-        hash = "sha256-y/Yownj5+DRPWKo3fATxPxpacNsP0SvKwU0DH483OYE=";
-      };
+  # `nix/sources.nix` says where each comes from and `nix/sources.lock` says
+  # which revision; `nix/resolve.nix` joins them. A working copy that holds
+  # anything is read at the revision the lock names, so a build here and a
+  # build in CI agree. UMBRELLA_DEV names the sources to read as plain
+  # directories instead, and `.envrc` sets it to `all`: the loop here is to
+  # edit a working copy and build without committing.
+  #
+  # So a clone with no working copies builds from the lock, and nothing has
+  # to be checked out first.
+  sources = import ./nix/wire.nix { };
 in
 rec {
-  inherit pkgs;
-  
-  umbrella = (import umbrellaSource { inherit pkgs; }).umbrella;
+  inherit pkgs sources;
+
+  # umbrella drives this collection. It is a source like the rest, so it can
+  # be edited in place, and it is also the tool that fetches the others --
+  # which the lock makes possible without it.
+  umbrella = (import sources.umbrella { inherit pkgs; }).umbrella;
 
   # Each submodule carries its own package definition and takes its siblings
   # as arguments, so nothing in them points at anything here. Built alone they
   # would get their dependencies from nixpkgs. Assembled here they get each
   # other, which is the point of keeping them in one checkout.
-  pyte = pkgs.python3Packages.callPackage ./pyte { };
+  pyte = pkgs.python3Packages.callPackage sources.pyte { };
 
-  prompt-toolkit = pkgs.python3Packages.callPackage ./prompt-toolkit { };
+  prompt-toolkit = pkgs.python3Packages.callPackage sources.prompt-toolkit { };
 
   # The layer that runs a program on a pty. It depends on nothing, which
   # is the point: two widgets need it, and neither may drag its toolkit
   # in behind it. Lillecarl/pymux#85.
-  ptyhost = pkgs.python3Packages.callPackage ./ptyhost { };
+  ptyhost = pkgs.python3Packages.callPackage sources.ptyhost { };
 
   # The test equipment the collection's suites share: the seats, the
   # drivers, the budgets. It takes the floor the widgets take and never
   # a layer above it, so every repository's checks can take it as an
   # input without a cycle. Lillecarl/pymux#274.
-  pyterm-pytest = pkgs.python3Packages.callPackage ./pyterm-pytest { };
+  pyterm-pytest = pkgs.python3Packages.callPackage sources.pyterm-pytest { };
 
-  ptterm = pkgs.python3Packages.callPackage ./ptterm {
+  ptterm = pkgs.python3Packages.callPackage sources.ptterm {
     inherit prompt-toolkit ptyhost pyte;
   };
 
   # The second front end: the same screen, drawn with Textual. It takes
   # the pure layer from ptterm and no prompt_toolkit comes with it, which
   # is what Lillecarl/pymux#82 asks for.
-  txterm = pkgs.python3Packages.callPackage ./txterm {
+  txterm = pkgs.python3Packages.callPackage sources.txterm {
     inherit pyte ptyhost;
     # Not a dependency of the package: its suite runs the conformance
     # suite of xterm, which is built once in ptterm.
     inherit ptterm;
   };
 
-  pymux = pkgs.python3Packages.callPackage ./pymux {
+  pymux = pkgs.python3Packages.callPackage sources.pymux {
     inherit prompt-toolkit ptterm;
     # The shared rig, whose seats the picture scripts borrow.
     inherit pyterm-pytest;

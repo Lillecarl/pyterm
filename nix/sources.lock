@@ -1,0 +1,69 @@
+{
+  "sources": {
+    "prompt-toolkit": {
+      "lastModified": 1789217658,
+      "narHash": "sha256-gE3/ShPEdOzjasRpqu2RV5xDmcqLsnbPKQcwVnhB19w=",
+      "owner": "Lillecarl",
+      "repo": "python-prompt-toolkit",
+      "rev": "4dca030106e5d5ceb9c26627effb2ae666040b56",
+      "type": "github"
+    },
+    "ptterm": {
+      "lastModified": 1789300372,
+      "narHash": "sha256-C4zO8orxHUV+UJY8AKiBUMF0u+u/UlARErNjclBWODE=",
+      "owner": "Lillecarl",
+      "repo": "ptterm",
+      "rev": "2fa1e6c66a824868c0a1659f90f70b1e28bb98e7",
+      "type": "github"
+    },
+    "ptyhost": {
+      "lastModified": 1789300372,
+      "narHash": "sha256-8ye9uCG8BSE3PJ84703caH/xG5gxRvClmyc6bRzATQ0=",
+      "owner": "Lillecarl",
+      "repo": "ptyhost",
+      "rev": "9de4dd950040aaea6b8f2ca977c3743d6f9b0edc",
+      "type": "github"
+    },
+    "pymux": {
+      "lastModified": 1789300546,
+      "narHash": "sha256-UYvIUxTmpIFjzobBJhvEv4oT4z4cytd/rHAvAbHKibA=",
+      "owner": "Lillecarl",
+      "repo": "pymux",
+      "rev": "5f77d7d68e52cd00c972577ff9640cdf2c0c1918",
+      "type": "github"
+    },
+    "pyte": {
+      "lastModified": 1789220556,
+      "narHash": "sha256-8ETXL5f1d0TY/HcAddiQ3kXSE6GS6xOArhAIzjDQc+U=",
+      "owner": "Lillecarl",
+      "repo": "pyte",
+      "rev": "cc7590422a0f2432191b9bc8ffd46e5360ffd4f8",
+      "type": "github"
+    },
+    "pyterm-pytest": {
+      "lastModified": 1789156794,
+      "narHash": "sha256-D9uLNkGOKBLPs8D5xI9wj5mgjgWK1/4z3dyRZymd0j8=",
+      "owner": "Lillecarl",
+      "repo": "pyterm-pytest",
+      "rev": "c02a59eb220a162ea716d9a7fc7a86bd4a5939d5",
+      "type": "github"
+    },
+    "txterm": {
+      "lastModified": 1789040973,
+      "narHash": "sha256-3UXE8zVxXxhhkoEBOhA/dz1YErI07BsCqtfylNv0hRE=",
+      "owner": "Lillecarl",
+      "repo": "txterm",
+      "rev": "452ad2cc92f57d786551edebd4da309bda6e9291",
+      "type": "github"
+    },
+    "umbrella": {
+      "lastModified": 1789048351,
+      "narHash": "sha256-t3+DOqDKQfXTt+UXwyh9L9Z2OhYDVrodwXVCtsi43d0=",
+      "owner": "Lillecarl",
+      "repo": "umbrella",
+      "rev": "8512b6eda19ce7f7af20f82f37e28913302a841f",
+      "type": "github"
+    }
+  },
+  "version": 1
+}

@@ -13,10 +13,9 @@
 # for the knobs that narrow a run, and a flake evaluates purely and would see
 # none of them. `nix build --file . checks.all` is how the tests are run.
 #
-# A flake also sees only what git tracks, and the contents of a submodule are
-# not that, so even a package build has to ask for them by name:
-#
-#     nix build '.?submodules=1#pymux'
+# The sources are not in this repository at all: `nix/sources.lock` names a
+# revision and a narHash for each, and the build fetches them. So a flake
+# build needs nothing asked for by name.
 {
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   outputs =
@@ -49,10 +48,10 @@
       # so it needs no nixpkgs of its own.
       #
       # The default of its `package` option builds pymux out of the source
-      # this flake was evaluated from. A flake sees only what git tracks,
-      # so that source needs the submodules asked for by name:
+      # this flake was evaluated from, which resolves every project through
+      # `nix/sources.lock`:
       #
-      #     pyterm.url = "git+https://github.com/Lillecarl/pyterm?submodules=1";
+      #     pyterm.url = "github:Lillecarl/pyterm";
       inherit (import ./. { }) homeManagerModules;
     };
 }

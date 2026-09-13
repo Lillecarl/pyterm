@@ -1,5 +1,7 @@
 result
 result-*
+# `nix build -o <name>-run` leaves these: a check's run, kept to read.
+*-run
 __pycache__/
 .direnv/
 /.claude/settings.local.json

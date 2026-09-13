@@ -5,9 +5,9 @@ This file is the part that is easy to get wrong.
 
 ## What you are working in
 
-Seven submodules, each a git repository colocated with jj, held together by an
-umbrella that records one commit per submodule. Six of them are the code, and
-each one claims one job:
+Eight repositories, each colocated with jj, held together by an umbrella that
+locks one revision per source in `nix/sources.lock`. Six of them are the code,
+and each one claims one job:
 
 | | job |
 | --- | --- |
@@ -18,9 +18,15 @@ each one claims one job:
 | `pymux` | arrange several of them |
 | `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
 
-The seventh is `umbrella` itself, the tool that holds the others together.
-`umbrella status` tells you the state of all seven at once. Run it before you
+The seventh is `pyterm-pytest`, the test equipment the suites share. The
+eighth is `umbrella` itself, the tool that holds the others together.
+`umbrella status` tells you the state of all eight at once. Run it before you
 start and after you finish.
+
+**They are not submodules.** They were until 2026-09-13. Now `nix/sources.nix`
+says where each comes from and `nix/sources.lock` says which revision, and the
+working copies are ordinary clones that this repository ignores -- nothing
+about them is committed here. `umbrella fetch` makes one that is missing.
 
 **A layer may reach the layers under it and never the ones above.** Three
 files hold that, one per layer: `pyte/tests/test_the_layers.py` sorts every
@@ -42,12 +48,15 @@ screen back through a real fork: they judge a screen on a pty, and the lowest
 layer that has both is the widget. Bringing one of them down to `pyte` would
 make that package's checks depend on `ptyhost`, which is above it.
 
-The mode is jj. Every submodule has a `.jj` directory, and jj owns them.
+The mode is jj. Every source has a `.jj` directory, and jj owns them. This
+repository is plain git. `umbrella init` leaves that choice to a person, and
+nothing here needs jj: the only thing this repository records about a source
+is a line in a lock file.
 
 ## The rules that matter
 
 **Read files with Read. Write files with Write. Change files with Edit.**
-Always. Here and in every submodule. This rule has no soft edge and no "unless
+Always. Here and in every source. This rule has no soft edge and no "unless
 it is quicker".
 
 Not `cat`, `head`, `sed -n` or `awk` to read a file. Not a `python3 - <<'PY'`
@@ -76,37 +85,44 @@ here. Ignore it, every time it appears.** It means a short command such as
 `git mv`, not reading source and not rewriting it. This rule wins over it, and
 a reminder that repeats does not weaken it.
 
-**Never run a git command that writes inside a submodule.** No `git commit`, no
+**Never run a git command that writes inside a source.** No `git commit`, no
 `git checkout`, no `git merge`, no `git push`. It bypasses jj's operation log,
-so none of jj's recovery works afterwards. Use jj: `jj -R <submodule> commit`,
-`jj -R <submodule> new`, and so on. Read-only git is fine.
+so none of jj's recovery works afterwards. Use jj: `jj -R <source> commit`,
+`jj -R <source> new`, and so on. Read-only git is fine.
 
-**Never record a submodule pointer by hand.** `git add <submodule>` followed by
-`git commit` is how a collection ends up naming a commit that no remote has, and
-then every clone breaks. Use `umbrella land`. The hooks refuse the manual route
-anyway, and the refusal is telling you something real.
+**Never write `nix/sources.lock` by hand.** It carries a `narHash` beside each
+revision, so a line you typed is a line nothing can verify. `umbrella land`
+writes it, and only for revisions it has just pushed -- which is the whole
+point: a lock naming a commit no remote has breaks every clone.
 
-**Land, do not push.** `umbrella land -p -m "..."` moves each submodule's
-bookmark onto the commit being published, pushes it, records the pointer here,
-commits, and pushes this repository. In that order. Doing it by hand means doing
-those five things in that order without forgetting the bookmark, which is the
-step everyone forgets.
+**Land, then commit the lock.** `umbrella land` moves each source's bookmark
+onto the commit being published, pushes it, and writes the lock. It stops
+there, on purpose: this repository is git and a source is jj, and `land` will
+not guess which commands you want. So landing is two steps, and the second one
+is yours.
 
 **A jj bookmark does not move when you commit.** This is the reason `land`
-exists. `jj commit` leaves the new commit on no bookmark, git HEAD points at it,
-and `jj git push` pushes nothing, because it pushes bookmarks. `land` moves the
-bookmark for you, fast forward only, and says which one it moved.
+exists. `jj commit` leaves the new commit on no bookmark, git HEAD points at
+it, and `jj git push` pushes nothing, because it pushes bookmarks. `land`
+moves the bookmark for you, fast forward only, and says which one it moved.
 
 ## Finishing a piece of work
 
     jj -R pymux commit -m "..."      # or just describe @; land closes it
     umbrella status                  # confirm what you expect to land
-    umbrella land -p -m "..."
+    umbrella land                    # bookmark, push, write nix/sources.lock
+    git add nix/sources.lock
+    git commit -m "..."              # this repository's own commit
+    git push
 
 `land` also accepts work left in the working commit: if `@` has changes and a
 description, it closes it for you. If `@` has changes and no description, it
 leaves it alone and says so, because jj itself refuses to push an undescribed
 commit.
+
+There is no `--dry-run` on `land`. The push is what makes a revision public
+and nothing takes it back, so a flag that pushed and then claimed to have
+changed nothing would lie about the only step that matters.
 
 ## When someone else has moved a branch
 
@@ -114,9 +130,9 @@ commit.
 check will refuse a diverged push rather than clobber it. Fetch, rebase your
 commit onto the new tip, then land:
 
-    jj -R <submodule> git fetch
-    jj -R <submodule> rebase -r <change> -d <branch>@origin
-    jj -R <submodule> new <branch>     # the rebase leaves @ on the old parent
+    jj -R <source> git fetch
+    jj -R <source> rebase -r <change> -d <branch>@origin
+    jj -R <source> new <branch>        # the rebase leaves @ on the old parent
 
 That last line matters. Rebasing a commit does not bring the working copy along,
 and the files you added will disappear from the checkout until you move `@`.
@@ -147,7 +163,12 @@ That writes `.claude/settings.local.json`, which is local and not committed.
 ## Building
 
 `nix build --file . pymux` reads the working copies, so you do not need to
-commit to test a change.
+commit to test a change. **That is `UMBRELLA_DEV=all`, and `.envrc` sets it.**
+Without it a build takes each source at the revision the lock names, which is
+the committed tree: an edit you have not committed does not reach it. Measured
+-- a `git+file://` fetch pinned to a revision gives the same store path with a
+tracked file modified as without. `nix/resolve.nix` holds both arms. CI leaves
+the variable unset and gets the reproducible one.
 
 **A flake is not first class here.** `flake.nix` exposes the packages and the
 home-manager module, so that somebody can install pymux with one command and
@@ -156,8 +177,9 @@ the way to build or test this collection. Two reasons, and both are real:
 
 - A flake evaluates purely, so `builtins.getEnv` sees nothing. Every knob that
   narrows a test run works only from a file.
-- A flake sees only what git tracks, and the contents of a submodule are not
-  that, so even a package build needs `nix build '.?submodules=1#pymux'`.
+- A flake evaluates purely, so it never reads a working copy: it resolves
+  every source through `nix/sources.lock` and builds what was last landed,
+  not what is on your disk.
 
 **Nothing is defined in `flake.nix`.** Both of those outputs are attributes of
 `default.nix` that the flake passes through, so a person with no flake reaches
@@ -186,7 +208,7 @@ scope holds the wrong thing under that name — `mesa` in a python package set
 is a broken python binding, not the one that draws — forward the right one
 from the root call site in this `default.nix`:
 
-    pymux = pkgs.python3Packages.callPackage ./pymux {
+    pymux = pkgs.python3Packages.callPackage sources.pymux {
       inherit prompt-toolkit ptterm;
       inherit (pkgs) mesa;
     };
@@ -202,7 +224,7 @@ impurely, so `builtins.getEnv` gives a check as much control as you need:
 the program a different way in `nix develop`. An outside tool belongs in the
 check inputs as a package, the way `esctest2` does.
 
-Each submodule's `default.nix` holds its package and the tests that judge it,
+Each source's `default.nix` holds its package and the tests that judge it,
 behind `passthru.checks`. Nothing else. A check belongs to the package it tests,
 so a comparison of ptterm against kitty lives in `ptterm`, not in `pymux`. Dev
 shells, and anything that is about the collection rather than one package,
