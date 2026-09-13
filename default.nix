@@ -54,20 +54,11 @@ rec {
     inherit prompt-toolkit ptyhost pyte;
   };
 
-  # The second front end: the same screen, drawn with Textual. It takes
-  # the pure layer from ptterm and no prompt_toolkit comes with it, which
-  # is what Lillecarl/pymux#82 asks for.
-  txterm = pkgs.python3Packages.callPackage sources.txterm {
-    inherit pyte ptyhost;
-    # Not a dependency of the package: its suite runs the conformance
-    # suite of xterm, which is built once in ptterm.
-    inherit ptterm;
-  };
-
   # The builders set: every third-party package lifted out of nixpkgs, and
-  # this collection's own sources on top. One source is in it so far -- the
-  # migration goes top down, because a nixpkgs package lifts into this set
-  # and a package of this set cannot go back. Lillecarl/pymux#319.
+  # this collection's own sources on top. The two tops of the graph are in
+  # it so far -- the migration goes top down, because a nixpkgs package
+  # lifts into this set and a package of this set cannot go back.
+  # Lillecarl/pymux#319.
   pythonSet = ps.mkPythonSet {
     inherit python;
 
@@ -82,7 +73,10 @@ rec {
     ]
     ++ ps.nixpkgsRootsFor {
       inherit python;
-      projectRoots = [ sources.pymux ];
+      projectRoots = [
+        sources.pymux
+        sources.txterm
+      ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
       # package, and the set would hold upstream's under our name.
@@ -109,6 +103,18 @@ rec {
         # The readers of the clipboard fence.
         inherit (pkgs) wl-clipboard xclip;
       };
+
+      # The second front end: the same screen, drawn with Textual. It
+      # takes the pure layer from pyte and no prompt_toolkit comes with
+      # it, which is what Lillecarl/pymux#82 asks for -- and the set is
+      # what keeps that true now, because a virtualenv holds exactly what
+      # was asked for and nothing propagates into it.
+      txterm = final.callPackage sources.txterm {
+        inherit (ps) mkProject;
+        # Not a dependency of the package: its suite runs the conformance
+        # suite of xterm, which is built once in ptterm.
+        inherit ptterm;
+      };
     };
   };
 
@@ -117,7 +123,14 @@ rec {
   # the package inside, which is where they are written.
   pymux = pythonSet.mkVirtualEnv "pymux" { pymux = [ "catppuccin" ]; } // {
     inherit (pythonSet.pymux) checks;
-    meta = pythonSet.pymux.meta;
+    inherit (pythonSet.pymux) meta;
+  };
+
+  # The same, for the Textual front end: the venv is what has a runnable
+  # `bin/txterm`, and the checks ride along from the package inside it.
+  txterm = pythonSet.mkVirtualEnv "txterm" { txterm = [ ]; } // {
+    inherit (pythonSet.txterm) checks;
+    inherit (pythonSet.txterm) meta;
   };
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than

@@ -57,11 +57,11 @@
       "type": "github"
     },
     "txterm": {
-      "lastModified": 1789040973,
-      "narHash": "sha256-3UXE8zVxXxhhkoEBOhA/dz1YErI07BsCqtfylNv0hRE=",
+      "lastModified": 1789307089,
+      "narHash": "sha256-5+OV6mGTxSf1S/m996+RZ6ilm7KiLF1MBEmNcjZ80jU=",
       "owner": "Lillecarl",
       "repo": "txterm",
-      "rev": "452ad2cc92f57d786551edebd4da309bda6e9291",
+      "rev": "11ce42562777abea9a1456bbff41306ce680ca33",
       "type": "github"
     },
     "umbrella": {
