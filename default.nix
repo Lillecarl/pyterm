@@ -31,36 +31,23 @@ rec {
   # which the lock makes possible without it.
   umbrella = (import sources.umbrella { inherit pkgs; }).umbrella;
 
-  # Each submodule carries its own package definition and takes its siblings
-  # as arguments, so nothing in them points at anything here. Built alone they
-  # would get their dependencies from nixpkgs. Assembled here they get each
-  # other, which is the point of keeping them in one checkout.
-  # The test equipment the collection's suites share: the seats, the
-  # drivers, the budgets. It takes the floor the widgets take and never
-  # a layer above it, so every repository's checks can take it as an
-  # input without a cycle. Lillecarl/pymux#274.
-  pyterm-pytest = pkgs.python3Packages.callPackage sources.pyterm-pytest { };
-
   # The builders set: every third-party package lifted out of nixpkgs, and
-  # this collection's own sources on top. The two tops of the graph are in
-  # it so far -- the migration goes top down, because a nixpkgs package
-  # lifts into this set and a package of this set cannot go back.
-  # Lillecarl/pymux#319.
+  # this collection's own sources on top.
+  #
+  # All seven are on it now. Each source carries its own package definition
+  # and takes its siblings as arguments, so nothing in them points at
+  # anything here; assembled here they get each other, which is the point of
+  # keeping them in one checkout. What changed is how: a virtualenv holds
+  # exactly what was asked for, instead of a PYTHONPATH holding whatever
+  # propagated. Lillecarl/pymux#319.
   pythonSet = ps.mkPythonSet {
     inherit python;
 
-    # The sources that have not converted yet, as nixpkgs built them. They
-    # are named here rather than looked up, because `nixpkgsRootsFor`
-    # resolves a name against nixpkgs and nixpkgs has a `prompt-toolkit`, a
-    # `pyte` and a `ptyhost` of its own.
-    #
-    # The one source still on nixpkgs. Its checks borrow tools from its
-    # passthru, and `hacks.nixpkgsPrebuilt` keeps a package's files and not
-    # its passthru, so pymux takes the nixpkgs copy for those.
-    nixpkgsRoots = [
-      pyterm-pytest
-    ]
-    ++ ps.nixpkgsRootsFor {
+    # Nothing of ours is named here any more. The list is what the seven
+    # `pyproject.toml` files ask for and nixpkgs supplies -- wcwidth,
+    # pytest, textual, asyncssh and the rest -- read out of the
+    # declarations rather than out of a build.
+    nixpkgsRoots = ps.nixpkgsRootsFor {
       inherit python;
       projectRoots = [
         sources.pymux
@@ -69,6 +56,7 @@ rec {
         sources.pyte
         sources.prompt-toolkit
         sources.ptyhost
+        sources.pyterm-pytest
       ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
@@ -85,6 +73,14 @@ rec {
     };
 
     overlay = final: _prev: {
+      # The test equipment the collection's suites share: the seats, the
+      # drivers, the budgets. It takes the floor the widgets take and never
+      # a layer above it, so every repository's checks can take it as an
+      # input without a cycle. Lillecarl/pymux#274.
+      pyterm-pytest = final.callPackage sources.pyterm-pytest {
+        inherit (ps) mkProject;
+      };
+
       # The toolkit under ptterm and pymux, and the one source here that is
       # somebody else's. It is packaged from this set like the rest, and its
       # own `pyproject.toml` is read exactly as upstream wrote it: a
@@ -121,10 +117,6 @@ rec {
 
       pymux = final.callPackage sources.pymux {
         inherit (ps) mkProject;
-        # pyterm-pytest as nixpkgs built it, for the tools its checks borrow
-        # from its passthru. The set holds it too, and that copy is what
-        # pymux imports.
-        inherit pyterm-pytest;
         # The one that draws, which its checks need for kitty.
         inherit (pkgs) mesa;
         # The readers of the clipboard fence.
@@ -170,6 +162,8 @@ rec {
   prompt-toolkit = pythonSet.prompt-toolkit;
 
   ptyhost = pythonSet.ptyhost;
+
+  pyterm-pytest = pythonSet.pyterm-pytest;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
