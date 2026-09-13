@@ -31,9 +31,12 @@ them matters, say which.
 
 Two more that are easy to blur:
 
-- **the server** is the `Pymux` object and the process holding it. **the
-  session** is what that server holds: one `Arrangement`, its windows,
-  and the options. One server, one session, several clients.
+- **the server** is the `Pymux` object and the process holding it. **a
+  session** is one of what that server holds: `session.Session`, with
+  one `Arrangement`, its windows and its environment. One server, n
+  sessions, m clients, and each client looks at one session
+  (`ClientState.session`). The options are the server's, not the
+  session's. Lillecarl/pymux#323.
 - **the frame** is one render for one client. **the plan** is where the
   panes are, which every client of one window shares.
 
@@ -225,11 +228,15 @@ One picture, and then three paths through it.
         +---- a socket, or nothing at all ----+
         |     ("pymux integrated" puts both ends in one process)
         v
-    Pymux -- the server, and one session
+    Pymux -- the server
         |
-        +-- Arrangement -- every Window, and the tree of Panes in each
+        +-- Session, one per session of this server
+        |     |
+        |     +-- Arrangement -- every Window, and the tree of Panes in each
         |
         +-- ClientState, one per attached client
+              |
+              +-- session: which Session this client looks at
               |
               +-- Application (prompt_toolkit): the focus, the keys
               +-- LayoutManager: this client's whole screen
