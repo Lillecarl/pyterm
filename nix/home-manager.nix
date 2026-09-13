@@ -39,7 +39,7 @@ let
   cfg = config.programs.pymux;
 
   # pymux splits a line with `shlex.split`
-  # (`pymux/pymux/commands/commands.py:87`), so a value that holds a space,
+  # (`pymux/pymux/commands/__init__.py:120`), so a value that holds a space,
   # a quote or a leading "#" has to arrive quoted. `status-left` is the one
   # that shows it: `'[#h:#S] '` holds a "#", a ":" and a trailing space.
   spell =

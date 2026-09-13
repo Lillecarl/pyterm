@@ -17,7 +17,7 @@ only reading the value back sees it.
 import shlex
 import sys
 
-from pymux.commands.commands import handle_command
+from pymux.commands import handle_command
 from pymux.main import Pymux
 
 #: What the check asked the module to write, and what each one has to be
@@ -60,7 +60,7 @@ def main(path):
 
     # The binding the check put in `extraConfig`. It proves that the lines
     # after the settings arrive as commands and not as text.
-    if pymux.key_bindings_manager.the_binding_on("|", needs_prefix=True) is None:
+    if pymux.key_bindings_manager.binding_on("|", needs_prefix=True) is None:
         problems.append("extraConfig: the bind-key line bound nothing")
 
     if problems:
