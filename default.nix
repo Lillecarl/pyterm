@@ -35,11 +35,6 @@ rec {
   # as arguments, so nothing in them points at anything here. Built alone they
   # would get their dependencies from nixpkgs. Assembled here they get each
   # other, which is the point of keeping them in one checkout.
-  # The layer that runs a program on a pty. It depends on nothing, which
-  # is the point: two widgets need it, and neither may drag its toolkit
-  # in behind it. Lillecarl/pymux#85.
-  ptyhost = pkgs.python3Packages.callPackage sources.ptyhost { };
-
   # The test equipment the collection's suites share: the seats, the
   # drivers, the budgets. It takes the floor the widgets take and never
   # a layer above it, so every repository's checks can take it as an
@@ -59,11 +54,10 @@ rec {
     # resolves a name against nixpkgs and nixpkgs has a `prompt-toolkit`, a
     # `pyte` and a `ptyhost` of its own.
     #
-    # ptyhost used to arrive behind ptterm, which the closure walker
-    # followed. ptterm is a builders package now and propagates nothing, so
-    # it is named here until it converts too.
+    # The one source still on nixpkgs. Its checks borrow tools from its
+    # passthru, and `hacks.nixpkgsPrebuilt` keeps a package's files and not
+    # its passthru, so pymux takes the nixpkgs copy for those.
     nixpkgsRoots = [
-      ptyhost
       pyterm-pytest
     ]
     ++ ps.nixpkgsRootsFor {
@@ -74,6 +68,7 @@ rec {
         sources.ptterm
         sources.pyte
         sources.prompt-toolkit
+        sources.ptyhost
       ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
@@ -105,6 +100,13 @@ rec {
       # The floor: the parser, the screen and everything under them. Both
       # widgets take it, and it takes nothing of theirs.
       pyte = final.callPackage sources.pyte {
+        inherit (ps) mkProject;
+      };
+
+      # The layer that runs a program on a pty. It depends on nothing here,
+      # which is the point: two widgets need it, and neither may drag a
+      # toolkit in behind it. Lillecarl/pymux#85.
+      ptyhost = final.callPackage sources.ptyhost {
         inherit (ps) mkProject;
       };
 
@@ -166,6 +168,8 @@ rec {
   pyte = pythonSet.pyte;
 
   prompt-toolkit = pythonSet.prompt-toolkit;
+
+  ptyhost = pythonSet.ptyhost;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
