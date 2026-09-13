@@ -1073,10 +1073,11 @@ Two git hooks enforce the same rule for anything that does not go through
 `pre-push` refuses to push this repository while any revision it locks is
 private. `pre-push` fetches first, so its answer is current.
 
-`umbrella wts` makes a worktreespace, and **it does not work here**: this
-repository is a jj repo, and `wts` keeps its markers in a `.git` directory that
-a jj workspace does not have. The limitation is fixable and nobody has fixed it
-yet -- Lillecarl/pymux#316 says where the markers should go instead.
+`umbrella wts add spike` makes a worktreespace: one more working copy of the
+whole collection, sharing storage rather than cloning, so making one costs
+about a second. The umbrella's own copy follows the umbrella -- a jj workspace
+of a colocated one, a git worktree otherwise -- and each source follows the
+mode. Lillecarl/pymux#316 is what taught it the workspace half.
 
 ## umbrella is a source too
 

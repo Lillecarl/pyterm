@@ -141,31 +141,26 @@ and the files you added will disappear from the checkout until you move `@`.
 
 ## Worktrees
 
-**`umbrella wts` does not work here any more, and asking for a worktree
-fails.** Colocating this repository with jj is what stopped it:
+Ask for a worktree and you get the whole collection again, sharing storage
+rather than cloning. `.claude/settings.json` points the worktree hooks at
+umbrella and turns the `jj-worktrees` plugin off for this project, because
+hooks merge across settings files and two of them would each build one.
 
-    umbrella: this umbrella is a jj repo, and a worktreespace of one cannot
-    hold the markers umbrella needs. Use jj workspace add.
+The umbrella's own extra copy follows the umbrella and not the mode. This
+repository is colocated, so it is a `jj workspace`; a plain git umbrella gets
+a git worktree. Each source beside it follows the mode, as before.
 
-**It is a fixable limitation, not a rule.** `wts` writes three markers -- the
-worktreespace name, the mode, the kind -- into `Path(repo.path)`, which is the
-`.git` directory, and a jj workspace has no `.git` of its own. `Umbrella.open`
-then calls `pygit2.discover_repository`, which finds nothing:
+**A workspace has no `.git`, and that used to be the end of it.** `wts` keeps
+three markers -- the worktreespace name, the mode, the kind -- beside the
+working copy's own repository state, and it only knew about `.git`. A
+workspace has `.jj` instead, which is just as private and just as uncommitted,
+so that is where they go now; `Umbrella.open` finds the workspace by walking up
+for a `.jj` with no `.git` beside it, and reaches the repository through
+`.jj/repo/store/git_target`. Lillecarl/pymux#316.
 
-    $ jj workspace add --name probe /tmp/probe && cd /tmp/probe
-    $ ls -a .jj ; ls -a .git
-    repo  working_copy      ls: .git: No such file or directory
-    $ umbrella status
-    umbrella: not inside a git repo.
-
-A workspace does have `.jj/`, which is per workspace and never committed, and
-`.jj/repo` points at the real repository. So both halves have a home: the
-markers go in `.jj/` when there is one, and `open` reaches the git repo
-through `.jj/repo/store/git_target`. Lillecarl/pymux#316 holds the patch.
-
-Until it is written, `.claude/settings.json` still points `WorktreeCreate` at
-`umbrella hook worktree-create`, so asking for a worktree runs a hook that
-errors. Work in the checkout.
+A worktreespace does not publish. `land` refuses there, and `status` says what
+it is rather than pretending to know about the lock. Land from the checkout it
+came from.
 
 ## If a hook says umbrella is not on PATH
 
