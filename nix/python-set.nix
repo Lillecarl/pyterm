@@ -162,6 +162,13 @@ in
     `prompt-toolkit` of its own, so the lookup would succeed and lift
     upstream's package under the name our overlay means to supply.
 
+    **PEP 508 markers are evaluated, against the same environment the
+    renderer uses.** A declaration can be conditional -- ptyhost asks for
+    `yawinpty` on Windows, where there is no pty to run a program on -- and
+    such a name has no nixpkgs package to resolve to on this platform.
+    Reading the names without the markers turned that into a build error for
+    a dependency nothing here will ever install.
+
     Everything remaining is resolved against `python.pkgs`, which is where a
     name is expected to be resolvable -- an unresolvable one is a real error
     and says so, rather than being silently dropped and reappearing as an
@@ -176,15 +183,23 @@ in
       exclude,
     }:
     let
+      environ = pep508.mkEnviron python;
+
       declaredNames =
         projectRoot:
         let
           inherit (pyproject-nix.lib.project.loadPyproject { inherit projectRoot; }) dependencies;
+
+          # `extras = [ ]` is what the renderer passes: it evaluates the
+          # markers and does not switch any optional group on. The extras
+          # still come back, filtered, and this wants their names -- a
+          # `test` extra is exactly what a check installs.
+          filtered = pyproject-nix.lib.pep621.filterDependenciesByEnviron environ [ ] dependencies;
         in
         map (dep: normalize dep.name) (
-          dependencies.dependencies
-          ++ dependencies.build-systems
-          ++ lib.concatLists (lib.attrValues dependencies.extras)
+          filtered.dependencies
+          ++ filtered.build-systems
+          ++ lib.concatLists (lib.attrValues filtered.extras)
         );
 
       wanted = lib.subtractLists (map normalize exclude) (
