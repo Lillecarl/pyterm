@@ -32,6 +32,14 @@
       "rev": "fca5a3bbc11bc2eb25c137f8a8e1b68d2074c8e6",
       "type": "github"
     },
+    "pyproject-nix": {
+      "lastModified": 1788394333,
+      "narHash": "sha256-xYOP0Xym1eVGUaHFx+eJEaycFGoiCbst3fZf0xFHP78=",
+      "owner": "pyproject-nix",
+      "repo": "pyproject.nix",
+      "rev": "6a8a7881d75b6f98967e7b8069f4ead331384301",
+      "type": "github"
+    },
     "pyte": {
       "lastModified": 1789302313,
       "narHash": "sha256-EjIGDyNyFmo6VWbRYXE6tL+nnFRVwir5V4gEgyHe/dM=",

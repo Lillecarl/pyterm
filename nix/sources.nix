@@ -78,4 +78,15 @@
     branch = "main";
     path = ../umbrella;
   };
+
+  # The builders that assemble a virtualenv, instead of nixpkgs' propagation
+  # and PYTHONPATH. Lillecarl/pymux#319.
+  #
+  # No `path`: this is somebody else's repository and we do not edit it, so
+  # there is no working copy to read. `nix/resolve.nix` answers from the lock
+  # alone when a source names no path.
+  pyproject-nix = {
+    url = "https://github.com/pyproject-nix/pyproject.nix.git";
+    branch = "master";
+  };
 }
