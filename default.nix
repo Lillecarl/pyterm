@@ -35,8 +35,6 @@ rec {
   # as arguments, so nothing in them points at anything here. Built alone they
   # would get their dependencies from nixpkgs. Assembled here they get each
   # other, which is the point of keeping them in one checkout.
-  prompt-toolkit = pkgs.python3Packages.callPackage sources.prompt-toolkit { };
-
   # The layer that runs a program on a pty. It depends on nothing, which
   # is the point: two widgets need it, and neither may drag its toolkit
   # in behind it. Lillecarl/pymux#85.
@@ -61,11 +59,10 @@ rec {
     # resolves a name against nixpkgs and nixpkgs has a `prompt-toolkit`, a
     # `pyte` and a `ptyhost` of its own.
     #
-    # prompt-toolkit and ptyhost used to arrive behind ptterm, which the
-    # closure walker followed. ptterm is a builders package now and
-    # propagates nothing, so they are named here until they convert too.
+    # ptyhost used to arrive behind ptterm, which the closure walker
+    # followed. ptterm is a builders package now and propagates nothing, so
+    # it is named here until it converts too.
     nixpkgsRoots = [
-      prompt-toolkit
       ptyhost
       pyterm-pytest
     ]
@@ -76,6 +73,7 @@ rec {
         sources.txterm
         sources.ptterm
         sources.pyte
+        sources.prompt-toolkit
       ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
@@ -92,6 +90,18 @@ rec {
     };
 
     overlay = final: _prev: {
+      # The toolkit under ptterm and pymux, and the one source here that is
+      # somebody else's. It is packaged from this set like the rest, and its
+      # own `pyproject.toml` is read exactly as upstream wrote it: a
+      # build-system swap is not a patch upstream could take.
+      #
+      # The attribute is `prompt-toolkit` and the project is
+      # `prompt_toolkit`. That is PEP 503 normalisation, and it is the
+      # spelling every dependency of it resolves to.
+      prompt-toolkit = final.callPackage sources.prompt-toolkit {
+        inherit (ps) mkProject;
+      };
+
       # The floor: the parser, the screen and everything under them. Both
       # widgets take it, and it takes nothing of theirs.
       pyte = final.callPackage sources.pyte {
@@ -154,6 +164,8 @@ rec {
   # The floor, for the same reason: a library that three repositories
   # import, and what this collection reaches from here is its checks.
   pyte = pythonSet.pyte;
+
+  prompt-toolkit = pythonSet.prompt-toolkit;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
