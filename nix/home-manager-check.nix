@@ -23,7 +23,6 @@
   lib,
   callPackage,
   writeText,
-  python3,
   pymux,
 }:
 let
@@ -103,12 +102,6 @@ let
   # rather than a string.
   installs = written.home.packages == [ pymux ];
 
-  # pymux is importable from this, and so is everything it carries.
-  #
-  # `toPythonModule` is what makes it importable. pymux is built as an
-  # application, so an environment holds its `bin` and leaves its modules
-  # off the path, and the judge imports the modules.
-  python = python3.withPackages (ps: [ (ps.toPythonModule pymux) ]);
 in
 suite { name = "pyterm-home-manager"; } ''
   cp ${conf} pymux.conf
@@ -126,5 +119,9 @@ suite { name = "pyterm-home-manager"; } ''
     exit 1
   fi
 
-  ${python}/bin/python ${./home-manager-judge.py} pymux.conf
+  # pymux is a virtualenv, so it is the environment the judge runs in:
+  # the modules it imports are beside the `pymux` it was given, and
+  # nothing has to be made into a python module to reach them.
+  # Lillecarl/pymux#319.
+  ${pymux}/bin/python ${./home-manager-judge.py} pymux.conf
 ''

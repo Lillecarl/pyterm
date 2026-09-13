@@ -14,6 +14,14 @@ let
   # So a clone with no working copies builds from the lock, and nothing has
   # to be checked out first.
   sources = import ./nix/wire.nix { };
+
+  # The builders that assemble a virtualenv instead of a PYTHONPATH.
+  # `nix/python-set.nix` says why, and why the third-party packages still
+  # come from nixpkgs. Lillecarl/pymux#319.
+  pyproject-nix = import sources.pyproject-nix { inherit (pkgs) lib; };
+  ps = pkgs.callPackage ./nix/python-set.nix { inherit pyproject-nix; };
+
+  python = pkgs.python3;
 in
 rec {
   inherit pkgs sources;
@@ -56,16 +64,60 @@ rec {
     inherit ptterm;
   };
 
-  pymux = pkgs.python3Packages.callPackage sources.pymux {
-    inherit prompt-toolkit ptterm;
-    # The shared rig, whose seats the picture scripts borrow.
-    inherit pyterm-pytest;
-    # The one that draws, which its checks need for kitty. In the python
-    # package set `mesa` is a python binding that nixpkgs has marked
-    # broken, so it has to come from here.
-    inherit (pkgs) mesa;
-    # The readers of the clipboard fence.
-    inherit (pkgs) wl-clipboard xclip;
+  # The builders set: every third-party package lifted out of nixpkgs, and
+  # this collection's own sources on top. One source is in it so far -- the
+  # migration goes top down, because a nixpkgs package lifts into this set
+  # and a package of this set cannot go back. Lillecarl/pymux#319.
+  pythonSet = ps.mkPythonSet {
+    inherit python;
+
+    # The three sources pymux reaches, as nixpkgs built them. They are named
+    # here rather than looked up, because `nixpkgsRootsFor` resolves a name
+    # against nixpkgs and nixpkgs has a `prompt-toolkit` and a `pyte` of its
+    # own. The closure walker brings pyte and ptyhost in behind ptterm.
+    nixpkgsRoots = [
+      ptterm
+      prompt-toolkit
+      pyterm-pytest
+    ]
+    ++ ps.nixpkgsRootsFor {
+      inherit python;
+      projectRoots = [ sources.pymux ];
+      # Everything this collection supplies for itself. A name left off
+      # this list would not fail: nixpkgs would answer with its own
+      # package, and the set would hold upstream's under our name.
+      exclude = [
+        "pymux"
+        "ptterm"
+        "prompt-toolkit"
+        "pyterm-pytest"
+        "pyte"
+        "ptyhost"
+        "txterm"
+      ];
+    };
+
+    overlay = final: _prev: {
+      pymux = final.callPackage sources.pymux {
+        inherit (ps) mkProject;
+        # ptterm and pyterm-pytest as nixpkgs built them, for the tools its
+        # checks borrow from their passthru. The set holds them too, and
+        # those copies are what pymux imports.
+        inherit ptterm pyterm-pytest;
+        # The one that draws, which its checks need for kitty.
+        inherit (pkgs) mesa;
+        # The readers of the clipboard fence.
+        inherit (pkgs) wl-clipboard xclip;
+      };
+    };
+  };
+
+  # pymux, as a person runs it: a virtualenv holding the package, everything
+  # it declares, and the themes of the pastel. The checks ride along from
+  # the package inside, which is where they are written.
+  pymux = pythonSet.mkVirtualEnv "pymux" { pymux = [ "catppuccin" ]; } // {
+    inherit (pythonSet.pymux) checks;
+    meta = pythonSet.pymux.meta;
   };
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
@@ -310,13 +362,17 @@ rec {
     };
   };
 
+  # The python of the dev shell: the same virtualenv the suites run on, so
+  # what works by hand and what works in the sandbox are the same thing.
+  devEnv = pythonSet.mkVirtualEnv "pyterm-dev" {
+    pymux = [
+      "test"
+      "dev"
+      "catppuccin"
+    ];
+  };
+
   shell = pkgs.callPackage ./pkgs/shell {
-    inherit
-      prompt-toolkit
-      pyte
-      ptterm
-      pymux
-      umbrella
-      ;
+    inherit devEnv umbrella;
   };
 }

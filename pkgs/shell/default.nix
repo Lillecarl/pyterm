@@ -1,10 +1,16 @@
+# The shell this collection is worked in.
+#
+# `devEnv` is one virtualenv and it is the whole python: pymux, everything
+# pymux declares, and the `test` extra that the suites and the hand-run
+# drivers need. It carries `bin/pymux` as well, so there is no second python
+# on PATH to shadow this one and no PYTHONPATH to put an older copy in front
+# of a freshly built package. Lillecarl/pymux#318, Lillecarl/pymux#319.
+#
+# A suite still runs against the source in the checkout, because a run starts
+# in that repository and its own directory comes first.
 {
   mkShell,
-  python3,
-  prompt-toolkit,
-  pyte,
-  ptterm,
-  pymux,
+  devEnv,
   umbrella,
   # pkgs.jj is a JSON stream editor. jujutsu is the version control system.
   jujutsu,
@@ -15,7 +21,7 @@
 }:
 mkShell {
   packages = [
-    pymux
+    devEnv
     umbrella
     jujutsu
     git
@@ -23,20 +29,5 @@ mkShell {
     black
     # tic and infocmp, for the terminfo entry of a pane.
     ncurses
-
-    # The four packages of this collection, and what their tests need. A
-    # test runs against the source in the checkout, so the environment
-    # carries the dependencies and not the packages under test.
-    (python3.withPackages (ps: [
-      prompt-toolkit
-      pyte
-      ptterm
-      ps.docopt-ng
-      ps.wcwidth
-      ps.hypothesis
-      ps.pytest
-      ps.libtmux
-      ps.pyinstrument
-    ]))
   ];
 }
