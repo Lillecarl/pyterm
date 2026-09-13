@@ -351,6 +351,12 @@ reaches whatever server holds it, which can be an older build; the integrated
 client reaches the server that the command started and nothing else. The two
 runs together say which side a fault is on.
 
+The routes differ in one thing besides the transport. An integrated server
+draws on the terminal it runs in, so a client cannot attach over the socket it
+binds for commands, and a check that puts two terminals on one session is a
+socket-route check. `check_second_terminal` says what each route answers a
+second terminal.
+
 `checks.pymux-pictures` is the only check that gets past the cell. It runs a
 real terminal emulator on a display server of its own, plays a program in it
 twice — once bare and once in a pymux pane that covers every cell — and
