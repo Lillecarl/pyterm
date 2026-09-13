@@ -1,3 +1,52 @@
+# What txterm is and what it needs. `setup.py` used to say this, and a build
+# read it by running it. Nix reads this file instead, at evaluation time, so
+# the dependency list here is the one the package is built from and there is
+# no second copy in a `.nix` file to fall out of step. Lillecarl/pymux#319.
+[project]
+name = "txterm"
+version = "0.1"
+description = "A terminal widget for Textual."
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+# Textual draws, `ptyhost` runs the program, and `pyte` holds the parser
+# and the screen.
+#
+# **No prompt_toolkit, and not even in the closure.** The pure layer used
+# to sit in `ptterm`, which is the prompt_toolkit widget, so this package
+# pulled the toolkit in behind it and only a test kept it out of the
+# code. It is in `pyte` now, where it belongs. Lillecarl/pymux#11.
+dependencies = [
+    "textual",
+    "ptyhost",
+    "pyte",
+]
+
+[project.optional-dependencies]
+# What a check installs, beside what txterm itself needs. anyio carries
+# the pytest plugin that runs a coroutine test; without it pytest fails
+# one with "async def functions are not natively supported", and
+# Textual's own test driver is async, so that is every test that runs an
+# app.
+test = [
+    "pytest",
+    "anyio",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lillecarl/txterm"
+
+[project.scripts]
+txterm = "txterm.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["txterm"]
+
 [tool.pytest.ini_options]
 # Run a coroutine test, with no mark on it.
 #

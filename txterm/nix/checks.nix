@@ -3,32 +3,23 @@
 # It declares its own inputs, so `default.nix` holds the package and carries
 # nothing that only a test needs.
 #
-# `package` and `testSources` come from `default.nix`: the first because a
+# `testEnv` and `testSources` come from `default.nix`: the first because a
 # suite runs against the installed package, the second because it knows where
 # the repository root is and this file does not.
 #
 # `nix/suite.nix` says why a check is two derivations.
 {
-  python,
-  pytest,
-  anyio,
+  # The python every suite runs on: a virtualenv of txterm, what txterm
+  # declares, and its `test` extra. `default.nix` builds it from
+  # `pyproject.toml`, so what a suite may import is what the package
+  # declares and there is no second list here. Lillecarl/pymux#319.
+  testEnv,
   callPackage,
-  package,
   testSources,
   esctest2,
 }:
 let
   inherit (callPackage ./suite.nix { }) suite;
-
-  # anyio carries the pytest plugin that runs a coroutine test. Without it
-  # pytest fails one with "async def functions are not natively supported",
-  # so no async test in this repository runs at all. Textual's own test
-  # driver is async, so that is every test that runs an app.
-  pythonWithTests = python.withPackages (ps: [
-    package
-    pytest
-    anyio
-  ]);
 
   # Narrow a run to one file or one test while hunting:
   #
@@ -64,7 +55,7 @@ in
   # is judged as segments, which is what `render_line` returns.
   unit = suite {
     name = "txterm-unit";
-    inputs = [ pythonWithTests ];
+    inputs = [ testEnv ];
     env = { inherit selection; };
     setup = prepare;
   } "python -m pytest $selection -q -p no:cacheprovider";
@@ -82,7 +73,7 @@ in
   esctest = suite {
     name = "txterm-esctest";
     inputs = [
-      pythonWithTests
+      testEnv
       esctest2
     ];
     env = { inherit esctestInclude; };
