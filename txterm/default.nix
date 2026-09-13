@@ -87,9 +87,9 @@ let
   # is which terminal it judges.
   #
   # This is the only reason `ptterm` is an argument at all. It is a build
-  # input of a check and reaches the closure of nothing that runs. It is
-  # also the copy nixpkgs built rather than the one in the set, because a
-  # lifted package keeps its files and not its passthru.
+  # input of a check and reaches the closure of nothing that runs, and it
+  # comes from the set: ptterm is a builders package too, so the copy in
+  # the scope is the one that carries the tools.
   checks = callPackage ./nix/checks.nix {
     inherit testEnv testSources;
     inherit (ptterm) esctest2;
