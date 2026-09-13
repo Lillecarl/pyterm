@@ -229,6 +229,18 @@ from the root call site in this `default.nix`:
 Each file down the chain then declares `mesa` by name, and none of them can
 reach for anything else.
 
+**Run a freshly built tool with `env -u PYTHONPATH`.** The dev shell has
+`pymux` and `umbrella` in `mkShell`'s `packages`, which puts their
+site-packages on `PYTHONPATH`. A wrapper adds its own paths with
+`site.addsitedir`, which appends to `sys.path`, and `PYTHONPATH` goes near the
+front -- so `/nix/store/<new>/bin/umbrella` imports the *old* module and runs
+code you did not build.
+
+It fails as a wrong answer and not an error, so it reads as "my patch does not
+work" while the suite says otherwise. If a hand-check disagrees with a passing
+suite, grep the built store path for the string you are seeing; if it is not
+there, you are running something else. Lillecarl/pymux#318.
+
 **Iterate inside the check, not beside it.** A build from a file evaluates
 impurely, so `builtins.getEnv` gives a check as much control as you need:
 `PYMUX_TESTS` picks what pytest runs, `PYMUX_ESCTEST_INCLUDE` and
