@@ -35,8 +35,6 @@ rec {
   # as arguments, so nothing in them points at anything here. Built alone they
   # would get their dependencies from nixpkgs. Assembled here they get each
   # other, which is the point of keeping them in one checkout.
-  pyte = pkgs.python3Packages.callPackage sources.pyte { };
-
   prompt-toolkit = pkgs.python3Packages.callPackage sources.prompt-toolkit { };
 
   # The layer that runs a program on a pty. It depends on nothing, which
@@ -63,12 +61,11 @@ rec {
     # resolves a name against nixpkgs and nixpkgs has a `prompt-toolkit`, a
     # `pyte` and a `ptyhost` of its own.
     #
-    # pyte and ptyhost used to arrive behind ptterm, which the closure
-    # walker followed. ptterm is a builders package now and propagates
-    # nothing, so they are named here until they convert as well.
+    # prompt-toolkit and ptyhost used to arrive behind ptterm, which the
+    # closure walker followed. ptterm is a builders package now and
+    # propagates nothing, so they are named here until they convert too.
     nixpkgsRoots = [
       prompt-toolkit
-      pyte
       ptyhost
       pyterm-pytest
     ]
@@ -78,6 +75,7 @@ rec {
         sources.pymux
         sources.txterm
         sources.ptterm
+        sources.pyte
       ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
@@ -94,6 +92,12 @@ rec {
     };
 
     overlay = final: _prev: {
+      # The floor: the parser, the screen and everything under them. Both
+      # widgets take it, and it takes nothing of theirs.
+      pyte = final.callPackage sources.pyte {
+        inherit (ps) mkProject;
+      };
+
       # The one terminal widget that the other two repositories reach: pymux
       # arranges several of them, and txterm borrows the conformance suite
       # that this one builds. Both take it from the set, which is why it had
@@ -146,6 +150,10 @@ rec {
   # reaches from here is the passthru -- the checks below, and the
   # conformance suites that pymux and txterm borrow.
   ptterm = pythonSet.ptterm;
+
+  # The floor, for the same reason: a library that three repositories
+  # import, and what this collection reaches from here is its checks.
+  pyte = pythonSet.pyte;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.

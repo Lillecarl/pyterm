@@ -41,11 +41,11 @@
       "type": "github"
     },
     "pyte": {
-      "lastModified": 1789302313,
-      "narHash": "sha256-EjIGDyNyFmo6VWbRYXE6tL+nnFRVwir5V4gEgyHe/dM=",
+      "lastModified": 1789308257,
+      "narHash": "sha256-DPpyMLOARDe84UhpJ1BDiE0w0lngL7Sgh1mn0LJelcc=",
       "owner": "Lillecarl",
       "repo": "pyte",
-      "rev": "b0511785cffa0bf71712d9feb4d5b312e689ec5c",
+      "rev": "d15e46f87bba0929d22bdb7294944f13fe6eb4de",
       "type": "github"
     },
     "pyterm-pytest": {
