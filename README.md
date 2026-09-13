@@ -41,12 +41,14 @@ because several words here mean two things -- "window", "screen", "layout" and
     git clone git@github.com:Lillecarl/pyterm.git
     cd pyterm
     umbrella init --jj   # drop --jj if you would rather drive them with git
-    umbrella fetch       # clone each source at the revision the lock names
+    umbrella fetch --all # clone each source at the revision the lock names
 
 `umbrella init` installs the hooks described below and lists the sources in
 `.git/info/exclude`, so a clone of one never lands in this repository's
-history. `umbrella fetch` is separate because you do not always want them: a
-build with no working copies at all reads the lock and fetches what it needs.
+history. `umbrella fetch` is separate because you do not always want them all:
+it takes source names, and `--all` is how you say every one. A build with no
+working copies reads the lock and fetches what it needs, so a checkout that
+fetched nothing still builds.
 
 **`nix/sources.nix` names the sources over https, and it has to.** Nix follows
 those URLs when nothing is checked out, whatever the URL of this repository
