@@ -48,10 +48,12 @@ screen back through a real fork: they judge a screen on a pty, and the lowest
 layer that has both is the widget. Bringing one of them down to `pyte` would
 make that package's checks depend on `ptyhost`, which is above it.
 
-The mode is jj. Every source has a `.jj` directory, and jj owns them. This
-repository is plain git. `umbrella init` leaves that choice to a person, and
-nothing here needs jj: the only thing this repository records about a source
-is a line in a lock file.
+The mode is jj, and this repository is a jj repo too, colocated like the
+sources. It could not be while the sources were submodules: jj ignores
+gitlinks, so a jj working copy here would have dropped every pointer. With
+the pointers gone there is nothing left for it to drop -- jj tracks the
+umbrella's own two dozen files and ignores the eight checkouts, which
+`.git/info/exclude` lists.
 
 ## The rules that matter
 
@@ -97,9 +99,9 @@ point: a lock naming a commit no remote has breaks every clone.
 
 **Land, then commit the lock.** `umbrella land` moves each source's bookmark
 onto the commit being published, pushes it, and writes the lock. It stops
-there, on purpose: this repository is git and a source is jj, and `land` will
-not guess which commands you want. So landing is two steps, and the second one
-is yours.
+there, on purpose: it will not guess which commands you want for the umbrella
+itself. So landing is two steps, and the second one is yours -- and the
+bookmark trap applies again, because this repository is jj as well.
 
 **A jj bookmark does not move when you commit.** This is the reason `land`
 exists. `jj commit` leaves the new commit on no bookmark, git HEAD points at
@@ -111,9 +113,9 @@ moves the bookmark for you, fast forward only, and says which one it moved.
     jj -R pymux commit -m "..."      # or just describe @; land closes it
     umbrella status                  # confirm what you expect to land
     umbrella land                    # bookmark, push, write nix/sources.lock
-    git add nix/sources.lock
-    git commit -m "..."              # this repository's own commit
-    git push
+    jj commit -m "..."               # this repository's own commit
+    jj bookmark set main -r @-       # land moves a source's bookmark, not this one
+    jj git push
 
 `land` also accepts work left in the working commit: if `@` has changes and a
 description, it closes it for you. If `@` has changes and no description, it
@@ -139,15 +141,31 @@ and the files you added will disappear from the checkout until you move `@`.
 
 ## Worktrees
 
-Ask for a worktree and you get the whole collection again, as jj workspaces
-sharing storage rather than four clones. `.claude/settings.json` points the
-worktree hooks at umbrella and turns the `jj-worktrees` plugin off for this
-project, because hooks merge across settings files and two of them would each
-build a worktree.
+**`umbrella wts` does not work here any more, and asking for a worktree
+fails.** Colocating this repository with jj is what stopped it:
 
-A worktreespace does not publish. `land` refuses there, and `status` says what
-it is rather than pretending to know about pointers. Land from the checkout it
-came from.
+    umbrella: this umbrella is a jj repo, and a worktreespace of one cannot
+    hold the markers umbrella needs. Use jj workspace add.
+
+**It is a fixable limitation, not a rule.** `wts` writes three markers -- the
+worktreespace name, the mode, the kind -- into `Path(repo.path)`, which is the
+`.git` directory, and a jj workspace has no `.git` of its own. `Umbrella.open`
+then calls `pygit2.discover_repository`, which finds nothing:
+
+    $ jj workspace add --name probe /tmp/probe && cd /tmp/probe
+    $ ls -a .jj ; ls -a .git
+    repo  working_copy      ls: .git: No such file or directory
+    $ umbrella status
+    umbrella: not inside a git repo.
+
+A workspace does have `.jj/`, which is per workspace and never committed, and
+`.jj/repo` points at the real repository. So both halves have a home: the
+markers go in `.jj/` when there is one, and `open` reaches the git repo
+through `.jj/repo/store/git_target`. Lillecarl/pymux#316 holds the patch.
+
+Until it is written, `.claude/settings.json` still points `WorktreeCreate` at
+`umbrella hook worktree-create`, so asking for a worktree runs a hook that
+errors. Work in the checkout.
 
 ## If a hook says umbrella is not on PATH
 

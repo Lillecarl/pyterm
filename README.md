@@ -1,11 +1,10 @@
 # pyterm
 
-A glorified git submodule collection. There is no code of its own here. What it
-holds is six repositories that are worked on together, a nix expression that
-builds each of them from its checkout, and the wiring that keeps the six in
-step.
+A glorified lock file. There is no code of its own here. What it holds is the
+record of eight repositories that are worked on together, a nix expression that
+builds each of them, and the wiring that keeps them in step.
 
-| submodule | branch | upstream | job |
+| source | branch | upstream | job |
 | --- | --- | --- | --- |
 | `pymux` | `graphics-protocol` | prompt-toolkit/pymux | arrange several terminals |
 | `ptterm` | `graphics-protocol` | prompt-toolkit/ptterm | draw one with prompt-toolkit |
@@ -13,13 +12,20 @@ step.
 | `ptyhost` | `main` | Lillecarl/ptyhost | run a program and carry its bytes |
 | `pyte` | `graphics-protocol` | selectel/pyte | parse, and hold a screen |
 | `prompt-toolkit` | `render-performance` | prompt-toolkit/python-prompt-toolkit | the toolkit under it all |
+| `pyterm-pytest` | `main` | Lillecarl/pyterm-pytest | the test equipment the suites share |
 | `umbrella` | `main` | Lillecarl/umbrella | hold the others together |
 
-Each submodule carries its own `default.nix`. That file holds the package and
+**These are not submodules.** They were until 2026-09-13. `nix/sources.nix`
+says where each comes from and `nix/sources.lock` says which revision, with a
+`narHash` beside it; `nix/resolve.nix` joins the two. A working copy is an
+ordinary clone beside this file, ignored here, and nothing about it is
+committed.
+
+Each source carries its own `default.nix`. That file holds the package and
 the tests that judge it, and nothing else. Sibling packages arrive as arguments
-rather than paths, so a submodule built on its own takes its dependencies from
-nixpkgs, and built here it takes the checkouts next to it. Nothing in a
-submodule points back at this repository.
+rather than paths, so a source built on its own takes its dependencies from
+nixpkgs, and built here it takes the checkouts next to it. Nothing in a source
+points back at this repository.
 
 This repository owns the assembly. It decides which checkout answers for
 `ptterm`, it names the tests, and it holds the dev shell.
@@ -32,20 +38,22 @@ because several words here mean two things -- "window", "screen", "layout" and
 
 ## Getting a checkout
 
-    git clone --recurse-submodules git@github.com:Lillecarl/pyterm.git
+    git clone git@github.com:Lillecarl/pyterm.git
     cd pyterm
-    umbrella initjj      # or initgit, if you would rather drive them with git
+    umbrella init --jj   # drop --jj if you would rather drive them with git
+    umbrella fetch       # clone each source at the revision the lock names
 
-`--recurse-submodules` is optional: `umbrella initjj` checks out whatever is
-missing. It also colocates each submodule as a jj repository and installs the
-hooks described below.
+`umbrella init` installs the hooks described below and lists the sources in
+`.git/info/exclude`, so a clone of one never lands in this repository's
+history. `umbrella fetch` is separate because you do not always want them: a
+build with no working copies at all reads the lock and fetches what it needs.
 
-**`.gitmodules` names the submodules over https, and it has to.** Nix follows
-those URLs when a flake asks for `?submodules=1`, whatever the URL of this
-repository was, so an SSH URL there makes every one of them need a key. A
-machine without one -- CI, a fresh container, somebody else's laptop -- then
-cannot evaluate a configuration that pins pyterm at all, which is most of what
-the home-manager module below is for.
+**`nix/sources.nix` names the sources over https, and it has to.** Nix follows
+those URLs when nothing is checked out, whatever the URL of this repository
+was, so an SSH URL there makes every one of them need a key. A machine without
+one -- CI, a fresh container, somebody else's laptop -- then cannot evaluate a
+configuration that pins pyterm at all, which is most of what the home-manager
+module below is for.
 
 If you push to these repositories, tell git to send https to SSH once:
 
@@ -61,15 +69,18 @@ already exists keeps the remotes it has; only a fresh clone reads these URLs.
 
 `default.nix` is the whole definition. `shell.nix` and `flake.nix` only call
 into it, and the flake takes nixpkgs as its one input. Everything else comes
-from the submodules.
+from the sources `nix/sources.lock` names.
 
-Each submodule's `default.nix` holds its package alone. The suites that judge
+Each source's `default.nix` holds its package alone. The suites that judge
 it live in that repository's `nix/checks.nix`, which declares its own inputs,
 so a package definition does not name the six terminal emulators and two
 display servers that only a test needs.
 
-Builds read the submodule working copies, so an edit in any of them builds
-without a commit or a push.
+Builds read the working copies, so an edit in any of them builds without a
+commit or a push. **That is `UMBRELLA_DEV=all`, and `.envrc` sets it.** Without
+it a build reads each source at the revision the lock names, which is the
+committed tree, so an uncommitted edit does not reach it. `nix/resolve.nix`
+holds both arms; CI leaves the variable unset and gets the reproducible one.
 
 **A flake is not first class here.** `flake.nix` exposes the packages and the
 home-manager module, so that somebody can install pymux with one command and
@@ -81,14 +92,14 @@ Neither of those two is defined there. Both are attributes of `default.nix`
 that the flake passes through, so a person with no flake reaches the same
 things.
 
-**A flake build has to ask for the submodules by name.** Flakes see only what
-git tracks, and a submodule's contents are not that, so a plain `nix build .#`
-fails with "Path 'prompt-toolkit' ... is not tracked by Git":
+**A flake build reads the lock, never your disk.** A flake evaluates purely,
+so `builtins.getEnv` sees nothing and `nix/resolve.nix` takes its reproducible
+arm: every source comes from the revision in `nix/sources.lock`. That is what
+makes `nix build .#pymux` work in a clone with no working copies at all, and
+it is also why a flake build ignores the edit you just made.
 
-    nix build '.?submodules=1#pymux'
-
-A build from a file has no such problem, and it reads the working copies rather
-than the last commit, which is usually what you want while working.
+A build from a file reads the working copies, which is usually what you want
+while working.
 
 ## Configuring pymux with home-manager
 
@@ -104,11 +115,11 @@ It is a plain module file, so a path is the whole import:
 `flake.nix` names the same file as `homeManagerModules.default`, for a person
 who takes this repository as a flake input:
 
-    pyterm.url = "git+https://github.com/Lillecarl/pyterm?submodules=1";
+    pyterm.url = "github:Lillecarl/pyterm";
 
-`?submodules=1` matters here too. The default of the module's `package` option
-builds pymux out of the source the module came from, and a flake without the
-submodules has no source to build.
+Nothing has to be asked for by name. The default of the module's `package`
+option builds pymux out of the source the module came from, and that source
+resolves every project through `nix/sources.lock`.
 
 Two options carry the configuration:
 
@@ -1036,41 +1047,43 @@ every pane's scrollback. The three commands above need none of it.
 
 [umbrella](https://github.com/Lillecarl/umbrella) is what makes a collection
 like this workable. The problem it solves is small and sharp: this repository
-records one commit per submodule, and if it records a commit that no remote has,
-every clone breaks on it. That is easy to do by accident, and with jj it is the
+names one revision per source, and if it names one that no remote has, every
+clone breaks on it. That is easy to do by accident, and with jj it is the
 default path, because a jj bookmark does not move when you commit.
 
-    umbrella status             # what each submodule is doing
+    umbrella status             # what each source is doing
     umbrella status --fetch     # the same, current about the remotes
-    umbrella land -p -m "..."   # push the submodules, then record the pointers
-    umbrella sync               # move the submodules onto the recorded pointers
-    umbrella wts add spike      # the whole collection again, sharing storage
-    umbrella wts rm spike
+    umbrella fetch              # clone a source at the revision the lock names
+    umbrella land               # push the sources, then lock what was pushed
+    umbrella update             # lock each source at the head of its branch
+    umbrella sync               # move working copies onto the locked revisions
 
-`land` is the one to reach for. It moves each submodule's branch onto the commit
-being published, pushes it, and only then records the pointer here. `-p` pushes
-this repository too. The order is the whole point: a submodule commit reaches
-its remote before anything names it.
+`land` is the one to reach for. It moves each source's bookmark onto the commit
+being published, pushes it, and only then writes `nix/sources.lock`. The order
+is the whole point: a commit reaches its remote before anything names it. It
+stops there rather than committing this repository, so landing is two steps and
+the second one is yours.
+
+`update` is the other arm, and the difference is which way the truth flows.
+`land` publishes what is on this disk. `update` follows the branch each source
+declares in `nix/sources.nix`, which is what picks up somebody else's work.
 
 Two git hooks enforce the same rule for anything that does not go through
-`land`. `pre-commit` refuses to stage a pointer no remote branch contains, and
-`pre-push` refuses to push this repository while any pointer it carries is
+`land`. `pre-commit` refuses a locked revision no remote branch contains, and
+`pre-push` refuses to push this repository while any revision it locks is
 private. `pre-push` fetches first, so its answer is current.
 
-`wts` is a worktreespace: one more working copy of the whole collection, made as
-jj workspaces or git worktrees depending on the mode. It shares storage rather
-than cloning, so making one costs about a second and a few hundred kilobytes.
+`umbrella wts` makes a worktreespace, and **it does not work here**: this
+repository is a jj repo, and `wts` keeps its markers in a `.git` directory that
+a jj workspace does not have. The limitation is fixable and nobody has fixed it
+yet -- Lillecarl/pymux#316 says where the markers should go instead.
 
-## umbrella is a submodule too
+## umbrella is a source too
 
-It is the tool that checks the submodules out, so a clone made without them has
-to build it anyway. `default.nix` handles that with a branch: it uses the
-`umbrella` checkout when the directory is there, and falls back to the commit it
-pins on GitHub when it is not.
+It is also the tool that fetches the others, so a clone that has fetched
+nothing still has to build it. The lock is what makes that work: `umbrella`
+resolves from `nix/sources.lock` like every other source, with no checkout and
+no fallback pinned by hand.
 
 So editing umbrella needs nothing special. Change a file in `umbrella/` and
-`nix build --file . umbrella` reads it, the same as any other submodule.
-
-Moving the fallback is the one manual step. Change `rev` in `default.nix`, set
-`hash` to `lib.fakeHash`, move the `umbrella` checkout out of the way, run
-`nix build --file . umbrella`, and paste back the hash nix reports.
+`nix build --file . umbrella` reads it, the same as any other source.
