@@ -50,10 +50,6 @@ rec {
   # input without a cycle. Lillecarl/pymux#274.
   pyterm-pytest = pkgs.python3Packages.callPackage sources.pyterm-pytest { };
 
-  ptterm = pkgs.python3Packages.callPackage sources.ptterm {
-    inherit prompt-toolkit ptyhost pyte;
-  };
-
   # The builders set: every third-party package lifted out of nixpkgs, and
   # this collection's own sources on top. The two tops of the graph are in
   # it so far -- the migration goes top down, because a nixpkgs package
@@ -62,13 +58,18 @@ rec {
   pythonSet = ps.mkPythonSet {
     inherit python;
 
-    # The three sources pymux reaches, as nixpkgs built them. They are named
-    # here rather than looked up, because `nixpkgsRootsFor` resolves a name
-    # against nixpkgs and nixpkgs has a `prompt-toolkit` and a `pyte` of its
-    # own. The closure walker brings pyte and ptyhost in behind ptterm.
+    # The sources that have not converted yet, as nixpkgs built them. They
+    # are named here rather than looked up, because `nixpkgsRootsFor`
+    # resolves a name against nixpkgs and nixpkgs has a `prompt-toolkit`, a
+    # `pyte` and a `ptyhost` of its own.
+    #
+    # pyte and ptyhost used to arrive behind ptterm, which the closure
+    # walker followed. ptterm is a builders package now and propagates
+    # nothing, so they are named here until they convert as well.
     nixpkgsRoots = [
-      ptterm
       prompt-toolkit
+      pyte
+      ptyhost
       pyterm-pytest
     ]
     ++ ps.nixpkgsRootsFor {
@@ -76,6 +77,7 @@ rec {
       projectRoots = [
         sources.pymux
         sources.txterm
+        sources.ptterm
       ];
       # Everything this collection supplies for itself. A name left off
       # this list would not fail: nixpkgs would answer with its own
@@ -92,12 +94,21 @@ rec {
     };
 
     overlay = final: _prev: {
+      # The one terminal widget that the other two repositories reach: pymux
+      # arranges several of them, and txterm borrows the conformance suite
+      # that this one builds. Both take it from the set, which is why it had
+      # to convert first -- a lifted package keeps a package's files and not
+      # the passthru those tools ride on.
+      ptterm = final.callPackage sources.ptterm {
+        inherit (ps) mkProject;
+      };
+
       pymux = final.callPackage sources.pymux {
         inherit (ps) mkProject;
-        # ptterm and pyterm-pytest as nixpkgs built them, for the tools its
-        # checks borrow from their passthru. The set holds them too, and
-        # those copies are what pymux imports.
-        inherit ptterm pyterm-pytest;
+        # pyterm-pytest as nixpkgs built it, for the tools its checks borrow
+        # from its passthru. The set holds it too, and that copy is what
+        # pymux imports.
+        inherit pyterm-pytest;
         # The one that draws, which its checks need for kitty.
         inherit (pkgs) mesa;
         # The readers of the clipboard fence.
@@ -111,9 +122,6 @@ rec {
       # was asked for and nothing propagates into it.
       txterm = final.callPackage sources.txterm {
         inherit (ps) mkProject;
-        # Not a dependency of the package: its suite runs the conformance
-        # suite of xterm, which is built once in ptterm.
-        inherit ptterm;
       };
     };
   };
@@ -132,6 +140,12 @@ rec {
     inherit (pythonSet.txterm) checks;
     inherit (pythonSet.txterm) meta;
   };
+
+  # The widget itself, and not a virtualenv of it. Nothing runs ptterm: it
+  # is a library that two repositories import, and what this collection
+  # reaches from here is the passthru -- the checks below, and the
+  # conformance suites that pymux and txterm borrow.
+  ptterm = pythonSet.ptterm;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
