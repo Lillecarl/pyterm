@@ -262,12 +262,29 @@ in
     `nativeBuildInputs` or extend `passthru` rather than silently replacing
     what the renderer derived from pyproject.toml.
 
+    **`root` is the repository, and the source is cut from it here.** Seven
+    projects spelled the same allowlist, and the two things that differed
+    between them -- which directories hold the package, and what the README
+    is called -- are both declared in `pyproject.toml` already. So they are
+    read, not repeated. A denylist is what this replaces: a `lib.cleanSource`
+    carries `tests`, `docs`, the `__pycache__` beside every module and the
+    `.ruff_cache` a local run rewrites, and then a test run changes the
+    source hash of the package and rebuilds everything above it.
+    Lillecarl/pymux#320.
+
+    `packages` is for a project whose backend is not hatchling and so has no
+    `[tool.hatch.build.targets.wheel]` to read: pyte is flit and
+    prompt-toolkit is setuptools with a `src` layout. Naming it is better
+    than guessing from the project name, which would be right for one of
+    them and wrong for the other.
+
     Type: mkProject :: AttrSet -> (AttrSet -> derivation)
   */
   mkProject =
     {
-      projectRoot,
+      root,
       python,
+      packages ? null,
       extra ? (_rendered: { }),
     }:
     {
@@ -276,6 +293,38 @@ in
       resolveBuildSystem,
     }:
     let
+      pyproject = lib.importTOML (root + "/pyproject.toml");
+
+      directories =
+        if packages != null then
+          packages
+        else
+          pyproject.tool.hatch.build.targets.wheel.packages
+            or (throw "${toString root}: no `[tool.hatch.build.targets.wheel] packages`, so `mkProject` needs `packages`");
+
+      # `py.typed` as well as the modules: it is what tells a checker that
+      # the annotations here are meant to be read, and it is a file the
+      # wheel has to carry. The filter is what keeps `__pycache__` out.
+      modules = lib.fileset.fileFilter (
+        file: file.hasExt "py" || file.name == "py.typed"
+      );
+
+      # A path the project declares and the wheel needs, when it is there.
+      # prompt-toolkit declares no `license-files`, so LICENSE is taken on
+      # sight rather than on its say-so.
+      optionalFile =
+        name: lib.optional (name != null && builtins.pathExists (root + "/${name}")) (root + "/${name}");
+
+      projectRoot = lib.fileset.toSource {
+        inherit root;
+        fileset = lib.fileset.unions (
+          map (directory: modules (root + "/${directory}")) directories
+          ++ [ (root + "/pyproject.toml") ]
+          ++ optionalFile (pyproject.project.readme or null)
+          ++ optionalFile "LICENSE"
+        );
+      };
+
       rendered =
         (pyproject-nix.build.lib.renderers.mkDerivation {
           project = pyproject-nix.lib.project.loadPyproject { inherit projectRoot; };
