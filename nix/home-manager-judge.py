@@ -43,6 +43,10 @@ EXPECTED = {
 #: with them: it has no client to set them on, which is the whole
 #: reason they are a scope of their own. Lillecarl/pymux#223.
 EXPECTED_FOR_CLIENT = [
+    # A bare word, which is what most values are. The two below carry
+    # the quoting; this one says a plain value arrives plain.
+    # Lillecarl/pymux#340.
+    ("name", "desk"),
     ("swap-light-and-dark-colors", "on"),
     ("theme", "grey"),
 ]

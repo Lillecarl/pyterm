@@ -96,6 +96,10 @@ let
       clientSettings = {
         theme = "grey";
         swap-light-and-dark-colors = true;
+        # What a person calls the terminals of this machine. A file is
+        # one machine's, so it names every one of them the same.
+        # Lillecarl/pymux#340.
+        name = "desk";
       };
       extraConfig = ''
         bind-key "|" split-window -h

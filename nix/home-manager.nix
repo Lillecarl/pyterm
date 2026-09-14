@@ -142,6 +142,11 @@ in
         says, so over SSH these are the settings of the machine in
         front of you and the panes still run on the other one.
 
+        **A file is one machine's, not one terminal's.** So `name`
+        here calls every terminal on this machine the same thing,
+        which is right for a machine you only have one of them on.
+        `pymux attach -n desk` is how two terminals get two names.
+
         Spelled the same way as `settings`, and read the same way.
       '';
     };
