@@ -274,6 +274,11 @@ rec {
     # port of the colour management of Xlib, and only a comparison against
     # the original says whether the port is right.
     pyte-xcms = pyte.checks.xcms;
+    # The character set tables, judged against xterm's own source. The
+    # national replacement sets are published nowhere as data, so
+    # `charsets.h` is the list and this is what says the copy is right.
+    # Lillecarl/pymux#111.
+    pyte-xterm-tables = pyte.checks.xterm-tables;
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
     ptyhost-unit = ptyhost.checks.unit;
