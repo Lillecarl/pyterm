@@ -259,6 +259,12 @@ rec {
   # A suite is named `<package>-<what it covers>`, and `unit` is the one that
   # needs nothing but python.
   suites = {
+    # The one check that belongs to the collection and to no package:
+    # only the umbrella can see all seven copies of `nix/suite.nix` at
+    # once. Lillecarl/pymux#367.
+    pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
+      inherit sources;
+    };
     pyte-unit = pyte.checks.unit;
     # The property tests of pyte, off a fresh seed. Not a gate: the
     # gate pins the draw so that a green run means the same thing
