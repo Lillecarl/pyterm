@@ -199,7 +199,17 @@ that is really attached.
 
 **Nothing to configure.** asyncssh reads the agent, the keys in `~/.ssh`, and
 `known_hosts`, the way `ssh` does. There is no server mode, no keys of pymux's
-own, and no authentication to design.
+own, and no authentication to design. The one thing pymux sets itself is the
+keepalive, every fifteen seconds with three misses, because a client that waits
+for its link has to learn that the link went.
+
+**A link that drops is a pause.** The panes run on the other machine and they
+survive, so the client shows what happened and opens the link again: half a
+second, then a second, up to thirty, with jitter. Any key tries at once and `q`
+leaves. A refused key, an unknown host key and a socket that is not there never
+retry, because each of those is an answer the far machine gave and will give
+again. A server that closes the connection never retries either: that is what a
+detach is. Lillecarl/pymux#256.
 
 **Nothing runs on the other machine.** Not a shell, not a pymux, not even to
 find out which socket to open. `ssh://host` with no path lists the sockets over
