@@ -10,9 +10,16 @@
 # Three are on both lists, so they are the screen's and not a front
 # end's:
 #
-#     DATests.test_DA_0                              (#112)
-#     DATests.test_DA_NoParameter                    (#112)
+#     DATests.test_DA_0
+#     DATests.test_DA_NoParameter
 #     ResetSpecialColorTests.test_ResetSpecialColor_Dynamic
+#
+# The two DA tests ask for all thirteen extensions that xterm names. A
+# pane names ten, and the four it leaves out are ones it really does
+# not have: the printer port, the locator port, user windows and the
+# ANSI text locator. `ptterm/tests/DEVIATIONS.md` entry 18 says why,
+# and says how the two character set numbers left that list and came
+# back to it. Lillecarl/pymux#112. Lillecarl/pymux#111.
 #
 # Five are here alone, and all five ask the terminal to change size.
 # A widget sits in a layout that somebody else owns, so `Terminal` says
