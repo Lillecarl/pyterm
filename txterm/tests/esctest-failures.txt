@@ -26,9 +26,19 @@
 #     DECSETTests.test_DECSET_DECNCSM
 #     ManipulateSelectionDataTests.test_ManipulateSelectionData_default
 #
-# The first follows from the resize: DECNCSM is about what DECCOLM
-# clears, and nothing here changes columns. The second is not
-# understood yet, and is Lillecarl/pymux#124.
+# **Both follow from the resize, and neither is a difference in what
+# the screen does.** DECNCSM is about what DECCOLM clears, and nothing
+# here changes columns.
+#
+# The second is esctest2's own bookkeeping. Measured: the test fails
+# identically on both hosts, with the same "Timeout waiting to read"
+# from `escio.ReadOSC("52")`, because the screen writes the clipboard
+# and does not read it (`ptterm/tests/DEVIATIONS.md` entry 19). It is
+# decorated `@optionRequired(terminal="xterm", option=XTERM_WINOPS_ENABLED)`,
+# and that decorator downgrades a failure to an expected one when the
+# option is absent. ptterm's host passes the option because it answers
+# a resize; this one does not, so the same failure is excused here and
+# counted there. Lillecarl/pymux#124.
 #
 # To write this file again:
 #     nix build --file . checks.txterm-esctest.run
