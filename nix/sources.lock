@@ -1,11 +1,11 @@
 {
   "sources": {
     "prompt-toolkit": {
-      "lastModified": 1789340524,
-      "narHash": "sha256-An886kdPmnq64VOofUZHa+yCr8JPiRoVMR6l7D73/fI=",
+      "lastModified": 1789394876,
+      "narHash": "sha256-fP8+wiZF08IzwmNf1tqPORk5OgFCCl1BGP0GJ1+qh2g=",
       "owner": "Lillecarl",
       "repo": "python-prompt-toolkit",
-      "rev": "92dd52aa9f68dba5583f3a70454ae612aa0d8e85",
+      "rev": "f8e00986b20d7c1a2847c045983c02e21351c8d5",
       "type": "github"
     },
     "ptterm": {
@@ -25,11 +25,11 @@
       "type": "github"
     },
     "pymux": {
-      "lastModified": 1789394394,
-      "narHash": "sha256-74WLxIHz8me1LqboMEs+yioiRQ2QXLxbw6ZRLLXNAj0=",
+      "lastModified": 1789394876,
+      "narHash": "sha256-JYaLWTGMfZMiNi/WZQ0dx/v0IagOr2jiaRUt2qT/Gi0=",
       "owner": "Lillecarl",
       "repo": "pymux",
-      "rev": "a1115e6e24be0445f3f70143c1a51b548d53346a",
+      "rev": "6b9431b4e56384e9c5d1bd9ba3a825eba034d753",
       "type": "github"
     },
     "pyproject-nix": {
