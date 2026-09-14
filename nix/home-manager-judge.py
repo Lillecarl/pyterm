@@ -18,6 +18,7 @@ import shlex
 import sys
 
 from pymux.commands import handle_command
+from pymux.config import client_options_in
 from pymux.main import Pymux
 
 #: What the check asked the module to write, and what each one has to be
@@ -36,6 +37,15 @@ EXPECTED = {
     # quoting has to escape rather than only wrap.
     "status-right": ("status_right", "it's #h"),
 }
+
+#: What `clientSettings` asked for, and what the client has to take out
+#: of the same file. The server reads these lines too and does nothing
+#: with them: it has no client to set them on, which is the whole
+#: reason they are a scope of their own. Lillecarl/pymux#223.
+EXPECTED_FOR_CLIENT = [
+    ("swap-light-and-dark-colors", "on"),
+    ("theme", "grey"),
+]
 
 
 def read(pymux, name):
@@ -62,6 +72,14 @@ def main(path):
     # after the settings arrive as commands and not as text.
     if pymux.key_bindings_manager.binding_on("|", needs_prefix=True) is None:
         problems.append("extraConfig: the bind-key line bound nothing")
+
+    # And the client's half of the same file.
+    announced = sorted(client_options_in(path))
+    if announced != EXPECTED_FOR_CLIENT:
+        problems.append(
+            "clientSettings: a client would announce %r, and the module "
+            "asked for %r" % (announced, EXPECTED_FOR_CLIENT)
+        )
 
     if problems:
         print("The generated configuration file is not one pymux accepts:")

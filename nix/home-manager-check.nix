@@ -90,6 +90,13 @@ let
         # the grep below is what sees it.
         bell = null;
       };
+      # The other scope. A client option is written into the same file
+      # and read by the client rather than by the server, so the judge
+      # asks both halves about it. Lillecarl/pymux#223.
+      clientSettings = {
+        theme = "grey";
+        swap-light-and-dark-colors = true;
+      };
       extraConfig = ''
         bind-key "|" split-window -h
       '';

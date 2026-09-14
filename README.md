@@ -123,7 +123,7 @@ Nothing has to be asked for by name. The default of the module's `package`
 option builds pymux out of the source the module came from, and that source
 resolves every project through `nix/sources.lock`.
 
-Two options carry the configuration:
+Three options carry the configuration:
 
     programs.pymux = {
       enable = true;
@@ -132,6 +132,9 @@ Two options carry the configuration:
         base-index = 1;
         mode-keys = "vi";
         status-left = "[#h:#S] ";
+      };
+      clientSettings = {
+        theme = "base16:gruvbox-dark-hard";
       };
       extraConfig = ''
         bind-key "|" split-window -h
@@ -144,6 +147,14 @@ names, which are the ones in `pymux/pymux/options.py`. There is no typed
 option per setting, because that list already exists and a second one here
 would go stale. `true` and `false` become `on` and `off`, a number becomes
 itself, a string is quoted, and `null` writes no line at all.
+
+`clientSettings` writes `set-client-option` lines, spelled the same way.
+**Those belong to the terminal a person is sitting at, not to the server**:
+the theme, and whether it is drawn the other way round. Only a client can
+know what its terminal is, so the client reads this file itself and tells
+the server what it says. Over SSH that means the theme is the one on the
+machine in front of you while the panes still run on the other one.
+Lillecarl/pymux#223.
 
 `extraConfig` is added after the settings. Key bindings go there: `bind-key`
 takes a command and its own arguments, and a Nix option cannot spell that
