@@ -348,6 +348,11 @@ rec {
     # runs beside other jobs. It is instrumentation, and reading it is
     # the work.
     pymux-profile = pymux.checks.profile;
+    # That the profiler still runs, which is a gate even though what it
+    # measures is not. The instrument broke and nothing said so, because
+    # the only thing that would have run it was the thing that broke.
+    # Lillecarl/pymux#360.
+    pymux-profile-starts = pymux.checks.profileStarts;
     # What pymux costs a keystroke, against the same program on a bare
     # pty. Not a gate either, and for the same reason the profile is
     # not: a millisecond belongs to the machine that read it. It is
