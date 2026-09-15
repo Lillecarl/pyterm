@@ -9,11 +9,11 @@
       "type": "github"
     },
     "ptterm": {
-      "lastModified": 1789426190,
-      "narHash": "sha256-goqqPwyZ5/gPcB5elRPZeIKDbNYP7MYSeMzy8nc+sBw=",
+      "lastModified": 1789439863,
+      "narHash": "sha256-l80jQDTBBav/WvCsZhpdjgcrjK6o7HoQ+RDm6GE6OOY=",
       "owner": "Lillecarl",
       "repo": "ptterm",
-      "rev": "451c54bc337acdd338e5d645c8c9343411e47782",
+      "rev": "79710820bd233a62578f4562943d0dadf7c94d51",
       "type": "github"
     },
     "ptyhost": {
