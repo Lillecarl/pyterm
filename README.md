@@ -601,8 +601,9 @@ tab stops are the same. Those are real questions, and the direct plug-in is
 where they are asked.
 
 The bytes reach the pane through a fifo, and a fence goes down it behind each
-payload: an OSC 52, which ptterm hands to pymux and pymux writes to its
-client. Seeing the fence on the wire proves the pane consumed the payload.
+payload: an OSC 99 that names no notification, which ptterm hands to pymux and
+pymux passes to its client untouched. Seeing the fence on the wire proves the
+pane consumed the payload.
 `pymux/tests/vterm_middleman.py` says the rest.
 
     PYMUX_VTERM_TRACE=1 nix build --file . checks.pymux-vterm.run
