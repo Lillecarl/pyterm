@@ -342,10 +342,10 @@ by hand with a comment that says what closed it.
 **Prefer closing an issue with the commit that fixes it.** `Closes
 Lillecarl/pymux#89` in the commit is the record that costs nothing extra and
 cannot drift from the fix. It closes the issue only when the commit reaches the
-default branch, and our sources land on `graphics-protocol` while the default
-is `master` -- so it does not fire yet (Lillecarl/pymux#416). Land anyway,
-then close by hand, with the comment naming the commit. The by-hand close is
-the fallback, not the practice.
+default branch, and the sources land there since #416 moved their default
+bookmarks over -- so `land` closes it, and the by-hand close with a comment
+naming the commit is for the cross-repository case only: a ptterm commit that
+fixes a pymux issue closes nothing by itself.
 
 This covers anything that improves the collection: architecture, a question to
 research, a fix, a test that is missing, a name that misleads. It does not
