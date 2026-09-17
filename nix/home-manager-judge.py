@@ -73,8 +73,10 @@ def main(path):
             )
 
     # The binding the check put in `extraConfig`. It proves that the lines
-    # after the settings arrive as commands and not as text.
-    if pymux.key_bindings_manager.binding_on("|", needs_prefix=True) is None:
+    # after the settings arrive as commands and not as text. A bare
+    # `bind-key` binds into the prefix table, which is the table
+    # `binding_on` reads by default.
+    if pymux.key_bindings_manager.binding_on("|") is None:
         problems.append("extraConfig: the bind-key line bound nothing")
 
     # And the client's half of the same file.
