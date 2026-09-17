@@ -31,7 +31,7 @@
   # The six that are the code.
   pyte = {
     url = "https://github.com/Lillecarl/pyte.git";
-    branch = "graphics-protocol";
+    branch = "master";
     path = ../pyte;
   };
   ptyhost = {
@@ -41,7 +41,7 @@
   };
   ptterm = {
     url = "https://github.com/Lillecarl/ptterm.git";
-    branch = "graphics-protocol";
+    branch = "master";
     path = ../ptterm;
   };
   txterm = {
@@ -51,7 +51,7 @@
   };
   pymux = {
     url = "https://github.com/Lillecarl/pymux.git";
-    branch = "graphics-protocol";
+    branch = "master";
     path = ../pymux;
   };
 
