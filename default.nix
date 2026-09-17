@@ -2,6 +2,8 @@
   pkgs ? import <nixpkgs> { },
 }:
 let
+  inherit (pkgs) lib;
+
   # The eight sources the umbrella owns, each one a directory.
   #
   # `nix/sources.nix` says where each comes from and `nix/sources.lock` says
@@ -21,7 +23,186 @@ let
   pyproject-nix = import sources.pyproject-nix { inherit (pkgs) lib; };
   ps = pkgs.callPackage ./nix/python-set.nix { inherit pyproject-nix; };
 
-  python = pkgs.python3;
+  # THE interpreter of the collection, and THE place its package scopes
+  # are bent. pymux and every Python dependency of it build against
+  # this one binding: the roots below resolve in its package scope,
+  # every lifted package is checked against its ABI
+  # (`nix/python-set.nix` throws on a mismatch), and the virtualenvs
+  # are built from it.
+  #
+  # The bends ride `pythonPackagesExtensions`, not the interpreter's
+  # own `packageOverrides`, because a check input of a raw nixpkgs
+  # package resolves through the build-host splice of the scope, and
+  # the splices keep the original flavors -- derivation arguments are
+  # filtered out of an interpreter `.override`
+  # (`pkgs/development/interpreters/python/cpython/default.nix:182`).
+  # The extension list is composed into every scope of every
+  # interpreter (`pkgs/development/interpreters/python/passthrufun.nix:91`),
+  # so one bend holds for all of them at once.
+  #
+  # Each bend is scoped to 3.15 and no further: on the default python
+  # this snapshot's packages are cached and tested, and bending them
+  # would only cost a rebuild.
+  pkgs' = pkgs.extend (_final: prev: {
+    pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+      (pyFinal: pyPrev:
+        lib.optionalAttrs (lib.versionAtLeast pyPrev.python.pythonVersion "3.15") {
+          # The python315 of this snapshot is 3.15.0rc2, one release
+          # candidate past the packages it brings, and the binary cache
+          # holds no 3.15 build of them -- so the packages build from
+          # source here, and their own suites run against the RC. What
+          # follows is every package that would not build, brought to
+          # the state upstream had reached for 3.15: a version bump
+          # where one exists, and where none does, the smallest suite
+          # bend that leaves the runtime untouched.
+
+          # Nothing here draws into Tk -- the collection is a terminal
+          # application -- and tkinter is the RC's own module, so there
+          # is no version to bump: its Tk test suite fails wholesale.
+          # matplotlib's default backend choice is the only thing that
+          # reaches tkinter, so the Tk build is dropped from the
+          # closure rather than carried untested.
+          matplotlib = pyPrev.matplotlib.override { enableTk = false; };
+
+          # Already the latest release (1.3.1). One test of a traceback
+          # decoration does not survive the RC: a "did you mean"
+          # suggestion renders differently. nixpkgs bends 3.14 breakage
+          # the same way (`pkgs/development/python-modules/exceptiongroup/default.nix:47`);
+          # this is the 3.15rc2 addition to it.
+          exceptiongroup = pyPrev.exceptiongroup.overrideAttrs (old: {
+            pytestFlagsArray = (old.pytestFlagsArray or [ ]) ++ [
+              "--deselect"
+              "tests/test_formatting.py::test_nameerror_suggestions_in_group"
+            ];
+          });
+
+          # Bumped to the latest release, which tracks 3.15 final: the
+          # snapshot's 3.2.0 misbehaves on the RC at runtime --
+          # `date.today` reads the real clock where it travelled to
+          # 1970 -- and the packages whose suites take time-machine as
+          # a pytest plugin need the fixed behaviour. The suite of
+          # 3.5.1 imports hypothesis, which is bumped below.
+          time-machine = pyPrev.time-machine.overridePythonAttrs (old: rec {
+            version = "3.5.1";
+            src = pkgs.fetchFromGitHub {
+              owner = "adamchainz";
+              repo = "time-machine";
+              tag = version;
+              hash = "sha256-k/URZJz/kiPg20SYoOblaleIWdB8coaT/nHLAV7dDU0=";
+            };
+            # The suite grew the fuzz modules, and the module this
+            # override re-enters never named hypothesis as a check
+            # input -- 3.2.0's suite did not import it.
+            nativeCheckInputs = (old.nativeCheckInputs or [ ])
+              ++ [ pyFinal.hypothesis ];
+            # The same tz-abbreviation quirk family the module already
+            # disables for Africa/Addis_Ababa ("Assertion Errors
+            # related to Africa/Addis_Ababa"): this tzdata spells
+            # Nairobi's abbreviation `Africa` where the snapshots
+            # expect `EAT`.
+            disabledTests = (old.disabledTests or [ ]) ++ [
+              "test_move_to_naive_string_uses_real_local_timezone"
+              "test_move_to_naive_mode_local_uses_real_local_timezone"
+              "test_move_to_unsupported_destination_keeps_timezone"
+              "test_move_to_naive_mode_error_keeps_timezone"
+              "test_naive_datetime_modes"
+              "test_localtime_and_gmtime_match_datetime"
+            ];
+          });
+
+          # Bumped: 0.20.0's suite builds a stable-ABI wheel to test
+          # its tagging, and the RC refuses it; 0.21.1 is where
+          # upstream tracks 3.15. numpy and everything above it take
+          # this as their build system, so the cascade behind it is
+          # large.
+          meson-python = pyPrev.meson-python.overridePythonAttrs (_old: rec {
+            version = "0.21.1";
+            src = pkgs.fetchPypi {
+              pname = "meson_python";
+              inherit version;
+              hash = "sha256-eLM0XcvA/te5Oefjep+qs1vdquB79i51QsitR5w5WvU=";
+            };
+          });
+
+          # Bumped: the snapshot's 6.156.1 fails its own suite on the
+          # RC, which removed `typing.ByteString` and its tests turn
+          # the warning into an error. numpy names hypothesis among its
+          # check inputs, so this gates numpy. The vendored rust tree
+          # changed with the version, and the module pins that hash as
+          # a literal, so the vendor fetch is recomputed here, in the
+          # module's own shape, with the hash the failed staging
+          # reported.
+          hypothesis = pyPrev.hypothesis.overridePythonAttrs (old: rec {
+            version = "6.168.0";
+            src = pkgs.fetchFromGitHub {
+              owner = "HypothesisWorks";
+              repo = "hypothesis";
+              tag = "v${version}";
+              hash = "sha256-e2RM1TaPz/C1VovVstmZJ1CICE0v7OVhsrR08a6epP0=";
+            };
+            cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+              inherit (old) pname;
+              inherit version src;
+              sourceRoot = "${src.name}/hypothesis";
+              cargoRoot = "rust";
+              hash = "sha256-6fvvOeaRDsoMoO6Jbk9jbl+xChSq1Vitsr5FqLzN8oI=";
+            };
+          });
+
+          # Bumped: the snapshot's suite calls the private
+          # `glob.glob1`, and the RC removed it. 4.65.0 is where
+          # upstream moved off it.
+          fonttools = pyPrev.fonttools.overridePythonAttrs (_old: rec {
+            version = "4.65.0";
+            src = pkgs.fetchFromGitHub {
+              owner = "fonttools";
+              repo = "fonttools";
+              tag = version;
+              hash = "sha256-6chZncheSuqoQdFk68fmNP46GNjhujOoM8IPQqqSspc=";
+            };
+          });
+
+          # Already the latest release (15.0.0): two inspector tests
+          # render differently on the RC, and there is no newer release
+          # to take their snapshots from. The runtime the collection
+          # uses is untouched, so only the two tests are skipped.
+          rich = pyPrev.rich.overridePythonAttrs (old: {
+            disabledTests = (old.disabledTests or [ ]) ++ [
+              "test_inspect_builtin_function_except_python311"
+              "test_inspect_builtin_function_only_python311"
+              "test_inspect_integer_with_methods_python38_and_python39"
+              "test_inspect_integer_with_methods_python310only"
+              "test_inspect_integer_with_methods_python311"
+              "test_attrs_broken"
+            ];
+          });
+
+          # Already the latest release (0.22.1): one socket test of its
+          # suite hits a bad file descriptor on the RC, in the C
+          # extension the collection never reaches -- anyio tests the
+          # uvloop backend, and the collection uses anyio's own loop.
+          uvloop = pyPrev.uvloop.overridePythonAttrs (old: {
+            disabledTests = (old.disabledTests or [ ]) ++ [
+              "test_socket_sync_remove"
+            ];
+          });
+
+          # Bumped: mypyc's compiled-run tests fail on the snapshot's
+          # 2.1.0; 2.3.1 is where upstream tracks 3.15.
+          mypy = pyPrev.mypy.overridePythonAttrs (_old: rec {
+            version = "2.3.1";
+            src = pkgs.fetchFromGitHub {
+              owner = "python";
+              repo = "mypy";
+              tag = "v${version}";
+              hash = "sha256-EkZVBWlT8l3oIC9UuDEJua6dxFDIL0o9k/3FJJFqMB4=";
+            };
+          });
+        })
+    ];
+  });
+
+  python = pkgs'.python315;
 in
 rec {
   inherit pkgs sources;
