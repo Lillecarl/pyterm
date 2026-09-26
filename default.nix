@@ -539,6 +539,12 @@ rec {
     # the two lists together say what a front end adds.
     txterm-esctest = txterm.checks.esctest;
     pymux-unit = pymux.checks.unit;
+    # The `ssh://` client against a real openssh sshd, rather than the
+    # asyncssh server that stands in for one everywhere else. It is the
+    # only check that can say whether openssh agrees: the unix socket
+    # channel every remote attach rests on, and the two directions a
+    # port is forwarded in.
+    pymux-openssh = pymux.checks.openssh-interop;
     # What it costs to lay a window out and draw the frame around its
     # panes, in bytecode instructions. The sibling of
     # `ptterm-instructions`, one layer up: that one measures what a
