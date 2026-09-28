@@ -35,6 +35,7 @@
           default = defaultNix.pymux;
           inherit (defaultNix)
             pymux
+            libpymux
             ptterm
             pyte
             prompt-toolkit

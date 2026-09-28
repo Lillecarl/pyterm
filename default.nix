@@ -202,7 +202,146 @@ let
     ];
   });
 
-  # The collection on one interpreter: the seven packages of the set,
+  /**
+    Every `pyproject.toml` project this collection builds, as the
+    directories that hold them.
+
+    Seven are a source of the umbrella each. The eighth is libpymux,
+    which is a project inside the repository of pymux: a caller that
+    only drives a server takes that one and none of the rest.
+
+    `nixpkgsRootsFor` reads the dependency declarations out of these,
+    so a set that holds our packages knows what they ask nixpkgs for.
+  */
+  projectRoots = [
+    sources.pymux
+    (sources.pymux + "/libpymux")
+    sources.txterm
+    sources.ptterm
+    sources.pyte
+    sources.prompt-toolkit
+    sources.ptyhost
+    sources.pyterm-pytest
+  ];
+
+  /**
+    Everything this collection supplies for itself.
+
+    A name left off this list would not fail: nixpkgs has a `pyte` and
+    a `prompt-toolkit` of its own, so the lookup would succeed and the
+    set would hold upstream's package under our name.
+  */
+  suppliedNames = [
+    "pymux"
+    "libpymux"
+    "ptterm"
+    "prompt-toolkit"
+    "pyterm-pytest"
+    "pyte"
+    "ptyhost"
+    "txterm"
+  ];
+
+  /**
+    The nixpkgs packages this collection needs, on one interpreter.
+
+    Nothing of ours is in it. The list is what the `pyproject.toml`
+    files ask for and nixpkgs supplies -- wcwidth, pytest, textual,
+    asyncssh and the rest -- read out of the declarations rather than
+    out of a build.
+
+    # Inputs
+
+    `python`
+    : The interpreter whose package scope the names resolve in
+  */
+  nixpkgsRootsOn = python: ps.nixpkgsRootsFor {
+    inherit python projectRoots;
+    exclude = suppliedNames;
+  };
+
+  /**
+    This collection's own packages, as an overlay of a pyproject.nix
+    builders set.
+
+    A set outside this repository takes it the same way `mkScope` does:
+    compose it into `mkPythonSet`'s `overlay`, with `nixpkgsRootsOn` in
+    front of it so that everything these declare is there to resolve.
+
+    Nothing in it knows which interpreter it is on. The set is built
+    for the one it was handed.
+  */
+  overlay = final: _prev: {
+    # The test equipment the collection's suites share: the seats, the
+    # drivers, the budgets. It takes the floor the widgets take and never
+    # a layer above it, so every repository's checks can take it as an
+    # input without a cycle. Lillecarl/pymux#274.
+    pyterm-pytest = final.callPackage sources.pyterm-pytest {
+      inherit (ps) mkProject;
+    };
+
+    # The toolkit under ptterm and pymux, and the one source here that is
+    # somebody else's. It is packaged from this set like the rest, and its
+    # own `pyproject.toml` is read exactly as upstream wrote it: a
+    # build-system swap is not a patch upstream could take.
+    #
+    # The attribute is `prompt-toolkit` and the project is
+    # `prompt_toolkit`. That is PEP 503 normalisation, and it is the
+    # spelling every dependency of it resolves to.
+    prompt-toolkit = final.callPackage sources.prompt-toolkit {
+      inherit (ps) mkProject;
+    };
+
+    # The floor: the parser, the screen and everything under them. Both
+    # widgets take it, and it takes nothing of theirs.
+    pyte = final.callPackage sources.pyte {
+      inherit (ps) mkProject;
+    };
+
+    # The layer that runs a program on a pty. It depends on nothing here,
+    # which is the point: two widgets need it, and neither may drag a
+    # toolkit in behind it. Lillecarl/pymux#85.
+    ptyhost = final.callPackage sources.ptyhost {
+      inherit (ps) mkProject;
+    };
+
+    # The one terminal widget that the other two repositories reach: pymux
+    # arranges several of them, and txterm borrows the conformance suite
+    # that this one builds. Both take it from the set, which is why it had
+    # to convert first -- a lifted package keeps a package's files and not
+    # the passthru those tools ride on.
+    ptterm = final.callPackage sources.ptterm {
+      inherit (ps) mkProject;
+    };
+
+    # The client library, and the smallest thing here anybody imports:
+    # a socket, a JSON message and platformdirs. It is what a program
+    # that drives a server takes, in place of pymux and the toolkit
+    # behind it. pymux takes it too -- the room a server binds in is
+    # what both sides have to agree about.
+    libpymux = final.callPackage (sources.pymux + "/libpymux") {
+      inherit (ps) mkProject;
+    };
+
+    pymux = final.callPackage sources.pymux {
+      inherit (ps) mkProject;
+      # The one that draws, which its checks need for kitty.
+      inherit (pkgs) mesa;
+      # The readers of the clipboard fence.
+      inherit (pkgs) wl-clipboard xclip;
+    };
+
+    # The second front end: the same screen, drawn with Textual. It
+    # takes the pure layer from pyte and no prompt_toolkit comes with
+    # it, which is what Lillecarl/pymux#82 asks for -- and the set is
+    # what keeps that true now, because a virtualenv holds exactly what
+    # was asked for and nothing propagates into it.
+    txterm = final.callPackage sources.txterm {
+      inherit (ps) mkProject;
+    };
+  };
+
+  # The collection on one interpreter: the eight packages of the set,
   # the runnable venvs of the two front ends, and the dev environment.
   # Nothing here knows which python it is on -- the set is built for
   # the one interpreter it was handed, and the bends of the scopes
@@ -211,97 +350,8 @@ let
     python:
     let
       set = ps.mkPythonSet {
-        inherit python;
-
-        # Nothing of ours is named here any more. The list is what the seven
-        # `pyproject.toml` files ask for and nixpkgs supplies -- wcwidth,
-        # pytest, textual, asyncssh and the rest -- read out of the
-        # declarations rather than out of a build.
-        nixpkgsRoots = ps.nixpkgsRootsFor {
-          inherit python;
-          projectRoots = [
-            sources.pymux
-            sources.txterm
-            sources.ptterm
-            sources.pyte
-            sources.prompt-toolkit
-            sources.ptyhost
-            sources.pyterm-pytest
-          ];
-          # Everything this collection supplies for itself. A name left off
-          # this list would not fail: nixpkgs would answer with its own
-          # package, and the set would hold upstream's under our name.
-          exclude = [
-            "pymux"
-            "ptterm"
-            "prompt-toolkit"
-            "pyterm-pytest"
-            "pyte"
-            "ptyhost"
-            "txterm"
-          ];
-        };
-
-        overlay = final: _prev: {
-          # The test equipment the collection's suites share: the seats, the
-          # drivers, the budgets. It takes the floor the widgets take and never
-          # a layer above it, so every repository's checks can take it as an
-          # input without a cycle. Lillecarl/pymux#274.
-          pyterm-pytest = final.callPackage sources.pyterm-pytest {
-            inherit (ps) mkProject;
-          };
-
-          # The toolkit under ptterm and pymux, and the one source here that is
-          # somebody else's. It is packaged from this set like the rest, and its
-          # own `pyproject.toml` is read exactly as upstream wrote it: a
-          # build-system swap is not a patch upstream could take.
-          #
-          # The attribute is `prompt-toolkit` and the project is
-          # `prompt_toolkit`. That is PEP 503 normalisation, and it is the
-          # spelling every dependency of it resolves to.
-          prompt-toolkit = final.callPackage sources.prompt-toolkit {
-            inherit (ps) mkProject;
-          };
-
-          # The floor: the parser, the screen and everything under them. Both
-          # widgets take it, and it takes nothing of theirs.
-          pyte = final.callPackage sources.pyte {
-            inherit (ps) mkProject;
-          };
-
-          # The layer that runs a program on a pty. It depends on nothing here,
-          # which is the point: two widgets need it, and neither may drag a
-          # toolkit in behind it. Lillecarl/pymux#85.
-          ptyhost = final.callPackage sources.ptyhost {
-            inherit (ps) mkProject;
-          };
-
-          # The one terminal widget that the other two repositories reach: pymux
-          # arranges several of them, and txterm borrows the conformance suite
-          # that this one builds. Both take it from the set, which is why it had
-          # to convert first -- a lifted package keeps a package's files and not
-          # the passthru those tools ride on.
-          ptterm = final.callPackage sources.ptterm {
-            inherit (ps) mkProject;
-          };
-
-          pymux = final.callPackage sources.pymux {
-            inherit (ps) mkProject;
-            # The one that draws, which its checks need for kitty.
-            inherit (pkgs) mesa;
-            # The readers of the clipboard fence.
-            inherit (pkgs) wl-clipboard xclip;
-          };
-
-          # The second front end: the same screen, drawn with Textual. It
-          # takes the pure layer from pyte and no prompt_toolkit comes with
-          # it, which is what Lillecarl/pymux#82 asks for -- and the set is
-          # what keeps that true now, because a virtualenv holds exactly what
-          # was asked for and nothing propagates into it.
-          txterm = final.callPackage sources.txterm {
-            inherit (ps) mkProject;
-          };
-        };
+        inherit python overlay;
+        nixpkgsRoots = nixpkgsRootsOn python;
       };
     in
     rec {
@@ -310,7 +360,14 @@ let
       # what the outside reaches from them is the passthru -- the
       # checks, and the conformance suites that pymux and txterm
       # borrow.
-      inherit (set) ptterm pyte prompt-toolkit ptyhost pyterm-pytest;
+      inherit (set)
+        ptterm
+        pyte
+        prompt-toolkit
+        ptyhost
+        pyterm-pytest
+        libpymux
+        ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
       # everything it declares, and the themes of the pastel. The checks
@@ -365,7 +422,26 @@ rec {
   # either way -- `scopes.python315.pymux`, and so on.
   default = scopes.python3;
 
+  # The builders of the set, for somebody assembling one of their own.
+  # `nix/python-set.nix` says what each does. A caller that wants this
+  # collection inside their own python set needs these three, the
+  # `overlay` below and a `pkgs` of their own: nothing here imports
+  # nixpkgs, so the one passed in is the one everything builds against.
+  inherit (ps) mkPythonSet nixpkgsRootsFor mkProject;
+
+  inherit
+    overlay
+    nixpkgsRootsOn
+    projectRoots
+    suppliedNames
+    ;
+
   pymux = default.pymux;
+
+  # The client library on its own, for a program that drives a server
+  # and does not draw one. It is the one package here that carries no
+  # toolkit and no parser.
+  libpymux = default.libpymux;
 
   txterm = default.txterm;
 
