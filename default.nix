@@ -376,6 +376,9 @@ let
       pymux = set.mkVirtualEnv "pymux" { pymux = [ "catppuccin" ]; } // {
         inherit (set.pymux) checks;
         inherit (set.pymux) meta;
+        # `<pymux-pane>` compiled, which is a thing to reach on its own:
+        # a front end built with node links it and never the venv.
+        inherit (set.pymux) element;
       };
 
       # pymux with `pymux web`, which serves a pane to a browser.
@@ -459,6 +462,18 @@ rec {
   # pymux with `pymux web`. See the comment beside it: the web parts are a
   # thing to choose, not the default.
   pymux-web = default.pymux-web;
+
+  # `<pymux-pane>` on its own: the compiled element, its declarations and a
+  # `package.json`, so a front end built with node links `$out` as
+  # `node_modules/pymux-pane` and imports it by name.
+  #
+  # **A separate output and not a path inside the venv.** The same files are
+  # in `lib/python3.x/site-packages/pymux/web/static/`, and that path
+  # carries the interpreter's version in it: a consumer reaching in there
+  # breaks when the collection moves interpreter. This one does not move.
+  # `checks.pymux-element` judges the declarations it publishes.
+  # Lillecarl/pymux#461.
+  pymux-element = default.pymux.element;
 
   # The client library on its own, for a program that drives a server
   # and does not draw one. It is the one package here that carries no
@@ -698,9 +713,11 @@ rec {
     # TEMPORARY scratch measurement for Lillecarl/pymux#258. Remove it
     # with the script and the check it runs.
     pymux-wire = pymux.checks.wire;
-    # That `<pymux-pane>` parses, and that its hand-written declarations
-    # describe it. node is in this check's inputs and in nothing pymux
-    # ships: a checker at build time, and nothing at run time.
+    # That the declarations `<pymux-pane>` publishes are usable. The
+    # element is TypeScript and the package build compiles it, so a type
+    # that does not hold fails that build; this asks the question the
+    # compiler cannot, with a consumer's own settings on the emitted
+    # `.d.ts`. A compiler at build time, and nothing at run time.
     pymux-element = pymux.checks.element;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
