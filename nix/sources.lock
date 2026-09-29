@@ -9,11 +9,11 @@
       "type": "github"
     },
     "ptterm": {
-      "lastModified": 1790655170,
-      "narHash": "sha256-/JP6nYomUiqrBqOM7vLrmFgSLbBfxtwxu+Q4dL27pHc=",
+      "lastModified": 1790686023,
+      "narHash": "sha256-w3NZzvc0hwzLaooSLt+kDFO4ZJgRwWO9Psqe+mICJ4g=",
       "owner": "Lillecarl",
       "repo": "ptterm",
-      "rev": "dd725dee13cdf542982b8f712255e33c255f4b4f",
+      "rev": "9c472090277b159f722386b591bafc918e65ef6c",
       "type": "github"
     },
     "ptyhost": {
@@ -41,11 +41,11 @@
       "type": "github"
     },
     "pyte": {
-      "lastModified": 1790678598,
-      "narHash": "sha256-SRKOhe90VdKlck2BxsbGIH6+6SUGow87h73n506Kf9k=",
+      "lastModified": 1790686022,
+      "narHash": "sha256-Xr5DEorTNEEr8b8kcTFS6bYqwxKQR0m30gwtEkOodqE=",
       "owner": "Lillecarl",
       "repo": "pyte",
-      "rev": "f07a9dc226051451b1c0dc5b30673ea30ce62e97",
+      "rev": "639171dba5d07b2cd3e4435549d2c25f4a73edcd",
       "type": "github"
     },
     "pyterm-pytest": {
