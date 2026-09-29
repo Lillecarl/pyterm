@@ -315,10 +315,44 @@ in
       optionalFile =
         name: lib.optional (name != null && builtins.pathExists (root + "/${name}")) (root + "/${name}");
 
+      # What a wheel carries besides modules, read from the project's own
+      # declaration rather than named again here.
+      #
+      # **`modules` above is why this exists.** It takes `.py` and
+      # `py.typed` and nothing else, which is right for a source tree that
+      # holds tests and pictures and recordings -- and wrong for a package
+      # that ships data. Measured: pymux grew `pymux/web/static/`, the
+      # wheel held every `.py` beside it and none of it, and the program
+      # that serves those files answered nothing and said nothing about
+      # why. So a project that ships data says so in
+      # `[tool.hatch.build.targets.wheel] artifacts`, and this reads the
+      # same list hatchling reads. Lillecarl/pymux#461.
+      #
+      # A trailing `/*` means the directory whole, and nothing else is
+      # allowed: `lib.fileset` has no globbing, so a pattern that meant one
+      # thing to hatchling and another here would ship a wheel that differs
+      # from the declaration. It throws instead.
+      artifacts = pyproject.tool.hatch.build.targets.wheel.artifacts or [ ];
+
+      wholeDirectory =
+        pattern:
+        let
+          named = lib.removeSuffix "/*" pattern;
+        in
+        if lib.hasInfix "*" named then
+          throw (
+            "${toString root}: `artifacts` entry ${pattern} is not a directory. "
+            + "mkProject takes `some/directory/*` and no other glob, because "
+            + "`lib.fileset` has none."
+          )
+        else
+          root + "/${named}";
+
       projectRoot = lib.fileset.toSource {
         inherit root;
         fileset = lib.fileset.unions (
           map (directory: modules (root + "/${directory}")) directories
+          ++ map wholeDirectory artifacts
           ++ [ (root + "/pyproject.toml") ]
           ++ optionalFile (pyproject.project.readme or null)
           ++ optionalFile "LICENSE"

@@ -378,6 +378,21 @@ let
         inherit (set.pymux) meta;
       };
 
+      # pymux with `pymux web`, which serves a pane to a browser.
+      #
+      # **A second attribute and not an extra on the one above**, because
+      # somebody installing a terminal multiplexer should not get a web
+      # server they did not ask for. The cost is small -- `websockets` is
+      # pure python and the front end is five files -- and the reason is
+      # not the closure: a port that shows a terminal is a thing to choose
+      # rather than to find. Lillecarl/pymux#461.
+      pymux-web = set.mkVirtualEnv "pymux-web" {
+        pymux = [
+          "catppuccin"
+          "web"
+        ];
+      };
+
       # The same, for the Textual front end: the venv is what has a
       # runnable `bin/txterm`, and the checks ride along from the
       # package inside it.
@@ -394,6 +409,9 @@ let
           "test"
           "dev"
           "catppuccin"
+          # So that `pymux web` runs by hand in the shell, and the suite
+          # that judges it has the library in the sandbox.
+          "web"
         ];
       };
     };
@@ -437,6 +455,10 @@ rec {
     ;
 
   pymux = default.pymux;
+
+  # pymux with `pymux web`. See the comment beside it: the web parts are a
+  # thing to choose, not the default.
+  pymux-web = default.pymux-web;
 
   # The client library on its own, for a program that drives a server
   # and does not draw one. It is the one package here that carries no
