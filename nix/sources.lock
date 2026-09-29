@@ -49,11 +49,11 @@
       "type": "github"
     },
     "pyterm-pytest": {
-      "lastModified": 1790671535,
-      "narHash": "sha256-+Lr9lwxsVCl6szZj7emKQvTgxLxeD19H6G+XXzjV43I=",
+      "lastModified": 1790682296,
+      "narHash": "sha256-XhPrnxhjqbHjGVz1xZM60pd+7baIa2gMAtBiYFw+6S0=",
       "owner": "Lillecarl",
       "repo": "pyterm-pytest",
-      "rev": "25208a54d49d21d474b756eb62b60e113ad31cad",
+      "rev": "031d993f212f9c7211b2b5c1200c31c154cb78b5",
       "type": "github"
     },
     "txterm": {
