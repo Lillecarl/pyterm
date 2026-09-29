@@ -698,6 +698,10 @@ rec {
     # TEMPORARY scratch measurement for Lillecarl/pymux#258. Remove it
     # with the script and the check it runs.
     pymux-wire = pymux.checks.wire;
+    # That `<pymux-pane>` parses, and that its hand-written declarations
+    # describe it. node is in this check's inputs and in nothing pymux
+    # ships: a checker at build time, and nothing at run time.
+    pymux-element = pymux.checks.element;
     pymux-pty = pymux.checks.pty;
     # The same end to end test, with the server and the client in one
     # process and no socket between them.
