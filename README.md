@@ -238,6 +238,39 @@ where the first server of a user listens. Name the path when that is wrong.
 already running a server. Spawning one is the other half of
 Lillecarl/pymux#90.
 
+## Watching a pane in a browser
+
+    pymux -S /tmp/pymux.sock.carl.0 web
+    pymux -S /tmp/pymux.sock.carl.0 web --port 9000 --allow-input
+
+It prints a URL with a token in it. **Showing only**, until
+`--allow-input`: the guard is the server's, not the page's, so a viewer that
+sends keys without it is refused rather than ignored. `--bind` takes an
+address, and anything but `127.0.0.1` lets another machine reach the terminal
+with the token as the only guard and no TLS unless something else adds it.
+
+**The server never imports a web library.** `pymux web` runs beside a server and
+reaches it over the ordinary socket, one stream per viewer, so the web half is
+an extra: `pip install pymux[web]`, or
+
+    nix build --file . pymux-web
+
+which is a second attribute rather than a flag on `pymux`, because somebody
+installing a terminal multiplexer should not get a web server they did not ask
+for. A missing extra says which extra rather than raising `ImportError` at
+somebody.
+
+**A caller with a front end of its own needs none of it.** `stream-pane` is the
+socket packet the adapter itself sends, and `libpymux` has it: frames in, keys
+out, no HTTP anywhere.
+
+    nix build --file . pymux-element
+
+That is `<pymux-pane>` as an npm package — the custom element the page uses,
+written in TypeScript and compiled at build time, with the declarations
+generated beside it. It needs no `unsafe-inline`, because every rule it draws
+goes through the CSSOM. Lillecarl/pymux#461, Lillecarl/pymux#466.
+
 ## Tests
 
 A package exposes its own tests through `passthru.checks`. This repository gives
@@ -270,6 +303,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
     nix build --file . checks.pymux-vttest-pictures # the same, of vttest
+    nix build --file . checks.pymux-element  # what <pymux-pane> decides, in node
     nix build --file . checks.pyterm-home-manager # the module, judged by pymux
     nix build --file . checks.all            # every one that is a gate
 
