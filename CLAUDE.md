@@ -336,16 +336,22 @@ One issue per finding. An issue that needs the word "and" is two issues.
 
 **Every issue lives in `Lillecarl/pymux`, and most commits do not.** A bare
 `Closes #89` in a ptterm or pyte commit names an issue of that repository, which
-is not the one you mean. Write `Closes Lillecarl/pymux#89`, and close the issue
-by hand with a comment that says what closed it.
+is not the one you mean. Write `Closes Lillecarl/pymux#89`.
 
-**Prefer closing an issue with the commit that fixes it.** `Closes
-Lillecarl/pymux#89` in the commit is the record that costs nothing extra and
-cannot drift from the fix. It closes the issue only when the commit reaches the
-default branch, and the sources land there since #416 moved their default
-bookmarks over -- so `land` closes it, and the by-hand close with a comment
-naming the commit is for the cross-repository case only: a ptterm commit that
-fixes a pymux issue closes nothing by itself.
+**Prefer closing an issue with the commit that fixes it.** That line is the
+record that costs nothing extra and cannot drift from the fix. It closes the
+issue when the commit reaches the default branch, and the sources land there
+since #416 moved their default bookmarks over -- so `land` closes it.
+
+**A cross-repository `Closes` closes it too.** Measured: pyte `03aba48a` carried
+`Closes Lillecarl/pymux#426`, and the closing event on #426 names that commit,
+seconds after the push. GitHub resolves the keyword across repositories when the
+pusher can write to both, and one person owns all eight.
+
+So nothing needs closing by hand. What is left is the comment naming the
+revision, because the issue is where somebody looks for it. Write that with `gh
+issue comment`, never with `--comment` on a close: the close is refused as
+already done and the text goes with it.
 
 This covers anything that improves the collection: architecture, a question to
 research, a fix, a test that is missing, a name that misleads. It does not
@@ -356,7 +362,7 @@ cover the task you are on. Finish that.
 Never stop with nothing to do while the list is stale. `gh issue list` is
 work. One pass:
 
-- Close what this session closed, and say in the comment what closed it.
+- Comment the revision on what this session closed. `land` did the closing.
 - Correct an issue this session contradicted. A wrong issue costs more than
   no issue.
 - Split one that grew a second concern.
