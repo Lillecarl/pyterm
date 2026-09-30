@@ -1,0 +1,14 @@
+# How `codex` reaches the local mock. Copy this to `$CODEX_HOME/config.toml`
+# (the default `$CODEX_HOME` is `~/.codex`), or point `CODEX_HOME` at a
+# directory holding it, and export `PROBE_API_KEY` to any non-empty value.
+# `codex` speaks only the Responses API, which the mock serves at
+# `/v1/responses`.
+model = "gpt-probe"
+model_provider = "probe"
+model_reasoning_effort = "low"
+
+[model_providers.probe]
+name = "probe"
+base_url = "http://127.0.0.1:4010/v1"
+env_key = "PROBE_API_KEY"
+wire_api = "responses"

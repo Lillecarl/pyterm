@@ -10,6 +10,8 @@
   lib,
   devEnv,
   umbrella,
+  # The mock model API the agent CLIs are driven against.
+  aimock,
   # pkgs.jj is a JSON stream editor. jujutsu is the version control system.
   jujutsu,
   git,
@@ -48,6 +50,7 @@ mkShell {
     devEnv
     (justTheBinaries umbrella)
     (justTheBinaries black)
+    aimock
     jujutsu
     git
     ruff

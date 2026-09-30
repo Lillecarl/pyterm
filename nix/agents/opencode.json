@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "anthropic": {
+      "options": {
+        "baseURL": "http://127.0.0.1:4010/v1",
+        "apiKey": "mock"
+      },
+      "models": {
+        "claude-probe": { "name": "Probe" }
+      }
+    }
+  },
+  "model": "anthropic/claude-probe"
+}

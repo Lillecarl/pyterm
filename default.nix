@@ -427,6 +427,15 @@ rec {
   # which the lock makes possible without it.
   umbrella = (import sources.umbrella { inherit pkgs; }).umbrella;
 
+  # The mock model API the agent CLIs are driven against, so a scroll or a
+  # repaint can be reproduced without a provider and without a token.
+  # `nix/agents/README.md` is how each agent is aimed at it, and
+  # `nix/agents/fixtures` is what it answers.
+  #
+  # It is a third-party tool nixpkgs does not hold, and node is in the build
+  # closure for it alone: nothing the collection ships reaches it.
+  aimock = pkgs.callPackage ./pkgs/aimock { nodejs = pkgs.nodejs_22; };
+
   # The collection's package scopes, one per interpreter: the same
   # seven sources and the same venvs, built on each python the
   # collection supports. The bends of the scopes live in the one place
@@ -591,6 +600,13 @@ rec {
     # once. Lillecarl/pymux#367.
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
+    };
+    # The mock the agent CLIs are driven against: the server comes up and
+    # every wire format answers from a fixture. It gates the fixtures and the
+    # package, not the agents -- their binaries are not this collection's to
+    # pin.
+    aimock-fixtures = pkgs.callPackage ./nix/agents/check.nix {
+      inherit sources aimock;
     };
     pyte-unit = pyte.checks.unit;
     # The property tests of pyte, off a fresh seed. Not a gate: the
@@ -765,6 +781,6 @@ rec {
   devEnv = default.devEnv;
 
   shell = pkgs.callPackage ./pkgs/shell {
-    inherit devEnv umbrella;
+    inherit devEnv umbrella aimock;
   };
 }
