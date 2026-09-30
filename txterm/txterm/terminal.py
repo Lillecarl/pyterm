@@ -17,6 +17,7 @@ a word of the other, which is what Lillecarl/pymux#82 asks for.
 
 import os
 import sys
+import time
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional
 
@@ -25,7 +26,7 @@ from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
 from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
 from pyte.screen import Screen
-from pyte.streams import Stream
+from pyte.streams import GroundTimer, Stream
 from ptyhost import Process
 from ptyhost.backends import Backend
 from rich.segment import Segment
@@ -39,6 +40,10 @@ from .keys import data_of
 from .style import style_of
 
 __all__ = ["Terminal"]
+
+#: How long a sequence may stay open in a widget before the next bytes
+#: drop it and return the parser to plain text. Lillecarl/pymux#390.
+_GROUND_TIMEOUT = 5
 
 #: Reversed, and not reversed. Three things reverse a cell and each one
 #: turns the last: "SGR 7" on the cell, DECSCNM over the whole screen,
@@ -239,6 +244,7 @@ class Terminal(Widget, can_focus=True):
         )
         self.stream = Stream(self.emulator)
         self.stream.attach(self.emulator)
+        self._ground_timer = GroundTimer(self.stream, _GROUND_TIMEOUT, time.monotonic)
 
         #: The pty. It needs a running event loop, so it is made when
         #: the widget mounts and not when it is built.
@@ -280,7 +286,7 @@ class Terminal(Widget, can_focus=True):
     def on_mount(self) -> None:
         self._process = Process(
             backend=self._backend,
-            receive=self.stream.feed,
+            receive=self._ground_timer.feed,
             invalidate=self.refresh,
             done_callback=lambda: self.post_message(self.Exited(self)),
             # A pane that nobody is looking at parses when the loop has
