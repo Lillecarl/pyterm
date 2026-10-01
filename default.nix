@@ -329,6 +329,8 @@ let
       inherit (pkgs) mesa;
       # The readers of the clipboard fence.
       inherit (pkgs) wl-clipboard xclip;
+      # The static checker that `pymux-types` runs.
+      inherit (pkgs) pyrefly;
     };
 
     # The second front end: the same screen, drawn with Textual. It
@@ -668,6 +670,10 @@ rec {
     # the two lists together say what a front end adds.
     txterm-esctest = txterm.checks.esctest;
     pymux-unit = pymux.checks.unit;
+    # The types of pymux, held by a static checker rather than by a run:
+    # a `Mode` member added and not handled by the `match` in
+    # `run_pymux` fails here. Lillecarl/pymux#486.
+    pymux-types = pymux.checks.types;
     # The `ssh://` client against a real openssh sshd, rather than the
     # asyncssh server that stands in for one everywhere else. It is the
     # only check that can say whether openssh agrees: the unix socket
