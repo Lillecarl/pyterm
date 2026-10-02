@@ -1,11 +1,11 @@
 {
   "sources": {
     "prompt-toolkit": {
-      "lastModified": 1790979126,
-      "narHash": "sha256-o9i+PEhozS8TZHEMFb94/KDaDFMdb3IDGC7M2yJoswk=",
+      "lastModified": 1790982729,
+      "narHash": "sha256-b38K0pmm+2/K8nGELomywQYeBuwjBYc74GtkgTv84f4=",
       "owner": "Lillecarl",
       "repo": "python-prompt-toolkit",
-      "rev": "3f19cb04f8c12b250a23d5096efbbac5bad5f518",
+      "rev": "574bc73376d62343f389e9fdca7d8837ef5ec3f9",
       "type": "github"
     },
     "ptterm": {
