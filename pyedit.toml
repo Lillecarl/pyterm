@@ -1,0 +1,10 @@
+# pyterm: ruff fix + organize-imports + format on every staged .py file.
+# The prompt-toolkit/ fork is vendored upstream code with its own CI
+# loop (ruff check, ruff format); both passes stand down there.
+exclude = ["prompt-toolkit/**"]
+
+[lsp.ruff]
+command = ["ruff", "server"]
+suffixes = [".py"]
+actions = ["source.fixAll.ruff", "source.organizeImports.ruff"]
+format = true
