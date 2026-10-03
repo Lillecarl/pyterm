@@ -787,13 +787,16 @@ rec {
   # What prompt-toolkit's own CI runs, and a stricter typing pass
   # over changed code, as programs on PATH instead of sandbox
   # verdicts. The checks above judge locked revisions; these judge the
-  # working copy, which is what an edit needs before it is committed.
+  # working copy, which is what an edit needs before it is committed,
+  # and `prompt-toolkit-review` judges one upstream PR base against
+  # head inside a throwaway sandbox the caller names.
   # `nix run --file . prompt-toolkit-ci`, from the prompt-toolkit
   # checkout. `./prompt-toolkit.nix` holds them because upstream cannot
   # take developer tooling for one person's fork.
   inherit (pkgs.callPackage ./prompt-toolkit.nix { inherit devEnv; })
     prompt-toolkit-ci
     prompt-toolkit-pyrefly
+    prompt-toolkit-review
     ;
 
   devEnv = default.devEnv;
