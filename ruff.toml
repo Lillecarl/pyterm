@@ -16,7 +16,7 @@
 # Each package repeats this stanza in its own `pyproject.toml`: the
 # build sandbox sees only that package's tree, so discovery from a
 # file under it must end there. Keep the two in step.
-target-version = "py311"
+target-version = "py314"
 # Pinned: a ruff upgrade must never silently reflow the tree.
 line-length = 120
 
