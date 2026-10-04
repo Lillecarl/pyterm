@@ -15,20 +15,22 @@ the joint between them:
 a word of the other, which is what Lillecarl/pymux#82 asks for.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import time
 from functools import lru_cache
-from typing import Callable, Dict, List, Optional
+from typing import Callable
 
+from ptyhost import Process
+from ptyhost.backends import Backend
+from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
 from pyte.environment import prepare
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
-from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
 from pyte.screen import Screen
 from pyte.streams import GroundTimer, Stream
-from ptyhost import Process
-from ptyhost.backends import Backend
 from rich.segment import Segment
 from rich.style import Style
 from textual import events
@@ -57,9 +59,7 @@ _NOT_REVERSE = Style(reverse=False)
 #: all of these, so one in a cell is a fault here; drawing it would let
 #: the terminal of the user read it as a control of its own, and the
 #: screen after that is anybody's guess.
-_NOT_FOR_A_SCREEN = frozenset(
-    chr(code) for code in list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0))
-)
+_NOT_FOR_A_SCREEN = frozenset(chr(code) for code in list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0)))
 
 
 #: The size is `style_of`'s, because a key here is one of its answers:
@@ -98,7 +98,7 @@ def _visible_char(char: str) -> str:
 
 
 def _in_the_child(
-    before_exec_func: Optional[Callable[[], None]],
+    before_exec_func: Callable[[], None] | None,
 ) -> Callable[[], None]:
     """
     What runs in the child, between the fork and the exec.
@@ -122,9 +122,7 @@ def _in_the_child(
     return hook
 
 
-def create_backend(
-    command: List[str], before_exec_func: Optional[Callable[[], None]] = None
-) -> Backend:
+def create_backend(command: list[str], before_exec_func: Callable[[], None] | None = None) -> Backend:
     "A pty running `command`, for the platform this is."
     if sys.platform.startswith("win"):
         from ptyhost.backends.win32 import Win32Backend
@@ -184,29 +182,29 @@ class Terminal(Widget, can_focus=True):
     class Exited(Message):
         "The program in a terminal has ended."
 
-        def __init__(self, terminal: "Terminal") -> None:
+        def __init__(self, terminal: Terminal) -> None:
             super().__init__()
             self.terminal = terminal
 
         @property
-        def control(self) -> "Terminal":
+        def control(self) -> Terminal:
             return self.terminal
 
     def __init__(
         self,
-        command: Optional[List[str]] = None,
+        command: list[str] | None = None,
         *,
-        before_exec_func: Optional[Callable[[], None]] = None,
-        backend: Optional[Backend] = None,
-        bell_func: Optional[Callable[[], None]] = None,
-        osc_func: Optional[Callable[[str, str], None]] = None,
-        resize_func: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
-        may_resize: Optional[Callable[[], bool]] = None,
-        get_history_limit: Optional[Callable[[], int]] = None,
-        unreadable_key_func: Optional[Callable[[object, int, str], None]] = None,
-        name: Optional[str] = None,
-        id: Optional[str] = None,
-        classes: Optional[str] = None,
+        before_exec_func: Callable[[], None] | None = None,
+        backend: Backend | None = None,
+        bell_func: Callable[[], None] | None = None,
+        osc_func: Callable[[str, str], None] | None = None,
+        resize_func: Callable[[int | None, int | None], None] | None = None,
+        may_resize: Callable[[], bool] | None = None,
+        get_history_limit: Callable[[], int] | None = None,
+        unreadable_key_func: Callable[[object, int, str], None] | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         # Called for a key this pane reads as something else, or not at
@@ -215,9 +213,7 @@ class Terminal(Widget, can_focus=True):
         # Lillecarl/pymux#238.
         self.unreadable_key_func = unreadable_key_func
 
-        self._backend = backend or create_backend(
-            command or ["/bin/bash"], before_exec_func
-        )
+        self._backend = backend or create_backend(command or ["/bin/bash"], before_exec_func)
 
         # The screen belongs to the front end and not to the pty: a
         # `Process` runs a program and pumps its bytes, and what those
@@ -248,7 +244,7 @@ class Terminal(Widget, can_focus=True):
 
         #: The pty. It needs a running event loop, so it is made when
         #: the widget mounts and not when it is built.
-        self._process: Optional[Process] = None
+        self._process: Process | None = None
 
         #: What this widget drew for each row of the page, and the write
         #: count of the screen that it drew it at. A row whose count has
@@ -258,12 +254,12 @@ class Terminal(Widget, can_focus=True):
         #: more than one reader and no way to know how many: `ptterm`
         #: draws the same screen with prompt_toolkit, and pymux gives
         #: several clients one pane. Lillecarl/pymux#126.
-        self._drawn: Dict[int, Strip] = {}
-        self._drawn_at: Dict[int, int] = {}
+        self._drawn: dict[int, Strip] = {}
+        self._drawn_at: dict[int, int] = {}
 
         #: What every remembered row was drawn under. None of it belongs
         #: to a row, so a change to any of it empties the whole memory.
-        self._drawn_under: Optional[tuple] = None
+        self._drawn_under: tuple | None = None
 
         #: Whether the program has been forked yet.
         #:
@@ -353,9 +349,7 @@ class Terminal(Widget, can_focus=True):
 
         data = data_of(event)
         if data:
-            self.process.write_input(
-                self.emulator.encode_key(data, report=self.unreadable_key_func)
-            )
+            self.process.write_input(self.emulator.encode_key(data, report=self.unreadable_key_func))
 
     def on_paste(self, event: events.Paste) -> None:
         "Hand pasted text over, bracketed when the program asked for it."
@@ -365,7 +359,7 @@ class Terminal(Widget, can_focus=True):
 
     # -- drawing ------------------------------------------------------------
 
-    def _cursor_column(self, y: int) -> Optional[int]:
+    def _cursor_column(self, y: int) -> int | None:
         """
         The column the cursor stands on in row `y` of the page, or None
         when the cursor is not on that row.
@@ -459,19 +453,19 @@ class Terminal(Widget, can_focus=True):
         self,
         number: int,
         width: int,
-        cursor_column: Optional[int],
+        cursor_column: int | None,
         ground: Style,
     ) -> Strip:
         "One row of the page, built from its cells."
         emulator = self.emulator
-        row: Dict[int, Cell] = emulator.page.data_buffer.get(number, {})
+        row: dict[int, Cell] = emulator.page.data_buffer.get(number, {})
         # DECSCNM reverses the whole screen: every cell of it, and the
         # blank ones as well.
         reverse_video = emulator.has_reverse_video
 
-        segments: List[Segment] = []
-        text: List[str] = []
-        current: Optional[Style] = None
+        segments: list[Segment] = []
+        text: list[str] = []
+        current: Style | None = None
 
         for column in range(width):
             cell = row.get(column)
@@ -489,9 +483,7 @@ class Terminal(Widget, can_focus=True):
                 appearance = cell.appearance
 
             style = style_of(appearance)
-            reverse = (
-                appearance.rendition.reverse ^ reverse_video ^ (column == cursor_column)
-            )
+            reverse = appearance.rendition.reverse ^ reverse_video ^ (column == cursor_column)
             if reverse != appearance.rendition.reverse:
                 style = _turned(style, reverse)
 

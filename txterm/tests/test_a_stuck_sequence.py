@@ -7,9 +7,11 @@ the wrong screen for ever. `GroundTimer` bounds that. The rule is
 pyte's; this checks the widget gives itself one. Lillecarl/pymux#484.
 """
 
-from textual.app import App, ComposeResult
+from __future__ import annotations
 
 from no_backend import NoBackend
+from textual.app import App, ComposeResult
+
 from txterm import Terminal
 
 COLUMNS = 20

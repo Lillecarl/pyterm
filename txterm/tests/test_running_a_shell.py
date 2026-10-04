@@ -12,12 +12,15 @@ that ends its program at once is a test that fails once in a dozen runs
 for a reason that has nothing to do with what it asks.
 """
 
+from __future__ import annotations
+
 import asyncio
 import sys
 
-from txterm import Terminal, TerminalApp
 from pyte.modes import PrivateMode
 from pyte.sequences import set_mode
+
+from txterm import Terminal, TerminalApp
 
 #: How long a test may wait for a program to say something, in seconds.
 TIMEOUT = 5.0
@@ -56,10 +59,7 @@ async def until(terminal: Terminal, text: str) -> None:
     deadline = asyncio.get_event_loop().time() + TIMEOUT
     while text not in text_of(terminal):
         if asyncio.get_event_loop().time() > deadline:
-            raise AssertionError(
-                "waited %g seconds for %r; the screen holds %r"
-                % (TIMEOUT, text, text_of(terminal))
-            )
+            raise AssertionError("waited %g seconds for %r; the screen holds %r" % (TIMEOUT, text, text_of(terminal)))
         await asyncio.sleep(TICK)
 
 
@@ -71,11 +71,7 @@ async def test_what_a_program_writes_reaches_the_screen():
 
 async def test_the_program_is_told_how_big_the_pane_is():
     app = TerminalApp(
-        program(
-            "import os\n"
-            "size = os.get_terminal_size()\n"
-            "print('SIZE %d %d' % (size.columns, size.lines))"
-        )
+        program("import os\nsize = os.get_terminal_size()\nprint('SIZE %d %d' % (size.columns, size.lines))")
     )
     async with app.run_test(size=SIZE):
         await until(app.query_one(Terminal), "SIZE 40 10")
@@ -157,9 +153,7 @@ async def test_a_paste_is_bracketed_when_the_program_asked():
     """
     from textual import events
 
-    app = TerminalApp(
-        program("import sys\nprint('GOT %r' % sys.stdin.readline(), flush=True)")
-    )
+    app = TerminalApp(program("import sys\nprint('GOT %r' % sys.stdin.readline(), flush=True)"))
     async with app.run_test(size=SIZE) as pilot:
         terminal = app.query_one(Terminal)
         terminal.stream.feed(set_mode(PrivateMode.BRACKETED_PASTE))

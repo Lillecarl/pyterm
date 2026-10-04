@@ -12,9 +12,11 @@ The widget runs in an application of its own, because `TerminalApp`
 passes no limit and this is the argument under test.
 """
 
-from textual.app import App, ComposeResult
+from __future__ import annotations
 
 from no_backend import NoBackend
+from textual.app import App, ComposeResult
+
 from txterm import Terminal
 
 COLUMNS = 80

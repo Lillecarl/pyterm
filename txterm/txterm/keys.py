@@ -19,7 +19,7 @@ Lillecarl/pymux#119 is that same disagreement, between the two tables
 that already exist.
 """
 
-from typing import Dict
+from __future__ import annotations
 
 from textual import events
 from textual._ansi_sequences import ANSI_SEQUENCES_KEYS
@@ -27,7 +27,7 @@ from textual._ansi_sequences import ANSI_SEQUENCES_KEYS
 __all__ = ("KEY_DATA", "data_of")
 
 
-def _keys_to_data() -> Dict[str, str]:
+def _keys_to_data() -> dict[str, str]:
     """
     The sequence that each key of Textual arrives as.
 
@@ -39,7 +39,7 @@ def _keys_to_data() -> Dict[str, str]:
     the table lists the plain one first: "ctrl+m" is "\\r" and also
     "\\x1b[27;5;13~", and a program that reads a line wants the first.
     """
-    data: Dict[str, str] = {}
+    data: dict[str, str] = {}
     for sequence, keys in ANSI_SEQUENCES_KEYS.items():
         if not isinstance(keys, tuple) or len(keys) != 1:
             continue

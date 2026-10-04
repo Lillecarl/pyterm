@@ -10,16 +10,17 @@ Every test feeds the stream by hand, through a backend that starts no
 program. Nothing forks.
 """
 
+from __future__ import annotations
+
 from no_backend import NoBackend
+from pyte import escape
+from pyte.modes import PrivateMode
+from pyte.osc import Osc
+from pyte.sequences import csi, osc, set_mode
 from rich.color import Color
 from rich.style import Style
+
 from txterm import Terminal, TerminalApp
-from pyte.modes import PrivateMode
-from pyte.sequences import set_mode
-from pyte import escape
-from pyte.sequences import csi
-from pyte.osc import Osc
-from pyte.sequences import osc
 
 #: The size of the pane in every test here.
 SIZE = (20, 5)
@@ -65,9 +66,7 @@ async def test_cells_that_draw_the_same_way_are_one_segment():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed(
-            "ab" + csi(escape.SGR, 31) + "cd" + csi(escape.SGR) + "\r\n"
-        )
+        terminal.stream.feed("ab" + csi(escape.SGR, 31) + "cd" + csi(escape.SGR) + "\r\n")
         assert [segment.text for segment in terminal.render_line(0)] == [
             "ab",
             "cd",
@@ -92,9 +91,7 @@ async def test_a_colour_a_program_named_itself_is_a_triplet():
     app = app_with_a_screen()
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
-        terminal.stream.feed(
-            csi(escape.SGR, 38, 2, 18, 52, 86) + "own" + csi(escape.SGR) + "\r\n"
-        )
+        terminal.stream.feed(csi(escape.SGR, 38, 2, 18, 52, 86) + "own" + csi(escape.SGR) + "\r\n")
         own = styles_of(terminal.render_line(0))[0]
         assert own.color.triplet == (0x12, 0x34, 0x56)
 
@@ -124,10 +121,7 @@ async def test_a_link_travels_as_a_link():
     async with app.run_test(size=SIZE):
         terminal = app.query_one(Terminal)
         terminal.stream.feed(
-            osc(Osc.HYPERLINK, "", "https://example.com")
-            + "here"
-            + osc(Osc.HYPERLINK, "", "")
-            + "\r\n"
+            osc(Osc.HYPERLINK, "", "https://example.com") + "here" + osc(Osc.HYPERLINK, "", "") + "\r\n"
         )
         here = styles_of(terminal.render_line(0))[0]
         assert here.link == "https://example.com"
@@ -172,9 +166,7 @@ async def test_a_pane_that_is_not_focused_draws_no_cursor():
         terminal.stream.feed("ab")
         # Nothing splits the row, because nothing on it draws
         # differently from the rest.
-        assert [segment.text for segment in terminal.render_line(0)] == [
-            "ab" + " " * 18
-        ]
+        assert [segment.text for segment in terminal.render_line(0)] == ["ab" + " " * 18]
 
 
 async def test_a_reversed_cell_under_the_cursor_turns_back():

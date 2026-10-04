@@ -14,10 +14,12 @@ gets that far has found a real entry, which is the thing that matters:
 naming an entry that is not installed is worse than naming xterm.
 """
 
-from pyte.terminfo import TERMINAL_NAME
-from txterm import Terminal, TerminalApp
+from __future__ import annotations
 
+from pyte.terminfo import TERMINAL_NAME
 from test_running_a_shell import SIZE, program, until
+
+from txterm import Terminal, TerminalApp
 
 
 async def test_a_program_is_told_the_name_of_this_screen(monkeypatch):
@@ -63,19 +65,13 @@ async def test_the_name_of_the_outer_terminal_is_gone(monkeypatch):
     the unicode placeholders of kitty, which this screen does not draw.
     """
     monkeypatch.setenv("KITTY_WINDOW_ID", "1")
-    app = TerminalApp(
-        program(
-            "import os\nprint('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"
-        )
-    )
+    app = TerminalApp(program("import os\nprint('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"))
     async with app.run_test(size=SIZE):
         await until(app.query_one(Terminal), "KITTY=[]")
 
 
 async def test_the_rest_of_the_environment_reaches_the_program(monkeypatch):
     monkeypatch.setenv("A_VARIABLE_OF_THE_USER", "kept")
-    app = TerminalApp(
-        program("import os\nprint('KEPT=' + os.environ['A_VARIABLE_OF_THE_USER'])")
-    )
+    app = TerminalApp(program("import os\nprint('KEPT=' + os.environ['A_VARIABLE_OF_THE_USER'])"))
     async with app.run_test(size=SIZE):
         await until(app.query_one(Terminal), "KEPT=kept")

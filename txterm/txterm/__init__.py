@@ -13,6 +13,8 @@ The parsing is `pyte.screen`, which imports no toolkit, and the pty is
 belong to Textual and to nothing else. Lillecarl/pymux#82.
 """
 
+from __future__ import annotations
+
 from .app import TerminalApp
 from .terminal import Terminal
 

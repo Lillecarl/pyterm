@@ -28,6 +28,8 @@
   mkProject,
   callPackage,
   ptterm,
+  # The linter and formatter that the `ruff` check runs.
+  ruff,
 }:
 let
   package =
@@ -59,6 +61,10 @@ let
     fileset = lib.fileset.unions [
       ./tests
       ./pyproject.toml
+      # The `ruff` check reads the package, where the suites above
+      # read the installed one and never look here.
+      ./txterm
+      ./examples
     ];
   };
 
@@ -75,7 +81,7 @@ let
   # comes from the set: ptterm is a builders package too, so the copy in
   # the scope is the one that carries the tools.
   checks = callPackage ./nix/checks.nix {
-    inherit testEnv testSources;
+    inherit testEnv testSources ruff;
     inherit (ptterm) esctest2;
   };
 in

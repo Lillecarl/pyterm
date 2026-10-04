@@ -19,6 +19,8 @@ Two rules.
    almost the same five, and its own copy of this file says so.
 """
 
+from __future__ import annotations
+
 import ast
 from pathlib import Path
 
@@ -141,9 +143,5 @@ def test_the_pty_comes_from_ptyhost():
     Only the widget runs a program. `ptyhost` is the package that does
     it, and nothing here parses what it hands back. Lillecarl/pymux#85.
     """
-    reaching = sorted(
-        name
-        for name in MODULES
-        if any(_root(module) == "ptyhost" for module in _imports(MODULES[name]))
-    )
+    reaching = sorted(name for name in MODULES if any(_root(module) == "ptyhost" for module in _imports(MODULES[name])))
     assert reaching == ["app", "terminal"]

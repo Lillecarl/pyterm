@@ -10,7 +10,7 @@ txterm needs a program to run, and "a widget" is not one.
 Lillecarl/pymux#82.
 """
 
-from typing import List, Optional
+from __future__ import annotations
 
 from ptyhost.backends import Backend
 from textual.app import App, ComposeResult
@@ -44,9 +44,9 @@ class TerminalApp(App):
 
     def __init__(
         self,
-        command: Optional[List[str]] = None,
+        command: list[str] | None = None,
         *,
-        backend: Optional[Backend] = None,
+        backend: Backend | None = None,
     ) -> None:
         super().__init__()
         self._command = command

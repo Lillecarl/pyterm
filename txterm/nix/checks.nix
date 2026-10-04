@@ -17,6 +17,8 @@
   callPackage,
   testSources,
   esctest2,
+  # The linter and formatter that the `ruff` check runs.
+  ruff,
 }:
 let
   inherit (callPackage ./suite.nix { }) suite;
@@ -83,4 +85,36 @@ in
       export TXTERM_ESCTEST_OUT="$out"
     '';
   } "python tests/drive_with_esctest.py";
+
+  # The style of txterm, held by the linter and the formatter rather
+  # than by a run.
+  #
+  # `ruff check` holds the selected rules and `ruff format --check`
+  # holds the layout at width 120, both read from the `pyproject.toml`
+  # beside them. Neither can see the one thing the lazy annotations
+  # rest on -- the presence of `from __future__ import annotations`
+  # in every file -- so a grep holds that: UP037 unquotes only where
+  # the import made the annotation lazy, and stays silent without it.
+  # `ruff.toml` beside the umbrella says what each rule is for.
+  #
+  # The package stays out of the shared `prepare`: a `txterm/` beside
+  # the tests shadows the installed package, and the suites above
+  # judge the artifact, not the tree. The `ruff` check never imports.
+  ruff = suite {
+    name = "txterm-ruff";
+    inputs = [ ruff ];
+    setup = prepare + ''
+      cp -r ${testSources}/txterm ${testSources}/examples .
+    '';
+  } ''
+    export RUFF_CACHE_DIR="$TMPDIR/ruff"
+    ruff check txterm tests examples
+    ruff format --check txterm tests examples
+    missing=$(grep -rL '^from __future__ import annotations' --include='*.py' --exclude-dir='.*' --exclude-dir='__pycache__' txterm tests examples || true)
+    if [ -n "$missing" ]; then
+      echo "files without the future import:"
+      echo "$missing"
+      exit 1
+    fi
+  '';
 }

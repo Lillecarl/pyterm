@@ -26,8 +26,10 @@ prompt_toolkit draws two of the three. Rich has no field for them.
 not the id that joins its pieces.
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from pyte.cells import appearance_of
 from pyte.colors import SgrColor
@@ -61,7 +63,7 @@ def color_of(color: SgrColor) -> Color:
     return Color.from_ansi(color.index)
 
 
-def _spelled(appearance: "Appearance") -> Style:
+def _spelled(appearance: Appearance) -> Style:
     """
     The Rich style that draws one cell.
 
@@ -73,7 +75,7 @@ def _spelled(appearance: "Appearance") -> Style:
     paints its own ground under the cells.
     """
     rendition = appearance.rendition
-    fields: Dict[str, Any] = {}
+    fields: dict[str, Any] = {}
 
     if rendition.color:
         fields["color"] = color_of(rendition.color)

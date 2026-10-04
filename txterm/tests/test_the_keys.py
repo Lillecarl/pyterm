@@ -7,11 +7,14 @@ key or moves the table fails here, loudly, instead of leaving a terminal
 that quietly drops the arrow keys.
 """
 
+from __future__ import annotations
+
 import pytest
-from textual import events
-from txterm.keys import KEY_DATA, data_of
 from pyte import escape
 from pyte.sequences import csi
+from textual import events
+
+from txterm.keys import KEY_DATA, data_of
 
 
 def press(key: str, character=None) -> events.Key:

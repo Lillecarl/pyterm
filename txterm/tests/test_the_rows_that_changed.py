@@ -16,13 +16,14 @@ emptied before every frame so that it builds everything. Every row of
 every frame has to match.
 """
 
+from __future__ import annotations
+
 from no_backend import NoBackend
-from txterm import Terminal, TerminalApp
 from pyte import escape
 from pyte.modes import PrivateMode
-from pyte.sequences import csi, reset_mode
-from pyte.sequences import Sharp, sharp
-from pyte.sequences import set_mode
+from pyte.sequences import Sharp, csi, reset_mode, set_mode, sharp
+
+from txterm import Terminal, TerminalApp
 
 #: The size of the pane in every test here.
 SIZE = (40, 10)
@@ -40,10 +41,7 @@ def frame(terminal: Terminal, forget: bool):
     if forget:
         terminal._drawn.clear()
         terminal._drawn_at.clear()
-    return [
-        [(segment.text, segment.style) for segment in terminal.render_line(y)]
-        for y in range(LINES)
-    ]
+    return [[(segment.text, segment.style) for segment in terminal.render_line(y)] for y in range(LINES)]
 
 
 #: What a real program does, in the shapes that move rows about. Each
@@ -65,9 +63,7 @@ CHUNKS = [
         + "the other page"
         + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
     ),
-    (
-        csi(escape.CUP, 5, 10) + "late" + csi(escape.IL, 2) + csi(escape.DL, 1)
-    ),  # IL and DL under the cursor.
+    (csi(escape.CUP, 5, 10) + "late" + csi(escape.IL, 2) + csi(escape.DL, 1)),  # IL and DL under the cursor.
     csi(escape.CUP, 1, 1) + csi(escape.DCH, 3) + csi(escape.ICH, 4),  # DCH and ICH.
     "a line that is much longer than forty columns and wraps twice over",
 ]

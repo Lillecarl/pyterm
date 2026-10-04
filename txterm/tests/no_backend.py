@@ -10,6 +10,8 @@ asks of a backend that ptterm's widget never needed: a future that says
 the program ended, and a `kill`.
 """
 
+from __future__ import annotations
+
 import asyncio
 
 __all__ = ("NoBackend",)
