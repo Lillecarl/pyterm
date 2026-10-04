@@ -22,7 +22,7 @@ def press(key: str, character=None) -> events.Key:
 
 
 @pytest.mark.parametrize(
-    "key,data",
+    ("key", "data"),
     [
         ("up", csi(escape.CUU)),
         ("down", csi(escape.CUD)),
