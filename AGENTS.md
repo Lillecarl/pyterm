@@ -23,6 +23,6 @@ upstream could take: minimal, in upstream style, about one thing
 (`prompt-toolkit-upstreaming.md`).
 
 The other six are ours. Maintain them to collection standards:
-`ruff.toml` (15 rules, width 120, lazy annotations, floor 3.14),
+`ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),
 one `checks.*-ruff` gate per package, tests beside the code they
 judge, no backwards compatibility. `CLAUDE.md` holds the rest.
