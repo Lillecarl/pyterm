@@ -56,6 +56,8 @@ line-length = 120
 # removed them, and naming a removed rule fails the run. Preview
 # rules are absent too: they move underfoot. RUF029 is the one to
 # watch graduate -- thirty-nine unused async tasks wait for it.
+#
+# UP035 moves the typing names to `collections.abc`.
 select = [
     "B035",
     "F401",
@@ -157,6 +159,7 @@ select = [
     "UP029",
     "UP033",
     "UP034",
+    "UP035",
     "UP036",
     "UP037",
     "UP039",
