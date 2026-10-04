@@ -9,27 +9,27 @@
       "type": "github"
     },
     "ptterm": {
-      "lastModified": 1790871749,
-      "narHash": "sha256-X+dPcDE7qK0pqUmyt2ahFNL0u+CXFiKYslUPBV3HNx8=",
+      "lastModified": 1791144336,
+      "narHash": "sha256-3dgSYx73zScej2DIHNh4V12chl+Ux16uq5YqO+xknHQ=",
       "owner": "Lillecarl",
       "repo": "ptterm",
-      "rev": "6489154251f22bbc78a3464a3fdf2685f27868e4",
+      "rev": "c7367978e15cc38a693581510b4b4bf29fc58064",
       "type": "github"
     },
     "ptyhost": {
-      "lastModified": 1790653708,
-      "narHash": "sha256-N3qvho78faGtWvNyOPuQZDMn2OeI7qRwRUStI8ugcEk=",
+      "lastModified": 1791144125,
+      "narHash": "sha256-Vvcje4zJj29K0R/5OibMDVFlJoch3zZ67rm7q6TJGIw=",
       "owner": "Lillecarl",
       "repo": "ptyhost",
-      "rev": "2fd63a2c32fa421c4b7c711422654073e9d172f6",
+      "rev": "03f87022abaae765cedcc396d7a87aa9fcabfb08",
       "type": "github"
     },
     "pymux": {
-      "lastModified": 1791111603,
-      "narHash": "sha256-U5242b5tgLomBsk+afv3KCkTei/WJNTNzEGc+bclHlg=",
+      "lastModified": 1791143229,
+      "narHash": "sha256-gW0xcYm554wWJTu7tNto8C3/NjgIRvcuO4hGAtrdqKQ=",
       "owner": "Lillecarl",
       "repo": "pymux",
-      "rev": "193aac8ce98bfb4408d9d7c7424fb25b68d6e73f",
+      "rev": "56159486a0a23b0221b6c9d573da1d864c2173de",
       "type": "github"
     },
     "pyproject-nix": {
@@ -41,11 +41,11 @@
       "type": "github"
     },
     "pyte": {
-      "lastModified": 1791066060,
-      "narHash": "sha256-MkF4bfJT89n/JYWuMKjjGTmbPuFteDFWKznm06I/f3k=",
+      "lastModified": 1791143990,
+      "narHash": "sha256-rf4eQ0Uy3zCl0WMaLTWCiHuS9WfswVabnBMW8HdCpss=",
       "owner": "Lillecarl",
       "repo": "pyte",
-      "rev": "4438877d363cb4857d8953305467e2a94c12391d",
+      "rev": "ac9597c2c149edd273c8f507cedae090a8155ddb",
       "type": "github"
     },
     "pyterm-pytest": {
@@ -57,11 +57,11 @@
       "type": "github"
     },
     "txterm": {
-      "lastModified": 1790812370,
-      "narHash": "sha256-i8sCjvMvj97aRG/hsgI6RHRXRhEOVmcN8Rs+Ob8C4go=",
+      "lastModified": 1791144409,
+      "narHash": "sha256-FWWNzbuKK3L3Q+8B2fFZW1iCR9oYdzs07VkWCApXOko=",
       "owner": "Lillecarl",
       "repo": "txterm",
-      "rev": "63c48f5d2a0a054f2184919c38d4d1aa9e2ac52f",
+      "rev": "5473880283aac47d11702868d80c5a97b3985a32",
       "type": "github"
     },
     "umbrella": {
