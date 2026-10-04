@@ -9,7 +9,7 @@ description = "A terminal widget for Textual."
 readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 # Textual draws, `ptyhost` runs the program, and `pyte` holds the parser
 # and the screen.
 #
@@ -64,9 +64,8 @@ anyio_mode = "auto"
 # sees only this tree, so discovery from a file under it must end
 # here. Keep the two in step; the why lives up there.
 #
-# The floor here is 3.10, not the umbrella's 3.14: the same rules,
-# applied for what this interpreter runs.
-target-version = "py310"
+# The floor is 3.14, like the umbrella's.
+target-version = "py314"
 # Pinned: a ruff upgrade must never silently reflow the tree.
 line-length = 120
 
