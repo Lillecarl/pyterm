@@ -20,8 +20,8 @@ from __future__ import annotations
 import os
 import sys
 import time
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Callable
 
 from ptyhost import Process
 from ptyhost.backends import Backend
