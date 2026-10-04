@@ -331,6 +331,8 @@ let
       inherit (pkgs) wl-clipboard xclip;
       # The static checker that `pymux-types` runs.
       inherit (pkgs) pyrefly;
+      # The linter and formatter that `pymux-ruff` runs.
+      inherit (pkgs) ruff;
     };
 
     # The second front end: the same screen, drawn with Textual. It
@@ -674,6 +676,10 @@ rec {
     # a `Mode` member added and not handled by the `match` in
     # `run_pymux` fails here. Lillecarl/pymux#486.
     pymux-types = pymux.checks.types;
+    # The style of pymux: the selected lint rules, the layout at
+    # width 120, and the future import in every file. `ruff.toml`
+    # beside the umbrella says what each rule is for.
+    pymux-ruff = pymux.checks.ruff;
     # The `ssh://` client against a real openssh sshd, rather than the
     # asyncssh server that stands in for one everywhere else. It is the
     # only check that can say whether openssh agrees: the unix socket

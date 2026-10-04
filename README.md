@@ -290,6 +290,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.txterm-unit   # the Textual widget, drawn and driven
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
+    nix build --file . checks.pymux-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
     nix build --file . checks.pymux-busy    # what a pane nobody looks at costs

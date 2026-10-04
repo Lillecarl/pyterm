@@ -64,3 +64,16 @@ select = [
     "UP037",
     "UP045",
 ]
+
+[lint.isort]
+# libpymux is a distribution of its own, installed like any other
+# dependency: third-party by installation, wherever it is developed.
+# pymux is the project under check: first-party, always.
+#
+# Without the pins the grouping follows PYTHONPATH. Measured: with
+# the dev shell's PYTHONPATH `ruff check` merges `libpymux` with
+# `pymux`, without it (and in the build sandbox, which sets none)
+# it splits them, so the same file passes in one and fails in the
+# other. The pins hold both to one order.
+known-first-party = ["pymux"]
+known-third-party = ["libpymux"]
