@@ -278,9 +278,12 @@ them names, because a test of ptterm against kitty is a test of ptterm, and the
 run needs the ptterm that this collection assembled:
 
     nix build --file . checks.pyte-unit     # the screen, and nothing but python
+    nix build --file . checks.pyte-ruff     # the lint rules, the layout, the future import
     nix build --file . checks.pyte-xcms     # colour specs, against the real Xlib
     nix build --file . checks.ptyhost-unit  # real programs on real ptys
+    nix build --file . checks.ptyhost-ruff  # the lint rules, the layout, the future import
     nix build --file . checks.ptterm-unit   # nothing but python
+    nix build --file . checks.ptterm-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.ptterm-panel  # against seven other terminals
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
     nix build --file . checks.ptterm-vterm  # the test suite of libvterm
@@ -288,6 +291,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.ptterm-instructions # what parsing costs, in instructions
     nix build --file . checks.ptterm-footprint # what a scrollback costs to hold
     nix build --file . checks.txterm-unit   # the Textual widget, drawn and driven
+    nix build --file . checks.txterm-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-ruff   # the lint rules, the layout, the future import

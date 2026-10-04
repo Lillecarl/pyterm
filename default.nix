@@ -296,6 +296,8 @@ let
     # widgets take it, and it takes nothing of theirs.
     pyte = final.callPackage sources.pyte {
       inherit (ps) mkProject;
+      # The linter and formatter that `pyte-ruff` runs.
+      inherit (pkgs) ruff;
     };
 
     # The layer that runs a program on a pty. It depends on nothing here,
@@ -303,6 +305,8 @@ let
     # toolkit in behind it. Lillecarl/pymux#85.
     ptyhost = final.callPackage sources.ptyhost {
       inherit (ps) mkProject;
+      # The linter and formatter that `ptyhost-ruff` runs.
+      inherit (pkgs) ruff;
     };
 
     # The one terminal widget that the other two repositories reach: pymux
@@ -312,6 +316,8 @@ let
     # the passthru those tools ride on.
     ptterm = final.callPackage sources.ptterm {
       inherit (ps) mkProject;
+      # The linter and formatter that `ptterm-ruff` runs.
+      inherit (pkgs) ruff;
     };
 
     # The client library, and the smallest thing here anybody imports:
@@ -342,6 +348,8 @@ let
     # was asked for and nothing propagates into it.
     txterm = final.callPackage sources.txterm {
       inherit (ps) mkProject;
+      # The linter and formatter that `txterm-ruff` runs.
+      inherit (pkgs) ruff;
     };
   };
 
@@ -613,6 +621,9 @@ rec {
       inherit sources aimock;
     };
     pyte-unit = pyte.checks.unit;
+    # The style of pyte: the selected lint rules, the layout at
+    # width 120, and the future import in every file.
+    pyte-ruff = pyte.checks.ruff;
     # The property tests of pyte, off a fresh seed. Not a gate: the
     # gate pins the draw so that a green run means the same thing
     # twice, and this is the run that still finds something new.
@@ -629,6 +640,9 @@ rec {
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
     ptyhost-unit = ptyhost.checks.unit;
+    # The style of ptyhost: the selected lint rules, the layout at
+    # width 120, and the future import in every file.
+    ptyhost-ruff = ptyhost.checks.ruff;
     # The equipment the suites share: the seats, the drivers, the
     # budgets. Its own gate is the ceiling; the suites that use it are
     # the real judges.
@@ -642,6 +656,9 @@ rec {
     # tests that judge the screen rather than the widget moved to
     # `pyte-unit` and `pyte-xcms`. Lillecarl/pymux#11.
     ptterm-unit = ptterm.checks.unit;
+    # The style of ptterm: the selected lint rules, the layout at
+    # width 120, and the future import in every file.
+    ptterm-ruff = ptterm.checks.ruff;
     ptterm-panel = ptterm.checks.panel;
     # The conformance suite of xterm, on a pty of its own. It judges the
     # run against a recorded list of the tests that fail today, and
@@ -667,6 +684,9 @@ rec {
     # The Textual widget: what it draws, read as the segments it
     # returns, and a real program on a pty under Textual's own driver.
     txterm-unit = txterm.checks.unit;
+    # The style of txterm: the selected lint rules, the layout at
+    # width 120, and the future import in every file.
+    txterm-ruff = txterm.checks.ruff;
     # The conformance suite of xterm again, this time as a program in a
     # Textual widget. ptterm runs it on a bare pty with no toolkit, so
     # the two lists together say what a front end adds.
