@@ -86,8 +86,10 @@ RUN_TIMEOUT = 900.0
 NOT_OURS = (
     (
         r"^XtermWinopsTests\.test_XtermWinops_(IconifyDeiconfiy|MoveToXY)",
-        "a widget draws inside somebody else's window, so it has none "
-        "to move, to iconify, or to report the position of.",
+        (
+            "a widget draws inside somebody else's window, so it has none "
+            "to move, to iconify, or to report the position of."
+        ),
     ),
 )
 
