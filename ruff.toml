@@ -58,6 +58,7 @@ line-length = 120
 # watch graduate -- thirty-nine unused async tasks wait for it.
 #
 # UP035 moves the typing names to `collections.abc`.
+# RUF022 sorts `__all__`.
 select = [
     "B035",
     "F401",
@@ -101,6 +102,7 @@ select = [
     "RUF018",
     "RUF019",
     "RUF020",
+    "RUF022",
     "RUF023",
     "RUF024",
     "RUF026",
