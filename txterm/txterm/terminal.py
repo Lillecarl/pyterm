@@ -59,7 +59,7 @@ _NOT_REVERSE = Style(reverse=False)
 #: all of these, so one in a cell is a fault here; drawing it would let
 #: the terminal of the user read it as a control of its own, and the
 #: screen after that is anybody's guess.
-_NOT_FOR_A_SCREEN = frozenset(chr(code) for code in list(range(0x20)) + [0x7F] + list(range(0x80, 0xA0)))
+_NOT_FOR_A_SCREEN = frozenset(chr(code) for code in [*list(range(32)), 127, *list(range(128, 160))])
 
 
 #: The size is `style_of`'s, because a key here is one of its answers:
