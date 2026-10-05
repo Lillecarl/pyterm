@@ -758,6 +758,11 @@ rec {
     # the shortest keystroke of the run to a number, because a loaded
     # machine can only add turns and never take one away.
     pymux-turns = pymux.checks.turns;
+    # What a keystroke costs while another pane streams, in turns of
+    # the event loop. The reproducer for Lillecarl/pymux#507: the same
+    # shortest-keystroke budget the turns check holds, measured alone
+    # and then under a stream, in one server.
+    pymux-contention = pymux.checks.contention;
     # TEMPORARY scratch measurement for Lillecarl/pymux#258. Remove it
     # with the script and the check it runs.
     pymux-wire = pymux.checks.wire;
