@@ -537,8 +537,9 @@ rec {
     # the latency measurement both read a wall clock, which says
     # nothing twice in a sandbox beside other jobs; they are
     # instrumentation, and reading them is the work. The image exercise
-    # has no recorded baseline yet; its first runs are evidence, not
-    # verdicts. The fuzz hunt
+    # is baselined and green, but it stays a manual instrument: ten
+    # minutes of seat time for six steps is worth spending when images
+    # are touched, and not on every run. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
