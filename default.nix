@@ -533,10 +533,12 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Seven are left out, and none of them is a gate. The profile and
+    # Eight are left out, and none of them is a gate. The profile and
     # the latency measurement both read a wall clock, which says
     # nothing twice in a sandbox beside other jobs; they are
-    # instrumentation, and reading them is the work. The fuzz hunt
+    # instrumentation, and reading them is the work. The image exercise
+    # has no recorded baseline yet; its first runs are evidence, not
+    # verdicts. The fuzz hunt
     # finds deviations from kitty faster than they get fixed, so it
     # would fail this most days. The vttest walk draws screens for a
     # person to read and judges none of them. The pictures of vttest
@@ -550,6 +552,7 @@ rec {
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
+        "pymux-image-exercise"
         "pymux-latency"
         "pymux-profile"
         "pymux-theme-pictures"
@@ -775,6 +778,12 @@ rec {
     # The result is a directory of pictures, so a run always leaves
     # something to look at.
     pymux-pictures = pymux.checks.pictures;
+    # An image through a move and two resizes, photographed at each
+    # step, in kitty and through a pane. Not a gate yet: nothing is
+    # recorded against it, so the first runs are the evidence for the
+    # issue they file, and only a recorded baseline can judge later
+    # ones.
+    pymux-image-exercise = pymux.checks.imageExercise;
     # The same picture, of vttest. Not a gate: the chain is proven and
     # the judging is not, and it is minutes of work for one item of
     # vttest's main menu.
