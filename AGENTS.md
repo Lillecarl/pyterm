@@ -26,3 +26,11 @@ The other six are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),
 one `checks.*-ruff` gate per package, tests beside the code they
 judge, no backwards compatibility. `CLAUDE.md` holds the rest.
+
+A change that touches frame cost is profiled on a huge screen too
+(856x178), not only at the issue's geometry: copy, diff and wire
+grow with damage and size, and a small screen hides all three.
+`PYMUX_PROFILE_ROWS/COLUMNS` size `checks.pymux-profile.run`;
+`PYMUX_PROFILE_PHASES` narrows it. Wall-clock moves with box load,
+so report the load beside the number and compare structure
+(self-time ranking), not just milliseconds.
