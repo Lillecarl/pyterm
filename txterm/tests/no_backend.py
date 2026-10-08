@@ -6,13 +6,13 @@ a child on a pty: nothing forks, so nothing has to be waited for or
 cleaned up. What the screen would have read is fed to `stream` by hand.
 
 This is ptterm's `tests/no_backend.py` with the two things `Process`
-asks of a backend that ptterm's widget never needed: a future that says
+asks of a backend that ptterm's widget never needed: an event that says
 the program ended, and a `kill`.
 """
 
 from __future__ import annotations
 
-import asyncio
+import anyio
 
 __all__ = ("NoBackend",)
 
@@ -29,9 +29,9 @@ class NoBackend:
         #: Whether there is anything more to read. Nothing here ever
         #: writes, so there never is and never was.
         self.closed = False
-        #: The program ending. `Process` hangs a callback on it, and
-        #: nothing here ever sets it.
-        self.ready_f = asyncio.get_event_loop().create_future()
+        #: The program ending. `Process` waits on it for `done_callback`,
+        #: and nothing here ever sets it.
+        self.ready_f: anyio.Event = anyio.Event()
 
     def write_text(self, text: str) -> None:
         self.written.append(text)
@@ -42,13 +42,13 @@ class NoBackend:
     def set_size(self, width: int, height: int) -> None:
         self.sizes.append((width, height))
 
-    def start(self) -> None:
+    async def start(self, task_group) -> None:
         pass
 
-    def connect_reader(self) -> None:
+    def pause_reading(self) -> None:
         pass
 
-    def disconnect_reader(self) -> None:
+    def resume_reading(self) -> None:
         pass
 
     def kill(self) -> None:

@@ -54,6 +54,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import anyio
+
 from txterm import Terminal, TerminalApp
 
 HERE = Path(__file__).parent
@@ -179,9 +181,9 @@ class Trial(TerminalApp):
     on its own then, and this waits for that rather than for a clock.
     """
 
-    def __init__(self, command) -> None:
-        super().__init__(command)
-        self.ended = asyncio.Event()
+    def __init__(self, command, task_group) -> None:
+        super().__init__(command, task_group=task_group)
+        self.ended = anyio.Event()
 
     def on_terminal_exited(self, event: Terminal.Exited) -> None:
         self.ended.set()
@@ -245,9 +247,11 @@ def left_out(log: str):
 
 async def drive(runner: Path) -> None:
     "Run the suite in a pane, under Textual's headless driver."
-    app = Trial([sys.executable, str(runner)])
-    async with app.run_test(size=(COLUMNS, ROWS)):
-        await asyncio.wait_for(app.ended.wait(), RUN_TIMEOUT)
+    async with anyio.create_task_group() as task_group:
+        app = Trial([sys.executable, str(runner)], task_group)
+        async with app.run_test(size=(COLUMNS, ROWS)):
+            with anyio.fail_after(RUN_TIMEOUT):
+                await app.ended.wait()
 
 
 def run(tmp: Path, directory: Path) -> str:

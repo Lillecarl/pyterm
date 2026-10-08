@@ -12,6 +12,7 @@ Lillecarl/pymux#82.
 
 from __future__ import annotations
 
+import anyio
 from ptyhost.backends import Backend
 from textual.app import App, ComposeResult
 
@@ -47,13 +48,15 @@ class TerminalApp(App):
         command: list[str] | None = None,
         *,
         backend: Backend | None = None,
+        task_group: anyio.TaskGroup | None = None,
     ) -> None:
         super().__init__()
         self._command = command
         self._backend = backend
+        self._task_group = task_group
 
     def compose(self) -> ComposeResult:
-        yield Terminal(self._command, backend=self._backend)
+        yield Terminal(self._command, backend=self._backend, task_group=self._task_group)
 
     def on_mount(self) -> None:
         self.query_one(Terminal).focus()
@@ -67,4 +70,11 @@ def main() -> None:
     "Run one program in one terminal. `txterm <command>`."
     import sys
 
-    TerminalApp(sys.argv[1:] or None).run()
+    async def run(command: list[str] | None) -> None:
+        async with anyio.create_task_group() as task_group:
+            await TerminalApp(command, task_group=task_group).run_async()
+            # The application is gone, and the program may not be:
+            # leaving the scope waits for its tasks, so end them.
+            task_group.cancel_scope.cancel()
+
+    anyio.run(run, sys.argv[1:] or None)

@@ -16,6 +16,7 @@ naming an entry that is not installed is worse than naming xterm.
 
 from __future__ import annotations
 
+import anyio
 from pyte.terminfo import TERMINAL_NAME
 from test_running_a_shell import SIZE, program, until
 
@@ -25,9 +26,10 @@ from txterm import Terminal, TerminalApp
 async def test_a_program_is_told_the_name_of_this_screen(monkeypatch):
     "And not the name of the terminal that the tests themselves run in."
     monkeypatch.setenv("TERM", "the-outer-terminal")
-    app = TerminalApp(program("import os\nprint('TERM=' + os.environ['TERM'])"))
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "TERM=" + TERMINAL_NAME)
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(program("import os\nprint('TERM=' + os.environ['TERM'])"), task_group=task_group)
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "TERM=" + TERMINAL_NAME)
 
 
 async def test_ncurses_finds_the_entry_that_the_program_is_told_about():
@@ -37,16 +39,18 @@ async def test_ncurses_finds_the_entry_that_the_program_is_told_about():
     The name goes in the answer as well: 256 colours is what the
     fallback says too, and the pair is what only the real entry gives.
     """
-    app = TerminalApp(
-        program(
-            "import curses, os\n"
-            "curses.setupterm()\n"
-            "print('FOUND=%s:%d'"
-            " % (os.environ['TERM'], curses.tigetnum('colors')))"
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program(
+                "import curses, os\n"
+                "curses.setupterm()\n"
+                "print('FOUND=%s:%d'"
+                " % (os.environ['TERM'], curses.tigetnum('colors')))"
+            ),
+            task_group=task_group,
         )
-    )
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "FOUND=%s:256" % TERMINAL_NAME)
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "FOUND=%s:256" % TERMINAL_NAME)
 
 
 async def test_a_program_may_write_a_colour():
@@ -54,9 +58,10 @@ async def test_a_program_may_write_a_colour():
     Without this a program falls back to the palette of `TERM` and
     quantises a 24 bit colour to an index before this screen sees it.
     """
-    app = TerminalApp(program("import os\nprint('DEPTH=' + os.environ['COLORTERM'])"))
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "DEPTH=truecolor")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(program("import os\nprint('DEPTH=' + os.environ['COLORTERM'])"), task_group=task_group)
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "DEPTH=truecolor")
 
 
 async def test_the_name_of_the_outer_terminal_is_gone(monkeypatch):
@@ -65,13 +70,19 @@ async def test_the_name_of_the_outer_terminal_is_gone(monkeypatch):
     the unicode placeholders of kitty, which this screen does not draw.
     """
     monkeypatch.setenv("KITTY_WINDOW_ID", "1")
-    app = TerminalApp(program("import os\nprint('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"))
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "KITTY=[]")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program("import os\nprint('KITTY=[%s]' % os.environ.get('KITTY_WINDOW_ID', ''))"), task_group=task_group
+        )
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "KITTY=[]")
 
 
 async def test_the_rest_of_the_environment_reaches_the_program(monkeypatch):
     monkeypatch.setenv("A_VARIABLE_OF_THE_USER", "kept")
-    app = TerminalApp(program("import os\nprint('KEPT=' + os.environ['A_VARIABLE_OF_THE_USER'])"))
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "KEPT=kept")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program("import os\nprint('KEPT=' + os.environ['A_VARIABLE_OF_THE_USER'])"), task_group=task_group
+        )
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "KEPT=kept")

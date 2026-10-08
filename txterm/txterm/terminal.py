@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from functools import lru_cache
 
+import anyio
 from ptyhost import Process
 from ptyhost.backends import Backend
 from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
@@ -196,6 +197,7 @@ class Terminal(Widget, can_focus=True):
         *,
         before_exec_func: Callable[[], None] | None = None,
         backend: Backend | None = None,
+        task_group: anyio.TaskGroup | None = None,
         bell_func: Callable[[], None] | None = None,
         osc_func: Callable[[str, str], None] | None = None,
         resize_func: Callable[[int | None, int | None], None] | None = None,
@@ -214,6 +216,11 @@ class Terminal(Widget, can_focus=True):
         self.unreadable_key_func = unreadable_key_func
 
         self._backend = backend or create_backend(command or ["/bin/bash"], before_exec_func)
+
+        #: Whose scope the program runs in. The widget mounts without
+        #: one -- drawing tests mount with `NoBackend`, which starts
+        #: nothing -- and a real program is started into it on mount.
+        self._task_group = task_group
 
         # The screen belongs to the front end and not to the pty: a
         # `Process` runs a program and pumps its bytes, and what those
@@ -242,8 +249,9 @@ class Terminal(Widget, can_focus=True):
         self.stream.attach(self.emulator)
         self._ground_timer = GroundTimer(self.stream, _GROUND_TIMEOUT, time.monotonic)
 
-        #: The pty. It needs a running event loop, so it is made when
-        #: the widget mounts and not when it is built.
+        #: The pty. It is made when the widget mounts and not when it
+        #: is built, because mounting is what says there is a scope
+        #: whose task group the program runs in.
         self._process: Process | None = None
 
         #: What this widget drew for each row of the page, and the write
@@ -279,7 +287,7 @@ class Terminal(Widget, can_focus=True):
 
     # -- the life of the program ------------------------------------------
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._process = Process(
             backend=self._backend,
             receive=self._ground_timer.feed,
@@ -289,13 +297,13 @@ class Terminal(Widget, can_focus=True):
             # nothing better to do. Focus is what "looking at" means.
             has_priority=lambda: self.has_focus,
         )
-        self._start(*self.size)
+        await self._start(*self.size)
 
     def on_unmount(self) -> None:
         if self._process is not None:
             self._process.kill()
 
-    def on_resize(self, event: events.Resize) -> None:
+    async def on_resize(self, event: events.Resize) -> None:
         """
         The pane changed size.
 
@@ -306,9 +314,9 @@ class Terminal(Widget, can_focus=True):
         would give a program two columns and two rows that no frame
         ever draws.
         """
-        self._start(*self.size)
+        await self._start(*self.size)
 
-    def _start(self, width: int, height: int) -> None:
+    async def _start(self, width: int, height: int) -> None:
         """
         Tell the pty and the screen how big the pane is, and start the
         program the first time there is a size to start it on.
@@ -326,7 +334,7 @@ class Terminal(Widget, can_focus=True):
         self.emulator.columns = width
 
         if not self._program_started:
-            self._process.start()
+            await self._process.start(self._task_group)
             self._program_started = True
 
     # -- what the user types ----------------------------------------------

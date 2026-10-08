@@ -20,6 +20,7 @@ Lillecarl/pymux#82.
 
 from __future__ import annotations
 
+import anyio
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -47,10 +48,14 @@ class TwoSplits(App):
     ]
     ENABLE_COMMAND_PALETTE = False
 
+    def __init__(self, task_group: anyio.TaskGroup) -> None:
+        super().__init__()
+        self._task_group = task_group
+
     def compose(self) -> ComposeResult:
         with Horizontal():
-            yield Terminal(["/bin/bash"])
-            yield Terminal(["/bin/bash"])
+            yield Terminal(["/bin/bash"], task_group=self._task_group)
+            yield Terminal(["/bin/bash"], task_group=self._task_group)
 
     def on_mount(self) -> None:
         self.query(Terminal).first().focus()
@@ -66,4 +71,12 @@ class TwoSplits(App):
 
 
 if __name__ == "__main__":
-    TwoSplits().run()
+
+    async def main() -> None:
+        async with anyio.create_task_group() as task_group:
+            await TwoSplits(task_group).run_async()
+            # The application is gone, and the shells may not be:
+            # leaving the scope waits for their tasks, so end them.
+            task_group.cancel_scope.cancel()
+
+    anyio.run(main)

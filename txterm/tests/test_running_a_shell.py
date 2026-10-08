@@ -14,9 +14,9 @@ for a reason that has nothing to do with what it asks.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 
+import anyio
 from pyte.modes import PrivateMode
 from pyte.sequences import set_mode
 
@@ -25,7 +25,8 @@ from txterm import Terminal, TerminalApp
 #: How long a test may wait for a program to say something, in seconds.
 TIMEOUT = 5.0
 
-#: How often the loop is turned while waiting.
+#: How often to look while waiting. The pump runs on its own task, so
+#: this only sets how fast the test notices.
 TICK = 0.01
 
 #: What keeps a program alive after it has said its piece. The test
@@ -56,33 +57,37 @@ def text_of(terminal: Terminal) -> str:
 
 async def until(terminal: Terminal, text: str) -> None:
     "Wait for `text` to turn up on the screen."
-    deadline = asyncio.get_event_loop().time() + TIMEOUT
+    deadline = anyio.current_time() + TIMEOUT
     while text not in text_of(terminal):
-        if asyncio.get_event_loop().time() > deadline:
+        if anyio.current_time() > deadline:
             raise AssertionError("waited %g seconds for %r; the screen holds %r" % (TIMEOUT, text, text_of(terminal)))
-        await asyncio.sleep(TICK)
+        await anyio.sleep(TICK)
 
 
 async def test_what_a_program_writes_reaches_the_screen():
-    app = TerminalApp(program("print('hello from the pty')"))
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "hello from the pty")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(program("print('hello from the pty')"), task_group=task_group)
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "hello from the pty")
 
 
 async def test_the_program_is_told_how_big_the_pane_is():
-    app = TerminalApp(
-        program("import os\nsize = os.get_terminal_size()\nprint('SIZE %d %d' % (size.columns, size.lines))")
-    )
-    async with app.run_test(size=SIZE):
-        await until(app.query_one(Terminal), "SIZE 40 10")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program("import os\nsize = os.get_terminal_size()\nprint('SIZE %d %d' % (size.columns, size.lines))"),
+            task_group=task_group,
+        )
+        async with app.run_test(size=SIZE):
+            await until(app.query_one(Terminal), "SIZE 40 10")
 
 
 async def test_a_letter_reaches_the_program():
-    app = TerminalApp(program("print('<' + input() + '>')"))
-    async with app.run_test(size=SIZE) as pilot:
-        terminal = app.query_one(Terminal)
-        await pilot.press("p", "i", "n", "g", "enter")
-        await until(terminal, "<ping>")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(program("print('<' + input() + '>')"), task_group=task_group)
+        async with app.run_test(size=SIZE) as pilot:
+            terminal = app.query_one(Terminal)
+            await pilot.press("p", "i", "n", "g", "enter")
+            await until(terminal, "<ping>")
 
 
 async def test_tab_reaches_the_program():
@@ -91,11 +96,12 @@ async def test_tab_reaches_the_program():
     program decides what tab means, so the widget stops the key before
     the screen and the app see it.
     """
-    app = TerminalApp(program("import sys\nprint('GOT %r' % sys.stdin.read(1))"))
-    async with app.run_test(size=SIZE) as pilot:
-        terminal = app.query_one(Terminal)
-        await pilot.press("tab", "enter")
-        await until(terminal, "GOT '\\t'")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(program("import sys\nprint('GOT %r' % sys.stdin.read(1))"), task_group=task_group)
+        async with app.run_test(size=SIZE) as pilot:
+            terminal = app.query_one(Terminal)
+            await pilot.press("tab", "enter")
+            await until(terminal, "GOT '\\t'")
 
 
 async def test_ctrl_c_reaches_the_program():
@@ -104,18 +110,20 @@ async def test_ctrl_c_reaches_the_program():
     Here it goes down the pty, and the line discipline turns it into the
     signal that every program in a terminal expects.
     """
-    app = TerminalApp(
-        program(
-            "import signal\n"
-            "signal.signal(signal.SIGINT, lambda *_: print('SIGINT', flush=True))\n"
-            "print('READY', flush=True)"
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program(
+                "import signal\n"
+                "signal.signal(signal.SIGINT, lambda *_: print('SIGINT', flush=True))\n"
+                "print('READY', flush=True)"
+            ),
+            task_group=task_group,
         )
-    )
-    async with app.run_test(size=SIZE) as pilot:
-        terminal = app.query_one(Terminal)
-        await until(terminal, "READY")
-        await pilot.press("ctrl+c")
-        await until(terminal, "SIGINT")
+        async with app.run_test(size=SIZE) as pilot:
+            terminal = app.query_one(Terminal)
+            await until(terminal, "READY")
+            await pilot.press("ctrl+c")
+            await until(terminal, "SIGINT")
 
 
 async def test_the_arrow_keys_follow_the_mode_of_the_program():
@@ -128,21 +136,23 @@ async def test_the_arrow_keys_follow_the_mode_of_the_program():
     The program reads a whole line, because a pty hands one over a line
     at a time until a program says otherwise.
     """
-    app = TerminalApp(
-        program(
-            "import sys\n"
-            # DECCKM on, and then read what the up arrow sends.
-            "sys.stdout.write('\\x1b[?1h')\n"
-            "sys.stdout.flush()\n"
-            "print('READY', flush=True)\n"
-            "print('GOT %r' % sys.stdin.readline(), flush=True)"
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program(
+                "import sys\n"
+                # DECCKM on, and then read what the up arrow sends.
+                "sys.stdout.write('\\x1b[?1h')\n"
+                "sys.stdout.flush()\n"
+                "print('READY', flush=True)\n"
+                "print('GOT %r' % sys.stdin.readline(), flush=True)"
+            ),
+            task_group=task_group,
         )
-    )
-    async with app.run_test(size=SIZE) as pilot:
-        terminal = app.query_one(Terminal)
-        await until(terminal, "READY")
-        await pilot.press("up", "enter")
-        await until(terminal, "GOT '\\x1bOA")
+        async with app.run_test(size=SIZE) as pilot:
+            terminal = app.query_one(Terminal)
+            await until(terminal, "READY")
+            await pilot.press("up", "enter")
+            await until(terminal, "GOT '\\x1bOA")
 
 
 async def test_a_paste_is_bracketed_when_the_program_asked():
@@ -153,26 +163,31 @@ async def test_a_paste_is_bracketed_when_the_program_asked():
     """
     from textual import events
 
-    app = TerminalApp(program("import sys\nprint('GOT %r' % sys.stdin.readline(), flush=True)"))
-    async with app.run_test(size=SIZE) as pilot:
-        terminal = app.query_one(Terminal)
-        terminal.stream.feed(set_mode(PrivateMode.BRACKETED_PASTE))
-        terminal.post_message(events.Paste("ping"))
-        await pilot.press("enter")
-        await until(terminal, "GOT '\\x1b[200~ping\\x1b[201~")
+    async with anyio.create_task_group() as task_group:
+        app = TerminalApp(
+            program("import sys\nprint('GOT %r' % sys.stdin.readline(), flush=True)"), task_group=task_group
+        )
+        async with app.run_test(size=SIZE) as pilot:
+            terminal = app.query_one(Terminal)
+            terminal.stream.feed(set_mode(PrivateMode.BRACKETED_PASTE))
+            terminal.post_message(events.Paste("ping"))
+            await pilot.press("enter")
+            await until(terminal, "GOT '\\x1b[200~ping\\x1b[201~")
 
 
 async def test_the_end_of_a_program_reaches_the_application():
     "The widget says so, and an application decides what that means."
 
     class Watching(TerminalApp):
-        def __init__(self, command) -> None:
-            super().__init__(command)
-            self.ended = asyncio.Event()
+        def __init__(self, command, task_group) -> None:
+            super().__init__(command, task_group=task_group)
+            self.ended = anyio.Event()
 
         def on_terminal_exited(self, event) -> None:
             self.ended.set()
 
-    app = Watching(program("pass", linger=False))
-    async with app.run_test(size=SIZE):
-        await asyncio.wait_for(app.ended.wait(), TIMEOUT)
+    async with anyio.create_task_group() as task_group:
+        app = Watching(program("pass", linger=False), task_group)
+        async with app.run_test(size=SIZE):
+            with anyio.fail_after(TIMEOUT):
+                await app.ended.wait()
