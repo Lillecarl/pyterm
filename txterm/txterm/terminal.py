@@ -24,6 +24,7 @@ from collections.abc import Callable
 from functools import lru_cache
 
 import anyio
+import anyio.abc
 from ptyhost import Process
 from ptyhost.backends import Backend
 from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
@@ -197,7 +198,7 @@ class Terminal(Widget, can_focus=True):
         *,
         before_exec_func: Callable[[], None] | None = None,
         backend: Backend | None = None,
-        task_group: anyio.TaskGroup | None = None,
+        task_group: anyio.abc.TaskGroup | None = None,
         bell_func: Callable[[], None] | None = None,
         osc_func: Callable[[str, str], None] | None = None,
         resize_func: Callable[[int | None, int | None], None] | None = None,

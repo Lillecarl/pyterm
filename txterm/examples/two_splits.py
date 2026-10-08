@@ -21,6 +21,7 @@ Lillecarl/pymux#82.
 from __future__ import annotations
 
 import anyio
+import anyio.abc
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -48,7 +49,7 @@ class TwoSplits(App):
     ]
     ENABLE_COMMAND_PALETTE = False
 
-    def __init__(self, task_group: anyio.TaskGroup) -> None:
+    def __init__(self, task_group: anyio.abc.TaskGroup) -> None:
         super().__init__()
         self._task_group = task_group
 

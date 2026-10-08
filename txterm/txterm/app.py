@@ -13,6 +13,7 @@ Lillecarl/pymux#82.
 from __future__ import annotations
 
 import anyio
+import anyio.abc
 from ptyhost.backends import Backend
 from textual.app import App, ComposeResult
 
@@ -48,7 +49,7 @@ class TerminalApp(App):
         command: list[str] | None = None,
         *,
         backend: Backend | None = None,
-        task_group: anyio.TaskGroup | None = None,
+        task_group: anyio.abc.TaskGroup | None = None,
     ) -> None:
         super().__init__()
         self._command = command
