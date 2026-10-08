@@ -4,15 +4,9 @@ A backend that starts no program.
 `Process` needs one, and a test of the drawing wants the widget without
 a child on a pty: nothing forks, so nothing has to be waited for or
 cleaned up. What the screen would have read is fed to `stream` by hand.
-
-This is ptterm's `tests/no_backend.py` with the two things `Process`
-asks of a backend that ptterm's widget never needed: an event that says
-the program ended, and a `kill`.
 """
 
 from __future__ import annotations
-
-import anyio
 
 __all__ = ("NoBackend",)
 
@@ -29,9 +23,10 @@ class NoBackend:
         #: Whether there is anything more to read. Nothing here ever
         #: writes, so there never is and never was.
         self.closed = False
-        #: The program ending. `Process` waits on it for `done_callback`,
-        #: and nothing here ever sets it.
-        self.ready_f: anyio.Event = anyio.Event()
+        #: The program ending. Nothing here ends, so there is none:
+        #: `Process` waits on it for `done_callback`, and a backend
+        #: with no end starts without a task group to watch it.
+        self.ready_f = None
 
     def write_text(self, text: str) -> None:
         self.written.append(text)
