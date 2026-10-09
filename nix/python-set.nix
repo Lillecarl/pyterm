@@ -163,11 +163,11 @@ in
     upstream's package under the name our overlay means to supply.
 
     **PEP 508 markers are evaluated, against the same environment the
-    renderer uses.** A declaration can be conditional -- ptyhost asks for
-    `yawinpty` on Windows, where there is no pty to run a program on -- and
-    such a name has no nixpkgs package to resolve to on this platform.
-    Reading the names without the markers turned that into a build error for
-    a dependency nothing here will ever install.
+    renderer uses.** A declaration can be conditional, such as
+    `"name; sys_platform == 'win32'"`, and such a name has no nixpkgs
+    package to resolve to on this platform. Reading the names without the
+    markers turns that into a build error for a dependency nothing here will
+    ever install.
 
     Everything remaining is resolved against `python.pkgs`, which is where a
     name is expected to be resolvable -- an unresolvable one is a real error
