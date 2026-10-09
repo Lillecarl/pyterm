@@ -795,6 +795,9 @@ rec {
     # is no bare side to subtract from. Reading the pictures is the
     # work. Lillecarl/pymux#161.
     pymux-chrome-pictures = pymux.checks.chromePictures;
+    # Every view before and after `upgrade-server`, in a real terminal,
+    # and each pair has to be the same pixels. Lillecarl/pymux#408.
+    pymux-upgrade-pictures = pymux.checks.upgradePictures;
     # Every theme, with the demo application in the pane: the whole
     # gallery in `$out`, for a person to read side by side. Not a gate
     # either. Lillecarl/pymux#194, Lillecarl/pymux#195.
