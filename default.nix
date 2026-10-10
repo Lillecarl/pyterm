@@ -668,6 +668,9 @@ rec {
     prompt-toolkit-rs-parity = prompt-toolkit-rs.checks.parity;
     # Their Rust, held by rustfmt and clippy.
     pyte-rs-lint = pyte-rs.checks.lint;
+    # pyte's suite with the Rust row in place of the dict.
+    # Lillecarl/pymux#570.
+    pyte-rs-unit = pyte-rs.checks.unit;
     prompt-toolkit-rs-lint = prompt-toolkit-rs.checks.lint;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
