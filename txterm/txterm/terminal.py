@@ -254,7 +254,6 @@ class Terminal(Widget, can_focus=True):
             get_history_limit=get_history_limit,
         )
         self.stream = Stream(self.emulator)
-        self.stream.attach(self.emulator)
         self._ground_timer = GroundTimer(self.stream, _GROUND_TIMEOUT, time.monotonic)
 
         #: The pty. It is made when the widget mounts and not when it
