@@ -17,7 +17,6 @@ a word of the other, which is what Lillecarl/pymux#82 asks for.
 
 from __future__ import annotations
 
-import sys
 import time
 from collections.abc import Callable
 from functools import lru_cache
@@ -26,8 +25,10 @@ import anyio
 import anyio.abc
 from ptyhost import Process
 from ptyhost.backends import Backend
+from ptyhost.backends.posix import spawn_of
+from ptyhost.held import backend_of
 from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
-from pyte.environment import prepare
+from pyte.environment import preparing
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
 from pyte.screen import Screen
@@ -98,54 +99,22 @@ def _visible_char(char: str) -> str:
     return char
 
 
-def _environment_of_a_pane(
-    theirs: Callable[[dict[str, str]], None] | None,
-) -> Callable[[dict[str, str]], None]:
-    """
-    What turns this process's environment into the program's.
-
-    The program runs on the screen of this widget and not in the
-    terminal that the application itself runs in, so the environment
-    has to say which one it is. Nothing else knows both: `pyte` has no
-    child to set an environment for, and `ptyhost` runs a program and
-    has no opinion on what parses the bytes. This widget owns a screen
-    and a `Process`, so this is the layer. Lillecarl/pymux#125.
-
-    The hook of the caller runs last, so an embedder can still say
-    something different.
-    """
-
-    def edit(environment: dict[str, str]) -> None:
-        prepare(environment)
-        if theirs is not None:
-            theirs(environment)
-
-    return edit
-
-
 def create_backend(
     command: list[str],
     environment: Callable[[dict[str, str]], None] | None = None,
     directory: str | None = None,
 ) -> Backend:
-    "A pty running `command`, for the platform this is."
-    if sys.platform.startswith("win"):
-        from ptyhost.backends.win32 import Win32Backend
-
-        return Win32Backend()
-
-    from ptyhost.backends.posix import PosixBackend
-
+    """
+    A pty for `command`, which runs on this widget's screen, so its
+    environment says so (`pyte.environment.preparing`).
+    Lillecarl/pymux#125.
+    """
     # The size of a cell goes into the size of the pty, so that a
     # program that draws images reads the same answer there as
     # "CSI 16 t" gives it. The screen holds that number, so the screen
     # passes it down and the pty layer claims nothing about pixels.
-    return PosixBackend.from_command(
-        command,
-        environment=_environment_of_a_pane(environment),
-        directory=directory,
-        cell=(ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT),
-    )
+    spawn = spawn_of(command, preparing(environment), directory)
+    return backend_of(spawn, (ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT))
 
 
 class Terminal(Widget, can_focus=True):
