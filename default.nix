@@ -311,6 +311,8 @@ let
         cargo
         rustc
         maturin
+        clippy
+        rustfmt
         ;
     };
 
@@ -344,6 +346,8 @@ let
         cargo
         rustc
         maturin
+        clippy
+        rustfmt
         ;
     };
 
@@ -662,6 +666,9 @@ rec {
     # Lillecarl/pymux#566.
     pyte-rs-parity = pyte-rs.checks.parity;
     prompt-toolkit-rs-parity = prompt-toolkit-rs.checks.parity;
+    # Their Rust, held by rustfmt and clippy.
+    pyte-rs-lint = pyte-rs.checks.lint;
+    prompt-toolkit-rs-lint = prompt-toolkit-rs.checks.lint;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     pyte-ruff = pyte.checks.ruff;
