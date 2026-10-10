@@ -17,7 +17,6 @@ a word of the other, which is what Lillecarl/pymux#82 asks for.
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from collections.abc import Callable
@@ -99,11 +98,11 @@ def _visible_char(char: str) -> str:
     return char
 
 
-def _in_the_child(
-    before_exec_func: Callable[[], None] | None,
-) -> Callable[[], None]:
+def _environment_of_a_pane(
+    theirs: Callable[[dict[str, str]], None] | None,
+) -> Callable[[dict[str, str]], None]:
     """
-    What runs in the child, between the fork and the exec.
+    What turns this process's environment into the program's.
 
     The program runs on the screen of this widget and not in the
     terminal that the application itself runs in, so the environment
@@ -116,15 +115,19 @@ def _in_the_child(
     something different.
     """
 
-    def hook() -> None:
-        prepare(os.environ)
-        if before_exec_func is not None:
-            before_exec_func()
+    def edit(environment: dict[str, str]) -> None:
+        prepare(environment)
+        if theirs is not None:
+            theirs(environment)
 
-    return hook
+    return edit
 
 
-def create_backend(command: list[str], before_exec_func: Callable[[], None] | None = None) -> Backend:
+def create_backend(
+    command: list[str],
+    environment: Callable[[dict[str, str]], None] | None = None,
+    directory: str | None = None,
+) -> Backend:
     "A pty running `command`, for the platform this is."
     if sys.platform.startswith("win"):
         from ptyhost.backends.win32 import Win32Backend
@@ -139,7 +142,8 @@ def create_backend(command: list[str], before_exec_func: Callable[[], None] | No
     # passes it down and the pty layer claims nothing about pixels.
     return PosixBackend.from_command(
         command,
-        before_exec_func=_in_the_child(before_exec_func),
+        environment=_environment_of_a_pane(environment),
+        directory=directory,
         cell=(ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT),
     )
 
@@ -149,7 +153,9 @@ class Terminal(Widget, can_focus=True):
     A program on a pty, drawn in a Textual widget.
 
     :param command: The program and its arguments.
-    :param before_exec_func: Called in the child, right before `exec`.
+    :param environment: Edits the program's environment, a copy of
+        this process's, when the program starts.
+    :param directory: Where the program starts.
     :param backend: A pty of your own. `command` is ignored when this is
         given, which is how a test drives the widget with no child.
     :param bell_func: Called when the program rings the bell.
@@ -196,7 +202,8 @@ class Terminal(Widget, can_focus=True):
         self,
         command: list[str] | None = None,
         *,
-        before_exec_func: Callable[[], None] | None = None,
+        environment: Callable[[dict[str, str]], None] | None = None,
+        directory: str | None = None,
         backend: Backend | None = None,
         task_group: anyio.abc.TaskGroup | None = None,
         bell_func: Callable[[], None] | None = None,
@@ -216,7 +223,7 @@ class Terminal(Widget, can_focus=True):
         # Lillecarl/pymux#238.
         self.unreadable_key_func = unreadable_key_func
 
-        self._backend = backend or create_backend(command or ["/bin/bash"], before_exec_func)
+        self._backend = backend or create_backend(command or ["/bin/bash"], environment, directory)
 
         #: Whose scope the program runs in. The widget mounts without
         #: one -- drawing tests mount with `NoBackend`, which starts
