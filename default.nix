@@ -236,8 +236,10 @@ let
     "libpymux"
     "ptterm"
     "prompt-toolkit"
+    "prompt-toolkit-rs"
     "pyterm-pytest"
     "pyte"
+    "pyte-rs"
     "ptyhost"
     "txterm"
   ];
@@ -300,6 +302,18 @@ let
       inherit (pkgs) ruff;
     };
 
+    # pyte's per-cell loops in Rust, which an embedder installs over the
+    # Python ones. A project inside pyte's repository, the way libpymux is
+    # inside pymux's. Lillecarl/pymux#566.
+    pyte-rs = final.callPackage (sources.pyte + "/pyte_rs") {
+      inherit (pkgs)
+        rustPlatform
+        cargo
+        rustc
+        maturin
+        ;
+    };
+
     # The layer that runs a program on a pty. It depends on nothing here,
     # which is the point: two widgets need it, and neither may drag a
     # toolkit in behind it. Lillecarl/pymux#85.
@@ -318,6 +332,19 @@ let
       inherit (ps) mkProject;
       # The linter and formatter that `ptterm-ruff` runs.
       inherit (pkgs) ruff;
+    };
+
+    # prompt_toolkit's per-cell loops in Rust, which pymux installs over
+    # the Python ones. A project inside pymux's repository, because
+    # prompt-toolkit takes only patches upstream could take.
+    # Lillecarl/pymux#566.
+    prompt-toolkit-rs = final.callPackage (sources.pymux + "/prompt_toolkit_rs") {
+      inherit (pkgs)
+        rustPlatform
+        cargo
+        rustc
+        maturin
+        ;
     };
 
     # The client library, and the smallest thing here anybody imports:
@@ -375,7 +402,9 @@ let
       inherit (set)
         ptterm
         pyte
+        pyte-rs
         prompt-toolkit
+        prompt-toolkit-rs
         ptyhost
         pyterm-pytest
         libpymux
@@ -507,7 +536,11 @@ rec {
 
   pyte = default.pyte;
 
+  pyte-rs = default.pyte-rs;
+
   prompt-toolkit = default.prompt-toolkit;
+
+  prompt-toolkit-rs = default.prompt-toolkit-rs;
 
   ptyhost = default.ptyhost;
 
@@ -625,6 +658,10 @@ rec {
       inherit sources aimock;
     };
     pyte-unit = pyte.checks.unit;
+    # The Rust kernels against the Python they replace.
+    # Lillecarl/pymux#566.
+    pyte-rs-parity = pyte-rs.checks.parity;
+    prompt-toolkit-rs-parity = prompt-toolkit-rs.checks.parity;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     pyte-ruff = pyte.checks.ruff;
