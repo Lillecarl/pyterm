@@ -237,6 +237,7 @@ let
     "ptterm"
     "prompt-toolkit"
     "prompt-toolkit-rs"
+    "pymux-rs"
     "pyterm-pytest"
     "pyte"
     "pyte-rs"
@@ -351,6 +352,20 @@ let
         ;
     };
 
+    # pymux's image loops in Rust, which pymux installs over its own
+    # Python. It imports nothing of pymux, which depends on it.
+    # Lillecarl/pymux#574.
+    pymux-rs = final.callPackage (sources.pymux + "/pymux_rs") {
+      inherit (pkgs)
+        rustPlatform
+        cargo
+        rustc
+        maturin
+        clippy
+        rustfmt
+        ;
+    };
+
     # The client library, and the smallest thing here anybody imports:
     # a socket, a JSON message and platformdirs. It is what a program
     # that drives a server takes, in place of pymux and the toolkit
@@ -409,6 +424,7 @@ let
         pyte-rs
         prompt-toolkit
         prompt-toolkit-rs
+        pymux-rs
         ptyhost
         pyterm-pytest
         libpymux
@@ -546,6 +562,8 @@ rec {
 
   prompt-toolkit-rs = default.prompt-toolkit-rs;
 
+  pymux-rs = default.pymux-rs;
+
   ptyhost = default.ptyhost;
 
   pyterm-pytest = default.pyterm-pytest;
@@ -674,6 +692,10 @@ rec {
     # prompt-toolkit's suite with the Rust row in its composed screen.
     prompt-toolkit-rs-unit = prompt-toolkit-rs.checks.unit;
     prompt-toolkit-rs-lint = prompt-toolkit-rs.checks.lint;
+    # pymux's image kernels, against its Python and in its style.
+    # Lillecarl/pymux#574.
+    pymux-rs-parity = pymux-rs.checks.parity;
+    pymux-rs-lint = pymux-rs.checks.lint;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     pyte-ruff = pyte.checks.ruff;

@@ -264,7 +264,7 @@ select = [
 ]
 
 [lint.isort]
-# libpymux and prompt_toolkit_rs are distributions of their own,
+# libpymux, prompt_toolkit_rs and pymux_rs are distributions of their own,
 # installed like any other dependency: third-party by installation,
 # wherever they are developed. pymux is the project under check:
 # first-party, always.
@@ -275,4 +275,4 @@ select = [
 # it splits them, so the same file passes in one and fails in the
 # other. The pins hold both to one order.
 known-first-party = ["pymux"]
-known-third-party = ["libpymux", "prompt_toolkit_rs"]
+known-third-party = ["libpymux", "prompt_toolkit_rs", "pymux_rs"]
