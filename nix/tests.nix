@@ -34,9 +34,10 @@ let
         worst=1
       fi
       seconds="$(cat ${run}/seconds)"
-      printf '%-${width}s  %s  %5ss  %s\n' "${name}" "$mark" "$seconds" "$last" \
+      cpu="$(cat ${run}/cpu)"
+      printf '%-${width}s  %s  %5ss  %5ss CPU  %s\n' "${name}" "$mark" "$seconds" "$cpu" "$last" \
         >> "$out/summary.txt"
-      printf '%6s  %s\n' "$seconds" "${name}" >> "$out/seconds.txt"
+      printf '%6s  %6s  %s\n' "$cpu" "$seconds" "${name}" >> "$out/cost.txt"
     '';
 
   report = runCommand "pyterm-tests-run" { } ''
@@ -44,10 +45,14 @@ let
     : > "$out/summary.txt"
     worst=0
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList line runs)}
-    # Slowest first. A suite's seconds are its own run's, so a check
-    # whose work happens in runs it depends on, such as the shots of
-    # pymux-pictures, counts only its own part here.
-    sort -rn "$out/seconds.txt" -o "$out/seconds.txt"
+    # Costliest first, by CPU: the gate runs every suite at once on too
+    # few cores, so the CPU they take together is what bounds it, and
+    # one suite's wall time is mostly the load of the others. A suite's
+    # numbers are its own run's, so a check whose work happens in runs
+    # it depends on, such as the shots of pymux-pictures, counts only
+    # its own part here.
+    sort -rn "$out/cost.txt" -o "$out/cost.txt"
+    awk '{ total += $1 } END { print total }' "$out/cost.txt" > "$out/cpu"
     echo "$worst" > "$out/status"
     cat "$out/summary.txt"
   '';
@@ -55,8 +60,8 @@ in
 runCommand "pyterm-tests" { passthru = { run = report; }; } ''
   cat ${report}/summary.txt
   echo ""
-  echo "The slowest, in seconds:"
-  head -n 10 ${report}/seconds.txt
+  echo "The costliest, as CPU and wall seconds, of $(cat ${report}/cpu) CPU seconds in all:"
+  head -n 10 ${report}/cost.txt
   if [ "$(cat ${report}/status)" != "0" ]; then
     echo "" >&2
     echo "A suite did not pass. Every one of them left its log and its" >&2
