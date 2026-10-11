@@ -588,7 +588,7 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Eight are left out, and none of them is a gate. The profile and
+    # Ten are left out, and none of them is a gate. The profile and
     # the latency measurement both read a wall clock, which says
     # nothing twice in a sandbox beside other jobs; they are
     # instrumentation, and reading them is the work. The image exercise
@@ -602,7 +602,8 @@ rec {
     # pictures of pymux's chrome judge nothing at all yet, because
     # there is no recorded image to judge them against. The roaming
     # property tests draw a fresh example every run, which is the one
-    # thing a gate may not do.
+    # thing a gate may not do. The wire measurement prints sizes for
+    # Lillecarl/pymux#258 and judges nothing.
     all = pkgs.callPackage ./nix/tests.nix {
       suites = removeAttrs suites [
         "ptterm-fuzz"
@@ -613,6 +614,7 @@ rec {
         "pymux-profile"
         "pymux-theme-pictures"
         "pymux-vttest-pictures"
+        "pymux-wire"
         "pyte-roaming"
       ];
     };
