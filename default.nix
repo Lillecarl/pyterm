@@ -604,8 +604,15 @@ rec {
     # property tests draw a fresh example every run, which is the one
     # thing a gate may not do. The wire measurement prints sizes for
     # Lillecarl/pymux#258 and judges nothing.
+    #
+    # The shots of pymux-pictures are listed beside it, so the report's
+    # times show where that check spends them.
     all = pkgs.callPackage ./nix/tests.nix {
-      suites = removeAttrs suites [
+      suites =
+        pkgs.lib.mapAttrs' (
+          terminal: shot: pkgs.lib.nameValuePair "pymux-pictures-${terminal}" { run = shot; }
+        ) suites.pymux-pictures.shots
+        // removeAttrs suites [
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
