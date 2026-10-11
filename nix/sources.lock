@@ -25,11 +25,11 @@
       "type": "github"
     },
     "pymux": {
-      "lastModified": 1791728978,
-      "narHash": "sha256-9ZIYzjLFF2X6VHUJmE0DD7wcjGNh2HsPT9p16LXPxC0=",
+      "lastModified": 1791730066,
+      "narHash": "sha256-ZQLxWLZ/PThs9Ol1TBOFNVqtziO6CaXp0eqz7FPe2wY=",
       "owner": "Lillecarl",
       "repo": "pymux",
-      "rev": "21f8f0312425d72a7d5db897ec3ed905ec05b16a",
+      "rev": "89510e862d5d12e7790ca078785967694a054cc5",
       "type": "github"
     },
     "pyproject-nix": {
