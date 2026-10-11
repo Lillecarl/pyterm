@@ -423,7 +423,10 @@ twice — once bare and once in a pymux pane that covers every cell — and
 subtracts one screenshot from the other. Two bugs got past every other check we
 have that way: a cursor stopped blinking, and an underline appeared where none
 belonged. Its result is a directory, so a run always leaves its pictures behind
-at `result/<terminal>/<fixture>/{bare,pymux,difference}.png`.
+at `result/<terminal>/<fixture>/{bare,pymux,difference}.png`. Each terminal
+takes its pictures in a derivation of its own,
+`checks.pymux-pictures.shots.<terminal>`, so the three run at once, and the
+check judges them together.
 
 It runs two seats. xterm speaks X and nothing else, so there is an Xvfb. foot
 speaks Wayland and nothing else, so there is a [cage](https://www.hjdskes.nl/projects/cage/),
