@@ -1,5 +1,6 @@
 {
-  pkgs ? import <nixpkgs> { },
+  # Unfree for claude-code, which a scenario check drives.
+  pkgs ? import <nixpkgs> { config.allowUnfree = true; },
 }:
 let
   inherit (pkgs) lib;
@@ -22,6 +23,16 @@ let
   # come from nixpkgs. Lillecarl/pymux#319.
   pyproject-nix = import sources.pyproject-nix { inherit (pkgs) lib; };
   ps = pkgs.callPackage ./nix/python-set.nix { inherit pyproject-nix; };
+
+  # The mock model API the agent CLIs are driven against, so a scroll or a
+  # repaint can be reproduced without a provider and without a token.
+  # `nix/agents/README.md` is how each agent is aimed at it, and
+  # `nix/agents/fixtures` is what it answers. pymux's scenario check drives
+  # claude-code against it.
+  #
+  # It is a third-party tool nixpkgs does not hold, and node is in the build
+  # closure for it alone: nothing the collection ships reaches it.
+  aimock = pkgs.callPackage ./pkgs/aimock { nodejs = pkgs.nodejs_22; };
 
   # THE interpreter of the collection, and THE place its package scopes
   # are bent. pymux and every Python dependency of it build against
@@ -385,6 +396,8 @@ let
       inherit (pkgs) pyrefly;
       # The linter and formatter that `pymux-ruff` runs.
       inherit (pkgs) ruff;
+      # The model API that the scenario check aims claude-code at.
+      inherit aimock;
     };
 
     # The second front end: the same screen, drawn with Textual. It
@@ -481,21 +494,13 @@ let
     };
 in
 rec {
-  inherit pkgs sources;
+  inherit pkgs sources aimock;
 
   # umbrella drives this collection. It is a source like the rest, so it can
   # be edited in place, and it is also the tool that fetches the others --
   # which the lock makes possible without it.
   umbrella = (import sources.umbrella { inherit pkgs; }).umbrella;
 
-  # The mock model API the agent CLIs are driven against, so a scroll or a
-  # repaint can be reproduced without a provider and without a token.
-  # `nix/agents/README.md` is how each agent is aimed at it, and
-  # `nix/agents/fixtures` is what it answers.
-  #
-  # It is a third-party tool nixpkgs does not hold, and node is in the build
-  # closure for it alone: nothing the collection ships reaches it.
-  aimock = pkgs.callPackage ./pkgs/aimock { nodejs = pkgs.nodejs_22; };
 
   # The collection's package scopes, one per interpreter: the same
   # seven sources and the same venvs, built on each python the
@@ -619,6 +624,7 @@ rec {
         "pymux-image-exercise"
         "pymux-latency"
         "pymux-profile"
+        "pymux-scenarios"
         "pymux-theme-pictures"
         "pymux-vttest-pictures"
         "pymux-wire"
@@ -869,6 +875,9 @@ rec {
     # the judging is not, and it is minutes of work for one item of
     # vttest's main menu.
     pymux-vttest-pictures = pymux.checks.vttestPictures;
+    # yazi and claude-code, driven step by step, bare and through pymux at
+    # once. Not a gate. Lillecarl/pymux#593.
+    pymux-scenarios = pymux.checks.scenarios;
     # A picture of what pymux draws around a pane: the status line, a
     # title bar, the command palette, a strip. Not a gate either, and
     # it judges nothing: the chrome is the thing pymux adds, so there
