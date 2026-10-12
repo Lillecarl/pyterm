@@ -9,7 +9,7 @@
 //! and the buffer is released at once, so a client never waits on Python
 //! to reuse it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd};
 use std::path::PathBuf;
@@ -56,17 +56,31 @@ use smithay::{
     delegate_output, delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_shell,
 };
 
+mod kitty;
+
 /// What one buffer held, as RGBA rows with no padding.
 struct Frame {
     width: i32,
     height: i32,
     rgba: Vec<u8>,
+    opaque: bool,
 }
+
+/// How many frames of damage a window remembers. A reader further
+/// behind than this gets the whole frame again.
+const HISTORY: usize = 64;
 
 struct Toplevel {
     id: u64,
     surface: ToplevelSurface,
     frame: Option<Frame>,
+    /// Counts the buffers committed. A reader names the last one it saw.
+    serial: u64,
+    /// The serial whose buffer changed size: nothing before it is an
+    /// edit of the current frame.
+    resized_at: u64,
+    /// The damage of the recent serials, oldest first.
+    history: VecDeque<(u64, Vec<Rect>)>,
 }
 
 /// A rectangle in buffer pixels: x, y, width, height.
@@ -273,7 +287,7 @@ impl CompositorHandler for State {
                     .frame
                     .as_ref()
                     .is_none_or(|old| (old.width, old.height) != (frame.width, frame.height));
-                let damaged = if resized {
+                let damaged: Vec<Rect> = if resized {
                     vec![(0, 0, frame.width, frame.height)]
                 } else {
                     damage
@@ -281,6 +295,17 @@ impl CompositorHandler for State {
                         .filter_map(|one| clipped(one, scale, frame.width, frame.height))
                         .collect()
                 };
+                toplevel.serial += 1;
+                if resized {
+                    toplevel.resized_at = toplevel.serial;
+                    toplevel.history.clear();
+                }
+                toplevel
+                    .history
+                    .push_back((toplevel.serial, damaged.clone()));
+                if toplevel.history.len() > HISTORY {
+                    toplevel.history.pop_front();
+                }
                 toplevel.frame = Some(frame);
                 damaged
             }
@@ -341,6 +366,7 @@ fn rgba_of(pool: &[u8], data: BufferData) -> Option<Frame> {
         width: data.width,
         height: data.height,
         rgba,
+        opaque,
     })
 }
 
@@ -371,6 +397,9 @@ impl XdgShellHandler for State {
             id,
             surface,
             frame: None,
+            serial: 0,
+            resized_at: 0,
+            history: VecDeque::new(),
         });
         self.events.push(Event::Toplevel(id));
     }
@@ -747,6 +776,64 @@ impl Compositor {
                 .unbind())
             })
             .collect()
+    }
+
+    /// What a kitty graphics terminal needs to show the window's last
+    /// buffer as image `image_id`, given the serial of the last buffer it
+    /// was sent (`since`, None for never).
+    ///
+    /// Returns `(serial, commands, whole)`. `commands` is None before the
+    /// window has drawn, and empty when the terminal is up to date.
+    /// `whole` says the image was sent again, so its placement has to be
+    /// put again too. Edits carry only the damage since `since`, unless a
+    /// resize or more history than the window keeps lies in between.
+    #[pyo3(signature = (id, image_id, since=None))]
+    fn kitty_update(
+        &self,
+        py: Python<'_>,
+        id: u64,
+        image_id: u32,
+        since: Option<u64>,
+    ) -> PyResult<(u64, Option<String>, bool)> {
+        let toplevel = self.toplevel(id)?;
+        let Some(frame) = toplevel.frame.as_ref() else {
+            return Ok((toplevel.serial, None, false));
+        };
+        let serial = toplevel.serial;
+        if since == Some(serial) {
+            return Ok((serial, Some(String::new()), false));
+        }
+        let covered = since.is_some_and(|since| {
+            since >= toplevel.resized_at
+                && since < serial
+                && toplevel
+                    .history
+                    .front()
+                    .is_some_and(|&(oldest, _)| oldest <= since + 1)
+        });
+        let damage: Vec<Rect> = match since {
+            Some(since) if covered => toplevel
+                .history
+                .iter()
+                .filter(|(at, _)| *at > since)
+                .flat_map(|(_, rects)| rects.iter().copied())
+                .collect(),
+            _ => Vec::new(),
+        };
+        let pixels = kitty::Pixels {
+            width: frame.width,
+            height: frame.height,
+            rgba: &frame.rgba,
+            opaque: frame.opaque,
+        };
+        let commands = py.detach(|| {
+            if covered {
+                kitty::edit(&pixels, image_id, &damage)
+            } else {
+                kitty::transmit(&pixels, image_id)
+            }
+        });
+        Ok((serial, Some(commands), !covered))
     }
 
     /// The window's last buffer as `(width, height, rgba)`, or None

@@ -20,14 +20,6 @@ from pysmithay import Compositor
 TEXT = "text/plain;charset=utf-8"
 
 
-@pytest.fixture
-def compositor(tmp_path, monkeypatch):
-    runtime = tmp_path / "run"
-    runtime.mkdir(mode=0o700)
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
-    return Compositor()
-
-
 def environment(compositor):
     return dict(os.environ, WAYLAND_DISPLAY=compositor.socket_name)
 

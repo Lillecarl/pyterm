@@ -17,17 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from pysmithay import Compositor
 
 CLIENT = Path(__file__).with_name("client.py")
-
-
-@pytest.fixture
-def compositor(tmp_path, monkeypatch):
-    runtime = tmp_path / "run"
-    runtime.mkdir(mode=0o700)
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
-    return Compositor()
 
 
 def pump(compositor, until, timeout=10.0):
