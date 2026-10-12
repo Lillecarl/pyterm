@@ -333,8 +333,9 @@ let
     # toolkit in behind it. Lillecarl/pymux#85.
     ptyhost = final.callPackage sources.ptyhost {
       inherit (ps) mkProject;
-      # The linter and formatter that `ptyhost-ruff` runs.
-      inherit (pkgs) ruff;
+      # The linter and formatter that `ptyhost-ruff` runs, and the player
+      # whose own reader judges an exported asciicast.
+      inherit (pkgs) ruff asciinema;
     };
 
     # The one terminal widget that the other two repositories reach: pymux

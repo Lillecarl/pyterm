@@ -463,6 +463,23 @@ pictures.
 **Read a recording before you commit it.** It holds whatever was on the
 screen. `pymux/tests/recordings/README.md` says the rest.
 
+pymux records from the inside too, and writes the same three files to
+`~/.local/state/pymux/recordings`. Each command starts a recording, and the
+same command stops it:
+
+    record-pane [-t pane] [-i seconds] [name]       # one pane's program
+    record-client [-t client] [-i seconds] [name]   # all pymux drew on a client
+
+`record-export` turns either recording into something to show:
+
+    record-export name                              # name.web.json
+    record-export -F asciicast name                 # name.cast, asciicast v3
+
+`pymux web` serves `/replay.html`, which plays a `.web.json` at the times it was
+recorded. asciinema plays a `.cast`, and `--cast-version 2` writes one for
+older players. An asciicast player draws no images. `-i` is the longest pause a
+player shows.
+
 Not every difference is a fault. A pane reads what a program asked for and
 writes the request again in the form the terminal understands, so a pane can
 draw more than that terminal draws on its own. xterm ignores `CSI 4:1 m` and
