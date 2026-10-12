@@ -107,15 +107,25 @@ fn coalesced(damage: &[Rect], width: i32, height: i32) -> Vec<Rect> {
     vec![(left, top, right - left, bottom - top)]
 }
 
-/// One rectangle of the frame, compressed and chunked behind `keys`.
-fn encode(pixels: &Pixels, (x, y, w, h): Rect, keys: &str) -> String {
-    let format = if pixels.opaque { 24 } else { 32 };
-    let size = if pixels.opaque { 3 } else { 4 };
-    let stride = pixels.stride;
+/// The rectangles a reader needs, each with its pixels as kitty's `f=24`
+/// (RGB) or `f=32` (RGBA) reads them: the whole frame, or the damage
+/// coalesced as `edit` sends it.
+pub fn rects(pixels: &Pixels, damage: Option<&[Rect]>) -> Vec<(Rect, Vec<u8>)> {
+    let rects = match damage {
+        Some(damage) => coalesced(damage, pixels.width, pixels.height),
+        None => vec![(0, 0, pixels.width, pixels.height)],
+    };
+    rects
+        .into_iter()
+        .map(|rect| (rect, raw(pixels, rect)))
+        .collect()
+}
 
+fn raw(pixels: &Pixels, (x, y, w, h): Rect) -> Vec<u8> {
+    let size = if pixels.opaque { 3 } else { 4 };
     let mut raw = Vec::with_capacity(w as usize * h as usize * size);
     for row in y..y + h {
-        let start = row as usize * stride + x as usize * 4;
+        let start = row as usize * pixels.stride + x as usize * 4;
         let line = &pixels.rgba[start..start + w as usize * 4];
         if pixels.opaque {
             for pixel in line.chunks_exact(4) {
@@ -125,6 +135,13 @@ fn encode(pixels: &Pixels, (x, y, w, h): Rect, keys: &str) -> String {
             raw.extend_from_slice(line);
         }
     }
+    raw
+}
+
+/// One rectangle of the frame, compressed and chunked behind `keys`.
+fn encode(pixels: &Pixels, rect: Rect, keys: &str) -> String {
+    let format = if pixels.opaque { 24 } else { 32 };
+    let raw = raw(pixels, rect);
 
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
     // A Vec takes every write.

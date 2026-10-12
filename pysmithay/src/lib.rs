@@ -148,6 +148,27 @@ impl Toplevel {
         Some(damage)
     }
 
+    /// The damage since serial `since`, merged, when the frame the
+    /// reader holds can be brought up to date by edits; None when it has
+    /// to be sent whole: a reader that holds none, one from before a
+    /// resize, or one further behind than the history.
+    fn damage_since(&self, since: Option<u64>) -> Option<Vec<Rect>> {
+        let since = since?;
+        let covered = since >= self.resized_at
+            && since < self.serial
+            && self
+                .history
+                .front()
+                .is_some_and(|&(oldest, _)| oldest <= since + 1);
+        covered.then(|| {
+            self.history
+                .iter()
+                .filter(|(at, _)| *at > since)
+                .flat_map(|(_, rects)| rects.iter().copied())
+                .collect()
+        })
+    }
+
     /// The canvas size in the window's own, logical pixels.
     fn logical_size(&self) -> Option<Size<i32, Logical>> {
         self.wanted
@@ -180,6 +201,22 @@ fn tell_scale(surface: &WlSurface, states: &SurfaceData, scale: f64) {
 
 /// A rectangle in buffer pixels: x, y, width, height.
 type Rect = (i32, i32, i32, i32);
+
+/// Pixels that go to Python as `bytes`.
+struct FrameBytes(Vec<u8>);
+
+impl<'py> IntoPyObject<'py> for FrameBytes {
+    type Target = PyBytes;
+    type Output = Bound<'py, PyBytes>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyBytes::new(py, &self.0))
+    }
+}
+
+/// One rectangle of `frame_rects`: x, y, width, height and its pixels.
+type FrameRect = (i32, i32, i32, i32, FrameBytes);
 
 enum Event {
     /// A window, and the tag of its client's connection.
@@ -1056,36 +1093,64 @@ impl Compositor {
         if since == Some(serial) {
             return ready(py, (serial, Some(String::new()), false));
         }
-        let covered = since.is_some_and(|since| {
-            since >= toplevel.resized_at
-                && since < serial
-                && toplevel
-                    .history
-                    .front()
-                    .is_some_and(|&(oldest, _)| oldest <= since + 1)
-        });
-        let damage: Vec<Rect> = match since {
-            Some(since) if covered => toplevel
-                .history
-                .iter()
-                .filter(|(at, _)| *at > since)
-                .flat_map(|(_, rects)| rects.iter().copied())
-                .collect(),
-            _ => Vec::new(),
-        };
+        let damage = toplevel.damage_since(since);
         let pixels = canvas.pixels().to_owned();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let whole = damage.is_none();
             let commands = tokio::task::spawn_blocking(move || {
                 let pixels = pixels.view();
-                if covered {
-                    kitty::edit(&pixels, image_id, &damage)
-                } else {
-                    kitty::transmit(&pixels, image_id)
+                match damage {
+                    Some(damage) => kitty::edit(&pixels, image_id, &damage),
+                    None => kitty::transmit(&pixels, image_id),
                 }
             })
             .await
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-            Ok((serial, Some(commands), !covered))
+            Ok((serial, Some(commands), whole))
+        })
+    }
+
+    /// The pixels a reader needs to bring the window up to date, given
+    /// the serial of the last frame it has (`since`, None for never).
+    ///
+    /// An awaitable of `(serial, whole, width, height, rects)`, or None
+    /// before the window has drawn. `rects` is a list of `(x, y, w, h,
+    /// pixels)` with the pixels as RGB rows, kitty's `f=24`: the whole
+    /// frame when `whole`, and otherwise the damage since `since`, merged
+    /// as `kitty_update` merges it; empty when the reader is up to date.
+    /// The reader encodes it for its terminal itself. Lillecarl/pymux#634.
+    #[pyo3(signature = (id, since=None))]
+    fn frame_rects<'py>(
+        &self,
+        py: Python<'py>,
+        id: u64,
+        since: Option<u64>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let toplevel = self.toplevel(id)?;
+        let serial = toplevel.serial;
+        let Some(canvas) = toplevel.canvas.as_ref() else {
+            return ready(py, None::<(u64, bool, i32, i32, Vec<FrameRect>)>);
+        };
+        let (width, height) = (canvas.width, canvas.height);
+        if since == Some(serial) {
+            return ready(
+                py,
+                Some((serial, false, width, height, Vec::<FrameRect>::new())),
+            );
+        }
+        let damage = toplevel.damage_since(since);
+        let pixels = canvas.pixels().to_owned();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let whole = damage.is_none();
+            let rects = tokio::task::spawn_blocking(move || {
+                kitty::rects(&pixels.view(), damage.as_deref())
+                    .into_iter()
+                    .map(|((x, y, w, h), raw)| (x, y, w, h, FrameBytes(raw)))
+                    .collect::<Vec<FrameRect>>()
+            })
+            .await
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+            Ok(Some((serial, whole, width, height, rects)))
         })
     }
 

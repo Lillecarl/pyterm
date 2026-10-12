@@ -99,3 +99,35 @@ def test_a_reader_from_the_future_gets_the_whole_frame(compositor):
     _serial, _text, whole = update(compositor, 1, 7, since=99)
     assert whole
     client.kill()
+
+
+# ----------------------------------------------------------------------
+# The same frames as raw rectangles, for a reader that encodes them for
+# its own terminal. Lillecarl/pymux#634.
+
+
+def rects(compositor, *args, **kwargs):
+    async def awaited():
+        return await compositor.frame_rects(*args, **kwargs)
+
+    return asyncio.run(awaited())
+
+
+def test_raw_rects_carry_what_the_commands_carry(compositor):
+    client = probe(compositor)
+    for since in (None, 1):
+        serial, whole, width, height, got = rects(compositor, 1, since=since)
+        _serial, text, _whole = update(compositor, 1, 7, since=since)
+        assert (serial, width, height, whole) == (2, 64, 32, since is None)
+        sent = commands(text)
+        assert [(x, y, w, h) for x, y, w, h, _pixels in got] == [
+            (int(keys.get("x", 0)), int(keys.get("y", 0)), int(keys["s"]), int(keys["v"])) for keys, _ in sent
+        ]
+        assert [pixels for *_rect, pixels in got] == [pixels for _keys, pixels in sent]
+    client.kill()
+
+
+def test_raw_rects_for_a_reader_up_to_date_are_none(compositor):
+    client = probe(compositor)
+    assert rects(compositor, 1, since=2) == (2, False, 64, 32, [])
+    client.kill()
