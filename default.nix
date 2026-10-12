@@ -624,7 +624,7 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Ten are left out, and none of them is a gate. The profile and
+    # Eleven are left out, and none of them is a gate. The profile and
     # the latency measurement both read a wall clock, which says
     # nothing twice in a sandbox beside other jobs; they are
     # instrumentation, and reading them is the work. The image exercise
@@ -652,6 +652,7 @@ rec {
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
+        "pymux-window-pane-pictures"
         "pymux-image-exercise"
         "pymux-latency"
         "pymux-profile"
@@ -922,6 +923,8 @@ rec {
     # is no bare side to subtract from. Reading the pictures is the
     # work. Lillecarl/pymux#161.
     pymux-chrome-pictures = pymux.checks.chromePictures;
+    # A Wayland window in a pane, in every terminal. Lillecarl/pymux#620.
+    pymux-window-pane-pictures = pymux.checks.windowPanePictures;
     # Every view before and after `upgrade-server`, in a real terminal,
     # and each pair has to be the same pixels. Lillecarl/pymux#408.
     pymux-upgrade-pictures = pymux.checks.upgradePictures;
