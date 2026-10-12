@@ -8,6 +8,6 @@ it changed. The caller owns the event loop.
 
 from __future__ import annotations
 
-from pysmithay._native import Compositor
+from pysmithay._native import Compositor, Vp9Encoder
 
-__all__ = ["Compositor"]
+__all__ = ["Compositor", "Vp9Encoder"]

@@ -72,6 +72,7 @@ use smithay::{
 
 mod canvas;
 mod kitty;
+mod vp9;
 
 use canvas::Canvas;
 
@@ -217,6 +218,10 @@ impl<'py> IntoPyObject<'py> for FrameBytes {
 
 /// One rectangle of `frame_rects`: x, y, width, height and its pixels.
 type FrameRect = (i32, i32, i32, i32, FrameBytes);
+
+/// What `vp9_frame` answers: serial, keyframe, width, height, the data,
+/// and the rectangles it changed.
+type VideoFrame = (u64, bool, i32, i32, FrameBytes, Vec<Rect>);
 
 enum Event {
     /// A window, and the tag of its client's connection.
@@ -1154,6 +1159,61 @@ impl Compositor {
         })
     }
 
+    /// The window's next frame in `encoder`'s VP9 stream: the first, the
+    /// first after a resize, and the first after the reader fell behind
+    /// the history are keyframes; the others carry only the blocks
+    /// under the damage since the frame `encoder` took last.
+    ///
+    /// An awaitable of `(serial, keyframe, width, height, data, rects)`,
+    /// or None before the window has drawn. `rects` are the rectangles
+    /// that changed, grown out to the encoder's blocks: what the reader
+    /// takes from the decoded frame. `data` is empty when the reader is
+    /// up to date. The encode runs on a worker thread.
+    /// Lillecarl/pymux#639.
+    fn vp9_frame<'py>(
+        &self,
+        py: Python<'py>,
+        id: u64,
+        encoder: Py<vp9::Vp9Encoder>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let toplevel = self.toplevel(id)?;
+        let serial = toplevel.serial;
+        let Some(canvas) = toplevel.canvas.as_ref() else {
+            return ready(py, None::<VideoFrame>);
+        };
+        let (width, height) = (canvas.width, canvas.height);
+        let since = encoder
+            .get()
+            .last()
+            .filter(|&(w, h, _)| (w, h) == (width, height))
+            .map(|(_, _, serial)| serial);
+        if since == Some(serial) {
+            let frame: VideoFrame = (
+                serial,
+                false,
+                width,
+                height,
+                FrameBytes(Vec::new()),
+                Vec::new(),
+            );
+            return ready(py, Some(frame));
+        }
+        let damage = toplevel.damage_since(since);
+        let pixels = canvas.pixels().to_owned();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (keyframe, data, rects) = tokio::task::spawn_blocking(move || {
+                encoder
+                    .get()
+                    .encode(&pixels.view(), serial, damage.as_deref())
+            })
+            .await
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+            .map_err(PyRuntimeError::new_err)?;
+            let frame: VideoFrame = (serial, keyframe, width, height, FrameBytes(data), rects);
+            Ok(Some(frame))
+        })
+    }
+
     /// The window as last drawn, as `(width, height, rgba)` with no row
     /// padding, or None before it has drawn.
     fn frame<'py>(
@@ -1257,5 +1317,6 @@ impl Compositor {
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<Compositor>()
+    module.add_class::<Compositor>()?;
+    module.add_class::<vp9::Vp9Encoder>()
 }

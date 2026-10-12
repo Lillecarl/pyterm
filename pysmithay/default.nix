@@ -23,6 +23,11 @@
   libxkbcommon,
   # The software renderer that composes a window with its popups.
   pixman,
+  # The VP9 encoder of window panes. Lillecarl/pymux#639.
+  libvpx,
+  pkg-config,
+  # Decodes the VP9 the encoder makes, in the tests.
+  ffmpeg-headless,
   foot,
   wl-clipboard,
   dejavu_fonts,
@@ -38,6 +43,7 @@ let
     fileset = fs.unions [
       ./Cargo.toml
       ./Cargo.lock
+      ./build.rs
       ./pyproject.toml
       ./src
       ./python
@@ -60,6 +66,8 @@ let
       clippy
       rustfmt
       stdenv.cc
+      pkg-config
+      rustPlatform.bindgenHook
     ];
     setup = ''
       cp -r ${src}/. crate
@@ -69,6 +77,7 @@ let
       export PYO3_PYTHON=${python.interpreter}
       export CARGO_TARGET_DIR="$TMPDIR/target"
       export LIBRARY_PATH=${libxkbcommon}/lib:${pixman}/lib
+      export PKG_CONFIG_PATH=${lib.getDev libvpx}/lib/pkgconfig
       # What `cargoSetupHook` writes, which a `runCommand` never runs.
       mkdir -p .cargo
       printf '[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "%s"\n' ${cargoDeps} > .cargo/config.toml
@@ -92,6 +101,7 @@ let
       testEnv
       foot
       wl-clipboard
+      ffmpeg-headless
     ];
     env.FONTCONFIG_FILE = makeFontsConf { fontDirectories = [ dejavu_fonts ]; };
     setup = ''
@@ -115,16 +125,21 @@ stdenv.mkDerivation {
     cargo
     rustc
     maturin
+    pkg-config
+    rustPlatform.bindgenHook
   ];
 
   buildInputs = [
     libxkbcommon
     pixman
+    libvpx
   ];
 
+  # `--auditwheel skip`: a repair copies libvpx into the wheel without
+  # the path to the libstdc++ it needs, and the module does not load.
   buildPhase = ''
     runHook preBuild
-    maturin build --release --offline --frozen --interpreter ${python.interpreter} --out dist
+    maturin build --release --offline --frozen --auditwheel skip --interpreter ${python.interpreter} --out dist
     runHook postBuild
   '';
 

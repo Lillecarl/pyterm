@@ -91,7 +91,7 @@ pub fn edit(pixels: &Pixels, image_id: u32, damage: &[Rect]) -> String {
 
 /// The rectangles to send: as given, or their bounding box when that is
 /// cheaper.
-fn coalesced(damage: &[Rect], width: i32, height: i32) -> Vec<Rect> {
+pub fn coalesced(damage: &[Rect], width: i32, height: i32) -> Vec<Rect> {
     let area: i64 = damage
         .iter()
         .map(|&(_, _, w, h)| i64::from(w) * i64::from(h))
