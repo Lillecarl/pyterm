@@ -58,10 +58,11 @@ use smithay::wayland::shell::xdg::{
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
+use smithay::wayland::viewporter::ViewporterState;
 use smithay::{
     delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
     delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
-    delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell,
 };
 
 mod canvas;
@@ -162,6 +163,9 @@ struct State {
     wlr_data_control_state: wlr_data_control::DataControlState,
     ext_data_control_state: ext_data_control::DataControlState,
     _xdg_decoration_state: XdgDecorationState,
+    /// Scaling and cropping of a surface, which mpv's software output
+    /// will not run without. The renderer honours it when it draws.
+    _viewporter_state: ViewporterState,
     popups: PopupManager,
     toplevels: Vec<Toplevel>,
     next_id: u64,
@@ -541,6 +545,7 @@ delegate_primary_selection!(State);
 delegate_data_control!(State);
 delegate_ext_data_control!(State);
 delegate_xdg_decoration!(State);
+delegate_viewporter!(State);
 
 /// A Wayland compositor that draws nowhere, and hands every window's
 /// pixels to Python.
@@ -659,6 +664,7 @@ impl Compositor {
             wlr_data_control_state,
             ext_data_control_state,
             _xdg_decoration_state: XdgDecorationState::new::<State>(&handle),
+            _viewporter_state: ViewporterState::new::<State>(&handle),
             popups: PopupManager::default(),
             toplevels: Vec::new(),
             next_id: 1,
