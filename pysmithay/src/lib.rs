@@ -12,6 +12,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +34,7 @@ use smithay::desktop::{
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurface};
-use smithay::reexports::wayland_server::{Client, Display, ListeningSocket};
+use smithay::reexports::wayland_server::{Client, Display, ListeningSocket, Resource};
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
@@ -139,7 +140,8 @@ impl Toplevel {
 type Rect = (i32, i32, i32, i32);
 
 enum Event {
-    Toplevel(u64),
+    /// A window, and the tag of its client's connection.
+    Toplevel(u64, u64),
     Title(u64, String),
     AppId(u64, String),
     Commit(u64, Vec<Rect>),
@@ -328,9 +330,11 @@ impl State {
     }
 }
 
-#[derive(Default)]
 struct ClientState {
     compositor_state: CompositorClientState,
+    /// The tag of the `connect` the client came from; 0 for the
+    /// listening socket.
+    origin: u64,
 }
 
 impl ClientData for ClientState {
@@ -424,6 +428,11 @@ impl XdgShellHandler for State {
         });
         let id = self.next_id;
         self.next_id += 1;
+        let origin = surface
+            .wl_surface()
+            .client()
+            .and_then(|client| client.get_data::<ClientState>().map(|data| data.origin))
+            .unwrap_or(0);
         self.toplevels.push(Toplevel {
             id,
             window: Window::new_wayland_window(surface),
@@ -434,7 +443,7 @@ impl XdgShellHandler for State {
             resized_at: 0,
             history: VecDeque::new(),
         });
-        self.events.push(Event::Toplevel(id));
+        self.events.push(Event::Toplevel(id, origin));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -554,6 +563,8 @@ struct Compositor {
     display: Display<State>,
     state: State,
     listener: ListeningSocket,
+    /// The tag the next `connect` gives; 0 is the listening socket's.
+    next_tag: u64,
     name: String,
     output: Output,
     seat: Seat<State>,
@@ -674,6 +685,7 @@ impl Compositor {
             display,
             state,
             listener,
+            next_tag: 1,
             name,
             output,
             seat,
@@ -853,10 +865,30 @@ impl Compositor {
         )
     }
 
+    /// A client connected already, for a program to take as
+    /// `WAYLAND_SOCKET`. Answers `(tag, fd)`: the windows of that
+    /// connection say `tag` in their "toplevel" event. The caller owns
+    /// `fd`, and closes its copy once the program has it. No path is
+    /// made, so nothing is left behind.
+    fn connect(&mut self) -> PyResult<(u64, i32)> {
+        let (ours, theirs) = UnixStream::pair().map_err(os_error)?;
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        let data = ClientState {
+            compositor_state: CompositorClientState::default(),
+            origin: tag,
+        };
+        self.display
+            .handle()
+            .insert_client(ours, Arc::new(data))
+            .map_err(os_error)?;
+        Ok((tag, theirs.into_raw_fd()))
+    }
+
     /// Accept waiting clients, run every request that has arrived, and
     /// return what happened, oldest first.
     ///
-    /// Each event is a tuple: `("toplevel", id)`, `("title", id, str)`,
+    /// Each event is a tuple: `("toplevel", id, tag)`, `("title", id, str)`,
     /// `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` with
     /// the damage in buffer pixels, `("closed", id)`, or
     /// `("selection", "clipboard" | "primary", [mime types])` when a
@@ -865,9 +897,13 @@ impl Compositor {
     /// type held with None; the caller owns `fd` and must close it.
     fn dispatch(&mut self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         while let Some(stream) = self.listener.accept().map_err(os_error)? {
+            let data = ClientState {
+                compositor_state: CompositorClientState::default(),
+                origin: 0,
+            };
             self.display
                 .handle()
-                .insert_client(stream, Arc::new(ClientState::default()))
+                .insert_client(stream, Arc::new(data))
                 .map_err(os_error)?;
         }
         self.display
@@ -888,7 +924,9 @@ impl Compositor {
             .into_iter()
             .map(|event| {
                 Ok(match event {
-                    Event::Toplevel(id) => ("toplevel", id).into_pyobject(py)?.into_any(),
+                    Event::Toplevel(id, origin) => {
+                        ("toplevel", id, origin).into_pyobject(py)?.into_any()
+                    }
                     Event::Title(id, title) => ("title", id, title).into_pyobject(py)?.into_any(),
                     Event::AppId(id, app_id) => {
                         ("app_id", id, app_id).into_pyobject(py)?.into_any()

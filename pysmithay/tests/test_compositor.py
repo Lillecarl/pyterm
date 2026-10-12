@@ -91,6 +91,24 @@ def test_the_second_frame_names_only_what_changed(compositor):
     assert compositor.toplevels() == []
 
 
+def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
+    first = launch(compositor, sys.executable, str(CLIENT))
+    pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+
+    before = set(os.listdir(os.environ["XDG_RUNTIME_DIR"]))
+    tag, fd = compositor.connect()
+    assert tag != 0
+    env = dict(os.environ, WAYLAND_SOCKET=str(fd))
+    second = subprocess.Popen([sys.executable, str(CLIENT)], env=env, pass_fds=[fd])
+    os.close(fd)
+    earlier = pump(compositor, lambda seen: ("toplevel", 2, tag) in seen)
+    assert set(os.listdir(os.environ["XDG_RUNTIME_DIR"])) == before
+
+    pump(compositor, lambda seen: all(("closed", id) in earlier + seen for id in (1, 2)))
+    first.wait(10)
+    second.wait(10)
+
+
 def test_a_window_draws_no_title_bar_of_its_own(compositor):
     "It asks for client side and is told server side: the pane draws the frame."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("decoration_client.py")))
