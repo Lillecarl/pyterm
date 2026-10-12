@@ -9,10 +9,13 @@
 //! and the buffer is released at once, so a client never waits on Python
 //! to reuse it.
 
-use std::os::fd::{AsFd, AsRawFd};
+use std::collections::HashMap;
+use std::io::Write;
+use std::os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use pyo3::exceptions::{PyKeyError, PyOSError};
+use pyo3::exceptions::{PyKeyError, PyOSError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use smithay::backend::input::{ButtonState, KeyState};
@@ -32,9 +35,16 @@ use smithay::wayland::compositor::{
     SurfaceAttributes, TraversalAction, with_states, with_surface_tree_downward,
 };
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
-use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+    clear_data_device_selection, request_data_device_client_selection, set_data_device_selection,
+};
+use smithay::wayland::selection::primary_selection::{
+    PrimarySelectionHandler, PrimarySelectionState, clear_primary_selection,
+    request_primary_client_selection, set_primary_selection,
+};
+use smithay::wayland::selection::{
+    SelectionHandler, SelectionSource, SelectionTarget, ext_data_control, wlr_data_control,
 };
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -42,8 +52,8 @@ use smithay::wayland::shell::xdg::{
 };
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::{
-    delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
-    delegate_xdg_shell,
+    delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
+    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_shell,
 };
 
 /// What one buffer held, as RGBA rows with no padding.
@@ -68,6 +78,9 @@ enum Event {
     AppId(u64, String),
     Commit(u64, Vec<Rect>),
     Closed(u64),
+    /// A client set a selection, offering these mime types, or cleared
+    /// it when there are none.
+    Selection(SelectionTarget, Vec<String>),
 }
 
 struct State {
@@ -77,15 +90,82 @@ struct State {
     _output_manager_state: OutputManagerState,
     seat_state: SeatState<State>,
     data_device_state: DataDeviceState,
+    primary_selection_state: PrimarySelectionState,
+    wlr_data_control_state: wlr_data_control::DataControlState,
+    ext_data_control_state: ext_data_control::DataControlState,
     toplevels: Vec<Toplevel>,
     next_id: u64,
     events: Vec<Event>,
 }
 
-// A clipboard nobody reads yet. Programs such as foot refuse to start
-// without the global.
+/// A selection the compositor holds itself: each mime type and its bytes.
+type Offers = Arc<HashMap<String, Vec<u8>>>;
+
 impl SelectionHandler for State {
-    type SelectionUserData = ();
+    type SelectionUserData = Offers;
+
+    fn new_selection(
+        &mut self,
+        target: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        let mime_types = source.map(|source| source.mime_types()).unwrap_or_default();
+        self.events.push(Event::Selection(target, mime_types));
+    }
+
+    fn send_selection(
+        &mut self,
+        _target: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        offers: &Offers,
+    ) {
+        let offers = Arc::clone(offers);
+        // A pipe holds 64 KiB, and the reader drains it when it likes:
+        // a write on this thread could stall every client.
+        std::thread::spawn(move || {
+            if let Some(bytes) = offers.get(&mime_type) {
+                let _ = std::fs::File::from(fd).write_all(bytes);
+            }
+        });
+    }
+}
+
+impl PrimarySelectionHandler for State {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+
+impl wlr_data_control::DataControlHandler for State {
+    fn data_control_state(&self) -> &wlr_data_control::DataControlState {
+        &self.wlr_data_control_state
+    }
+}
+
+impl ext_data_control::DataControlHandler for State {
+    fn data_control_state(&self) -> &ext_data_control::DataControlState {
+        &self.ext_data_control_state
+    }
+}
+
+fn target_of(name: &str) -> PyResult<SelectionTarget> {
+    match name {
+        "clipboard" => Ok(SelectionTarget::Clipboard),
+        "primary" => Ok(SelectionTarget::Primary),
+        _ => Err(PyValueError::new_err(format!(
+            "a selection is \"clipboard\" or \"primary\", not {name:?}"
+        ))),
+    }
+}
+
+fn name_of(target: SelectionTarget) -> &'static str {
+    match target {
+        SelectionTarget::Clipboard => "clipboard",
+        SelectionTarget::Primary => "primary",
+    }
 }
 
 impl DataDeviceHandler for State {
@@ -344,6 +424,9 @@ delegate_output!(State);
 delegate_xdg_shell!(State);
 delegate_seat!(State);
 delegate_data_device!(State);
+delegate_primary_selection!(State);
+delegate_data_control!(State);
+delegate_ext_data_control!(State);
 
 /// A Wayland compositor that draws nowhere, and hands every window's
 /// pixels to Python.
@@ -352,8 +435,9 @@ struct Compositor {
     display: Display<State>,
     state: State,
     listener: ListeningSocket,
+    name: String,
     output: Output,
-    _seat: Seat<State>,
+    seat: Seat<State>,
     keyboard: KeyboardHandle<State>,
     pointer: PointerHandle<State>,
 }
@@ -378,7 +462,8 @@ impl Compositor {
 
 #[pymethods]
 impl Compositor {
-    /// Listen on `$XDG_RUNTIME_DIR/<socket_name>`, or on the first free
+    /// Listen on `$XDG_RUNTIME_DIR/<socket_name>`, on `socket_name`
+    /// itself when it is an absolute path, or on the first free
     /// `wayland-N` when no name is given.
     #[new]
     #[pyo3(signature = (socket_name=None, width=800, height=600))]
@@ -386,10 +471,20 @@ impl Compositor {
         let display = Display::<State>::new().map_err(os_error)?;
         let handle = display.handle();
         let listener = match socket_name {
+            Some(path) if path.starts_with('/') => {
+                ListeningSocket::bind_absolute(PathBuf::from(path))
+            }
             Some(name) => ListeningSocket::bind(name),
             None => ListeningSocket::bind_auto("wayland", 1..33),
         }
         .map_err(os_error)?;
+        let name = match socket_name {
+            Some(name) => name.to_owned(),
+            None => listener
+                .socket_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        };
 
         let output = Output::new(
             "pysmithay".into(),
@@ -415,6 +510,20 @@ impl Compositor {
             .map_err(os_error)?;
         let pointer = seat.add_pointer();
 
+        // wl-copy and wl-paste reach the clipboard through data control
+        // when no window of theirs has focus, which here is always.
+        let primary_selection_state = PrimarySelectionState::new::<State>(&handle);
+        let wlr_data_control_state = wlr_data_control::DataControlState::new::<State, _>(
+            &handle,
+            Some(&primary_selection_state),
+            |_| true,
+        );
+        let ext_data_control_state = ext_data_control::DataControlState::new::<State, _>(
+            &handle,
+            Some(&primary_selection_state),
+            |_| true,
+        );
+
         let state = State {
             compositor_state: CompositorState::new::<State>(&handle),
             xdg_shell_state: XdgShellState::new::<State>(&handle),
@@ -422,6 +531,9 @@ impl Compositor {
             _output_manager_state: OutputManagerState::new_with_xdg_output::<State>(&handle),
             seat_state,
             data_device_state: DataDeviceState::new::<State>(&handle),
+            primary_selection_state,
+            wlr_data_control_state,
+            ext_data_control_state,
             toplevels: Vec::new(),
             next_id: 1,
             events: Vec::new(),
@@ -430,11 +542,60 @@ impl Compositor {
             display,
             state,
             listener,
+            name,
             output,
-            _seat: seat,
+            seat,
             keyboard,
             pointer,
         })
+    }
+
+    /// Hold a selection for clients to paste: each mime type with its
+    /// bytes. `target` is "clipboard" or "primary".
+    fn set_selection(&mut self, target: &str, offers: HashMap<String, Vec<u8>>) -> PyResult<()> {
+        let mime_types: Vec<String> = offers.keys().cloned().collect();
+        let handle = self.display.handle();
+        match target_of(target)? {
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&handle, &self.seat, mime_types, Arc::new(offers))
+            }
+            SelectionTarget::Primary => {
+                set_primary_selection(&handle, &self.seat, mime_types, Arc::new(offers))
+            }
+        }
+        self.flush()
+    }
+
+    /// Drop the selection, whoever set it.
+    fn clear_selection(&mut self, target: &str) -> PyResult<()> {
+        let handle = self.display.handle();
+        match target_of(target)? {
+            SelectionTarget::Clipboard => clear_data_device_selection(&handle, &self.seat),
+            SelectionTarget::Primary => clear_primary_selection(&handle, &self.seat),
+        }
+        self.flush()
+    }
+
+    /// Ask the client that holds the selection for it in `mime_type`.
+    ///
+    /// Returns the read end of a pipe, which the caller owns and reads
+    /// to the end. The client writes only once `dispatch` has run, so
+    /// read it without blocking the loop that calls `dispatch`.
+    fn request_selection(&mut self, target: &str, mime_type: String) -> PyResult<i32> {
+        let (reader, writer) = std::io::pipe().map_err(os_error)?;
+        let writer = OwnedFd::from(writer);
+        match target_of(target)? {
+            SelectionTarget::Clipboard => {
+                request_data_device_client_selection(&self.seat, mime_type, writer)
+                    .map_err(|error| PyValueError::new_err(error.to_string()))?
+            }
+            SelectionTarget::Primary => {
+                request_primary_client_selection(&self.seat, mime_type, writer)
+                    .map_err(|error| PyValueError::new_err(error.to_string()))?
+            }
+        }
+        self.flush()?;
+        Ok(OwnedFd::from(reader).into_raw_fd())
     }
 
     /// Give the keyboard to this window.
@@ -504,12 +665,11 @@ impl Compositor {
         self.flush()
     }
 
-    /// The name a client puts in `WAYLAND_DISPLAY`.
+    /// What a client puts in `WAYLAND_DISPLAY`: a name in
+    /// `$XDG_RUNTIME_DIR`, or an absolute path.
     #[getter]
-    fn socket_name(&self) -> Option<String> {
-        self.listener
-            .socket_name()
-            .map(|name| name.to_string_lossy().into_owned())
+    fn socket_name(&self) -> &str {
+        &self.name
     }
 
     /// The listening socket and the display: wait on both for reading.
@@ -525,7 +685,9 @@ impl Compositor {
     ///
     /// Each event is a tuple: `("toplevel", id)`, `("title", id, str)`,
     /// `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` with
-    /// the damage in buffer pixels, or `("closed", id)`.
+    /// the damage in buffer pixels, `("closed", id)`, or
+    /// `("selection", "clipboard" | "primary", [mime types])` when a
+    /// client sets a selection, with no mime types when it clears one.
     fn dispatch(&mut self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         while let Some(stream) = self.listener.accept().map_err(os_error)? {
             self.display
@@ -551,6 +713,11 @@ impl Compositor {
                         ("commit", id, damage).into_pyobject(py)?.into_any()
                     }
                     Event::Closed(id) => ("closed", id).into_pyobject(py)?.into_any(),
+                    Event::Selection(target, mime_types) => {
+                        ("selection", name_of(target), mime_types)
+                            .into_pyobject(py)?
+                            .into_any()
+                    }
                 }
                 .unbind())
             })

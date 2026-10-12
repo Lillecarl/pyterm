@@ -22,6 +22,7 @@
   rustfmt,
   libxkbcommon,
   foot,
+  wl-clipboard,
   dejavu_fonts,
   makeFontsConf,
 }:
@@ -79,8 +80,8 @@ let
     pysmithay = [ "test" ];
   };
 
-  # The compositor against a client that draws known pixels, and against
-  # foot, a real program.
+  # The compositor against a client that draws known pixels, against
+  # foot, a real program, and the clipboard against wl-copy and wl-paste.
   #
   #     nix build --file . checks.pysmithay-unit
   checks.unit = suite {
@@ -88,6 +89,7 @@ let
     inputs = [
       testEnv
       foot
+      wl-clipboard
     ];
     env.FONTCONFIG_FILE = makeFontsConf { fontDirectories = [ dejavu_fonts ]; };
     setup = ''
