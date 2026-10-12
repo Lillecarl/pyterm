@@ -25,11 +25,11 @@
       "type": "github"
     },
     "pymux": {
-      "lastModified": 1791789343,
-      "narHash": "sha256-DB3G4TXUK2dQu45WhYWU+z3A/mS1tTrdwwBAw5oQE0Y=",
+      "lastModified": 1791791605,
+      "narHash": "sha256-UiNltilXBmz5vhD8Ns1K7m0QenVUKth6u2UmNc9/UOw=",
       "owner": "Lillecarl",
       "repo": "pymux",
-      "rev": "28c2d8b930478965a46253cc30040c35e3a5e736",
+      "rev": "0aca88e23a4eeeca02b1a0fa58f9e02d70586caf",
       "type": "github"
     },
     "pyproject-nix": {
@@ -41,11 +41,11 @@
       "type": "github"
     },
     "pysmithay": {
-      "lastModified": 1791789342,
-      "narHash": "sha256-ekpMSFUJixOz4hzOFP3qEArg28YHnLsESXgIcyvRWZY=",
+      "lastModified": 1791791604,
+      "narHash": "sha256-ZutJqjc+4jt7SXfqm9hlqEHGoy52sCjRNIabEJ7B82Y=",
       "owner": "Lillecarl",
       "repo": "pysmithay",
-      "rev": "8cebfee91aa8a4530f1a294f91d6dd6bc8194572",
+      "rev": "ad126800068b4019d27524c6cd9b12ceb6fff9c5",
       "type": "github"
     },
     "pyte": {

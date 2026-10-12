@@ -397,6 +397,7 @@ let
         clippy
         rustfmt
         libxkbcommon
+        pixman
         foot
         wl-clipboard
         dejavu_fonts
