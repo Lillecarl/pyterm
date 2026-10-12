@@ -448,10 +448,11 @@ a project and your own configuration, and what it draws depends on all three.
 
 So record it once, where it goes wrong, and replay the bytes:
 
-    ptterm-record --into pymux/tests/recordings --lines 24 --columns 80 \
+    ptyhost-record --into pymux/tests/recordings --lines 24 --columns 80 \
         claude -- claude
 
-`ptterm-record` comes with ptterm, so it runs anywhere. The program behaves
+`ptyhost-record` comes with ptyhost, and the pymux package puts it on the
+path, so it runs anywhere. The program behaves
 normally: use it, reproduce the fault, and quit. A `claude.bin` in
 `pymux/tests/recordings` then becomes a fixture called `recorded-claude`, and
 `checks.pymux-pictures` plays it back bare and in a pane and subtracts the two
