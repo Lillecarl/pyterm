@@ -994,6 +994,32 @@ impl Compositor {
         self.flush()
     }
 
+    /// Scroll window `id` by `pixels` of its canvas: positive is down,
+    /// or right when `horizontal`. A continuous source, so the client
+    /// moves by exactly that much and adds no animation or momentum of
+    /// its own: the terminal's trackpad already carries both.
+    #[pyo3(signature = (id, pixels, time, horizontal=false))]
+    fn pointer_scroll_smooth(
+        &mut self,
+        id: u64,
+        pixels: f64,
+        time: u32,
+        horizontal: bool,
+    ) -> PyResult<()> {
+        let scale = self.toplevel(id)?.scale;
+        let axis = if horizontal {
+            Axis::Horizontal
+        } else {
+            Axis::Vertical
+        };
+        let frame = AxisFrame::new(time)
+            .source(AxisSource::Continuous)
+            .value(axis, pixels / scale);
+        self.pointer.axis(&mut self.state, frame);
+        self.pointer.frame(&mut self.state);
+        self.flush()
+    }
+
     /// Press or release a pointer button, as an evdev code: `BTN_LEFT`
     /// is 0x110.
     fn pointer_button(&mut self, button: u32, pressed: bool, time: u32) -> PyResult<()> {

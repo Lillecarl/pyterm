@@ -163,7 +163,7 @@ def test_shutdown_lets_the_socket_go(compositor):
 
 def test_a_window_names_the_pointer_it_wants(compositor):
     "Lillecarl/pymux#650."
-    client = launch(compositor, sys.executable, str(CLIENT.with_name("cursor_client.py")))
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
     try:
         pump(compositor, lambda seen: commits(seen))
         compositor.pointer_motion(1, 5.0, 5.0, 1)
@@ -171,6 +171,32 @@ def test_a_window_names_the_pointer_it_wants(compositor):
     finally:
         client.kill()
         client.wait(10)
+
+
+def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
+    "Lillecarl/pymux#652."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
+    try:
+        pump(compositor, lambda seen: commits(seen))
+        compositor.configure(1, 128, 64, 2.0)
+        compositor.pointer_motion(1, 5.0, 5.0, 1)
+        compositor.pointer_scroll_smooth(1, 40.0, 2)
+        lines = []
+        pump(compositor, lambda _seen: _read_until(client, lines, "axis"))
+        # 2 is `wl_pointer.axis_source.continuous`.
+        assert lines[-1] == "axis 2 20"
+    finally:
+        client.kill()
+        client.wait(10)
+
+
+def _read_until(client, lines, prefix):
+    "Take what the client printed so far, and say whether a line starts with `prefix`."
+    os.set_blocking(client.stdout.fileno(), False)
+    text = client.stdout.read()
+    if text:
+        lines.extend(text.decode().splitlines())
+    return any(line.startswith(prefix) for line in lines)
 
 
 def test_a_real_terminal_draws(compositor):
