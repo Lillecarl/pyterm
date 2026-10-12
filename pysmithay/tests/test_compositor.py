@@ -37,8 +37,8 @@ def pump(compositor, until, timeout=10.0):
         select.select(compositor.fds(), [], [], min(left, 0.1))
         events = compositor.dispatch()
         seen.extend(events)
-        if any(event[0] == "commit" for event in events):
-            compositor.frame_done(int(time.monotonic() * 1000) & 0xFFFFFFFF)
+        for toplevel in {event[1] for event in commits(events)}:
+            compositor.frame_done(toplevel, int(time.monotonic() * 1000) & 0xFFFFFFFF)
     return seen
 
 

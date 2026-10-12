@@ -1012,19 +1012,17 @@ impl Compositor {
         self.flush()
     }
 
-    /// Tell every window, its popups included, that its last frame was
+    /// Tell one window, its popups included, that its last frame was
     /// shown, so it may draw the next. `time` is in milliseconds, from
-    /// any fixed start.
-    fn frame_done(&mut self, time: u32) -> PyResult<()> {
+    /// any fixed start. A window nobody shows gets none, and waits.
+    fn frame_done(&mut self, id: u64, time: u32) -> PyResult<()> {
         let output = self.output.clone();
-        for toplevel in &self.state.toplevels {
-            toplevel.window.send_frame(
-                &output,
-                Duration::from_millis(u64::from(time)),
-                None,
-                |_, _| Some(output.clone()),
-            );
-        }
+        self.toplevel(id)?.window.send_frame(
+            &output,
+            Duration::from_millis(u64::from(time)),
+            None,
+            |_, _| Some(output.clone()),
+        );
         self.flush()
     }
 
