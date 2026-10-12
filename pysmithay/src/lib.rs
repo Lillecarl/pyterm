@@ -46,6 +46,8 @@ use smithay::wayland::selection::primary_selection::{
 use smithay::wayland::selection::{
     SelectionHandler, SelectionSource, SelectionTarget, ext_data_control, wlr_data_control,
 };
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
@@ -53,7 +55,8 @@ use smithay::wayland::shell::xdg::{
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::{
     delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
-    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_shell,
+    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
+    delegate_xdg_decoration, delegate_xdg_shell,
 };
 
 mod kitty;
@@ -110,6 +113,7 @@ struct State {
     primary_selection_state: PrimarySelectionState,
     wlr_data_control_state: wlr_data_control::DataControlState,
     ext_data_control_state: ext_data_control::DataControlState,
+    _xdg_decoration_state: XdgDecorationState,
     toplevels: Vec<Toplevel>,
     next_id: u64,
     events: Vec<Event>,
@@ -382,6 +386,32 @@ impl ShmHandler for State {
 
 impl OutputHandler for State {}
 
+/// Every window is drawn without a title bar of its own: whoever shows
+/// it draws the frame around it, as a pymux pane does.
+impl XdgDecorationHandler for State {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        server_side(&toplevel);
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
+        server_side(&toplevel);
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        server_side(&toplevel);
+    }
+}
+
+fn server_side(toplevel: &ToplevelSurface) {
+    toplevel.with_pending_state(|state| {
+        state.decoration_mode = Some(DecorationMode::ServerSide);
+    });
+    // Before the first configure, that configure carries it.
+    if toplevel.is_initial_configure_sent() {
+        toplevel.send_pending_configure();
+    }
+}
+
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
@@ -466,6 +496,7 @@ delegate_data_device!(State);
 delegate_primary_selection!(State);
 delegate_data_control!(State);
 delegate_ext_data_control!(State);
+delegate_xdg_decoration!(State);
 
 /// A Wayland compositor that draws nowhere, and hands every window's
 /// pixels to Python.
@@ -573,6 +604,7 @@ impl Compositor {
             primary_selection_state,
             wlr_data_control_state,
             ext_data_control_state,
+            _xdg_decoration_state: XdgDecorationState::new::<State>(&handle),
             toplevels: Vec::new(),
             next_id: 1,
             events: Vec::new(),

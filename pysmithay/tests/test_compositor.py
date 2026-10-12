@@ -91,6 +91,13 @@ def test_the_second_frame_names_only_what_changed(compositor):
     assert compositor.toplevels() == []
 
 
+def test_a_window_draws_no_title_bar_of_its_own(compositor):
+    "It asks for client side and is told server side: the pane draws the frame."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("decoration_client.py")))
+    pump(compositor, lambda _seen: client.poll() is not None)
+    assert client.stdout.read().decode().strip() == "2"
+
+
 def test_a_real_terminal_draws(compositor):
     "foot asks for a size, gets one, and paints something that is not blank."
     foot = launch(compositor, "foot", "--override=main.font=DejaVu Sans Mono:size=8", "sh", "-c", "sleep 30")
