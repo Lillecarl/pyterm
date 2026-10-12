@@ -394,6 +394,7 @@ let
         rustfmt
         libxkbcommon
         foot
+        wl-clipboard
         dejavu_fonts
         makeFontsConf
         ;
@@ -467,10 +468,11 @@ let
         ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
-      # everything it declares, and the themes of the pastel. The checks
-      # ride along from the package inside, which is where they are
-      # written.
-      pymux = set.mkVirtualEnv "pymux" { pymux = [ "catppuccin" ]; } // {
+      # everything it declares, the themes of the pastel, and on Linux
+      # the compositor for panes with no display (`wayland-server`). The
+      # checks ride along from the package inside, which is where they
+      # are written.
+      pymux = set.mkVirtualEnv "pymux" { pymux = [ "catppuccin" "wayland" ]; } // {
         inherit (set.pymux) checks;
         inherit (set.pymux) meta;
         # `<pymux-pane>` compiled, which is a thing to reach on its own:
@@ -810,6 +812,10 @@ rec {
     # the two lists together say what a front end adds.
     txterm-esctest = txterm.checks.esctest;
     pymux-unit = pymux.checks.unit;
+    # The compositor pymux holds for panes with no display, with the
+    # `wayland` extra that every other pymux suite leaves out.
+    # Lillecarl/pymux#383.
+    pymux-wayland = pymux.checks.wayland;
     # The types of pymux, held by a static checker rather than by a run:
     # a `Mode` member added and not handled by the `match` in
     # `run_pymux` fails here. Lillecarl/pymux#486.
