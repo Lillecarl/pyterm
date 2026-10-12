@@ -108,8 +108,12 @@ impl Toplevel {
             .expect("every window here is made from a toplevel")
     }
 
-    /// Draw the window if a surface of it changed, and return the
-    /// damage; None when there is nothing new to read.
+    /// Draw the window if a surface of it committed, and return the
+    /// damage, which is empty when the commit changed no pixel; None
+    /// when nothing committed.
+    ///
+    /// An empty commit is still news: it may carry a frame callback, and
+    /// Firefox paints nothing until that is answered. Lillecarl/pymux#638.
     fn render(&mut self, renderer: &mut PixmanRenderer) -> Option<Vec<Rect>> {
         if !std::mem::take(&mut self.dirty) {
             return None;
@@ -130,7 +134,7 @@ impl Toplevel {
         let canvas = self.canvas.as_mut()?;
         let damage = canvas.render(renderer, &self.window);
         if damage.is_empty() && !resized {
-            return None;
+            return Some(damage);
         }
         self.serial += 1;
         if resized {
@@ -960,7 +964,8 @@ impl Compositor {
     ///
     /// Each event is a tuple: `("toplevel", id, tag)`, `("title", id, str)`,
     /// `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` with
-    /// the damage in buffer pixels, `("closed", id)`, or
+    /// the damage in canvas pixels, empty when the commit drew nothing
+    /// but may wait on `frame_done` all the same, `("closed", id)`, or
     /// `("selection", "clipboard" | "primary", [mime types])` when a
     /// client sets a selection, with no mime types when it clears one,
     /// or `("send", target, mime_type, fd)` when a client pastes a mime

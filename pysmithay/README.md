@@ -47,7 +47,8 @@ thread starts.
 
 Events are tuples: `("toplevel", id)`, `("title", id, str)`,
 `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` and
-`("closed", id)`.
+`("closed", id)`. A commit's damage is empty when it drew nothing; it
+still waits on `frame_done`.
 
 ## What it does not do yet
 
