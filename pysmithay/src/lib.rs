@@ -81,6 +81,9 @@ enum Event {
     /// A client set a selection, offering these mime types, or cleared
     /// it when there are none.
     Selection(SelectionTarget, Vec<String>),
+    /// A client asked for a held selection that Python answers itself:
+    /// write the mime type into the descriptor, then close it.
+    Send(SelectionTarget, String, OwnedFd),
 }
 
 struct State {
@@ -98,8 +101,9 @@ struct State {
     events: Vec<Event>,
 }
 
-/// A selection the compositor holds itself: each mime type and its bytes.
-type Offers = Arc<HashMap<String, Vec<u8>>>;
+/// A selection the compositor holds itself: each mime type and its
+/// bytes, or None when Python answers each request as it comes.
+type Offers = Arc<HashMap<String, Option<Vec<u8>>>>;
 
 impl SelectionHandler for State {
     type SelectionUserData = Offers;
@@ -116,20 +120,26 @@ impl SelectionHandler for State {
 
     fn send_selection(
         &mut self,
-        _target: SelectionTarget,
+        target: SelectionTarget,
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
         offers: &Offers,
     ) {
-        let offers = Arc::clone(offers);
-        // A pipe holds 64 KiB, and the reader drains it when it likes:
-        // a write on this thread could stall every client.
-        std::thread::spawn(move || {
-            if let Some(bytes) = offers.get(&mime_type) {
-                let _ = std::fs::File::from(fd).write_all(bytes);
+        match offers.get(&mime_type) {
+            Some(Some(_)) => {
+                let offers = Arc::clone(offers);
+                // A pipe holds 64 KiB, and the reader drains it when it
+                // likes: a write on this thread could stall every client.
+                std::thread::spawn(move || {
+                    if let Some(Some(bytes)) = offers.get(&mime_type) {
+                        let _ = std::fs::File::from(fd).write_all(bytes);
+                    }
+                });
             }
-        });
+            Some(None) => self.events.push(Event::Send(target, mime_type, fd)),
+            None => {}
+        }
     }
 }
 
@@ -552,7 +562,15 @@ impl Compositor {
 
     /// Hold a selection for clients to paste: each mime type with its
     /// bytes. `target` is "clipboard" or "primary".
-    fn set_selection(&mut self, target: &str, offers: HashMap<String, Vec<u8>>) -> PyResult<()> {
+    ///
+    /// A mime type offered with None is answered by Python: a paste of
+    /// it comes back from `dispatch` as `("send", target, mime_type,
+    /// fd)`, and the caller writes the bytes into `fd` and closes it.
+    fn set_selection(
+        &mut self,
+        target: &str,
+        offers: HashMap<String, Option<Vec<u8>>>,
+    ) -> PyResult<()> {
         let mime_types: Vec<String> = offers.keys().cloned().collect();
         let handle = self.display.handle();
         match target_of(target)? {
@@ -687,7 +705,9 @@ impl Compositor {
     /// `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` with
     /// the damage in buffer pixels, `("closed", id)`, or
     /// `("selection", "clipboard" | "primary", [mime types])` when a
-    /// client sets a selection, with no mime types when it clears one.
+    /// client sets a selection, with no mime types when it clears one,
+    /// or `("send", target, mime_type, fd)` when a client pastes a mime
+    /// type held with None; the caller owns `fd` and must close it.
     fn dispatch(&mut self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         while let Some(stream) = self.listener.accept().map_err(os_error)? {
             self.display
@@ -715,6 +735,11 @@ impl Compositor {
                     Event::Closed(id) => ("closed", id).into_pyobject(py)?.into_any(),
                     Event::Selection(target, mime_types) => {
                         ("selection", name_of(target), mime_types)
+                            .into_pyobject(py)?
+                            .into_any()
+                    }
+                    Event::Send(target, mime_type, fd) => {
+                        ("send", name_of(target), mime_type, fd.into_raw_fd())
                             .into_pyobject(py)?
                             .into_any()
                     }

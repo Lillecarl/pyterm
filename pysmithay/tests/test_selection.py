@@ -113,6 +113,31 @@ def test_what_python_holds_reaches_a_client(compositor, target, flags):
     assert stdout == b"held by pymux"
 
 
+def test_python_answers_a_selection_held_with_none(compositor):
+    "The paste waits for Python, which writes when it has the bytes."
+    compositor.set_selection("clipboard", {TEXT: None})
+    process = subprocess.Popen(
+        ["wl-paste", "--no-newline"],
+        env=environment(compositor),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        events = pump(compositor, lambda seen: any(event[0] == "send" for event in seen))
+        (send,) = [event for event in events if event[0] == "send"]
+        _, target, mime_type, fd = send
+        assert (target, mime_type) == ("clipboard", TEXT)
+        os.write(fd, b"answered late")
+        os.close(fd)
+        pump(compositor, lambda _seen: process.poll() is not None)
+        stdout, stderr = process.communicate()
+        assert process.returncode == 0, stderr
+        assert stdout == b"answered late"
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+
 def test_a_large_selection_does_not_stall_the_compositor(compositor):
     "More than a pipe holds, so the write cannot be on the dispatch thread."
     big = b"x" * (1 << 20)
