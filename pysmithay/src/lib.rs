@@ -691,9 +691,9 @@ delegate_cursor_shape!(State);
 /// pixels to Python.
 #[pyclass(unsendable, module = "pysmithay")]
 struct Compositor {
-    display: Display<State>,
+    /// The sockets, until `shutdown`.
+    wire: Option<Wire>,
     state: State,
-    listener: ListeningSocket,
     /// The tag the next `connect` gives; 0 is the listening socket's.
     next_tag: u64,
     name: String,
@@ -703,6 +703,20 @@ struct Compositor {
     pointer: PointerHandle<State>,
     /// Draws every window into its canvas, in software.
     renderer: PixmanRenderer,
+}
+
+/// What a compositor holds open: its clients, and the socket they find.
+///
+/// `shutdown` drops it on the thread that owns the compositor. PyO3 runs
+/// no destructor of an `unsendable` class freed on another thread, and
+/// Python's garbage collector may free one on any. Lillecarl/pymux#642.
+struct Wire {
+    display: Display<State>,
+    listener: ListeningSocket,
+}
+
+fn closed() -> PyErr {
+    PyOSError::new_err("the compositor is closed")
 }
 
 /// An awaitable that has its answer already, so that a call answers an
@@ -735,8 +749,12 @@ impl Compositor {
             .ok_or_else(|| PyKeyError::new_err(id))
     }
 
+    fn wire(&mut self) -> PyResult<&mut Wire> {
+        self.wire.as_mut().ok_or_else(closed)
+    }
+
     fn flush(&mut self) -> PyResult<()> {
-        self.display.flush_clients().map_err(os_error)
+        self.wire()?.display.flush_clients().map_err(os_error)
     }
 }
 
@@ -827,9 +845,8 @@ impl Compositor {
             events: Vec::new(),
         };
         Ok(Self {
-            display,
+            wire: Some(Wire { display, listener }),
             state,
-            listener,
             next_tag: 1,
             name,
             output,
@@ -852,7 +869,7 @@ impl Compositor {
         offers: HashMap<String, Option<Vec<u8>>>,
     ) -> PyResult<()> {
         let mime_types: Vec<String> = offers.keys().cloned().collect();
-        let handle = self.display.handle();
+        let handle = self.wire()?.display.handle();
         match target_of(target)? {
             SelectionTarget::Clipboard => {
                 set_data_device_selection(&handle, &self.seat, mime_types, Arc::new(offers))
@@ -866,7 +883,7 @@ impl Compositor {
 
     /// Drop the selection, whoever set it.
     fn clear_selection(&mut self, target: &str) -> PyResult<()> {
-        let handle = self.display.handle();
+        let handle = self.wire()?.display.handle();
         match target_of(target)? {
             SelectionTarget::Clipboard => clear_data_device_selection(&handle, &self.seat),
             SelectionTarget::Primary => clear_primary_selection(&handle, &self.seat),
@@ -1006,11 +1023,18 @@ impl Compositor {
     }
 
     /// The listening socket and the display: wait on both for reading.
-    fn fds(&mut self) -> (i32, i32) {
-        (
-            self.listener.as_raw_fd(),
-            self.display.backend().poll_fd().as_fd().as_raw_fd(),
-        )
+    fn fds(&mut self) -> PyResult<(i32, i32)> {
+        let wire = self.wire()?;
+        Ok((
+            wire.listener.as_raw_fd(),
+            wire.display.backend().poll_fd().as_fd().as_raw_fd(),
+        ))
+    }
+
+    /// Let every client go and stop listening. Nothing works after it.
+    fn shutdown(&mut self) {
+        self.wire = None;
+        self.state.toplevels.clear();
     }
 
     /// A client connected already, for a program to take as
@@ -1026,7 +1050,8 @@ impl Compositor {
             compositor_state: CompositorClientState::default(),
             origin: tag,
         };
-        self.display
+        self.wire()?
+            .display
             .handle()
             .insert_client(ours, Arc::new(data))
             .map_err(os_error)?;
@@ -1037,7 +1062,8 @@ impl Compositor {
     /// return what happened, oldest first.
     ///
     /// Each event is a tuple: `("toplevel", id, tag)`, `("title", id, str)`,
-    /// `("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` with
+    /// `("app_id", id, str)`, `("pointer", id, css_name)` with "" for a
+    /// pointer the terminal picks, `("commit", id, [(x, y, w, h), ...])` with
     /// the damage in canvas pixels, empty when the commit drew nothing
     /// but may wait on `frame_done` all the same, `("closed", id)`, or
     /// `("selection", "clipboard" | "primary", [mime types])` when a
@@ -1045,17 +1071,18 @@ impl Compositor {
     /// or `("send", target, mime_type, fd)` when a client pastes a mime
     /// type held with None; the caller owns `fd` and must close it.
     fn dispatch(&mut self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
-        while let Some(stream) = self.listener.accept().map_err(os_error)? {
+        let wire = self.wire.as_mut().ok_or_else(closed)?;
+        while let Some(stream) = wire.listener.accept().map_err(os_error)? {
             let data = ClientState {
                 compositor_state: CompositorClientState::default(),
                 origin: 0,
             };
-            self.display
+            wire.display
                 .handle()
                 .insert_client(stream, Arc::new(data))
                 .map_err(os_error)?;
         }
-        self.display
+        wire.display
             .dispatch_clients(&mut self.state)
             .map_err(os_error)?;
         self.state.popups.cleanup();

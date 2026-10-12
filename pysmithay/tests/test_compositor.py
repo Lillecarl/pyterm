@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-
 CLIENT = Path(__file__).with_name("client.py")
 
 
@@ -150,6 +149,16 @@ def test_a_window_draws_no_title_bar_of_its_own(compositor):
     client = launch(compositor, sys.executable, str(CLIENT.with_name("decoration_client.py")))
     pump(compositor, lambda _seen: client.poll() is not None)
     assert client.stdout.read().decode().strip() == "2"
+
+
+def test_shutdown_lets_the_socket_go(compositor):
+    "On the owner's thread, whichever thread frees it later. Lillecarl/pymux#642."
+    path = Path(os.environ["XDG_RUNTIME_DIR"]) / compositor.socket_name
+    assert path.exists()
+    compositor.shutdown()
+    assert not path.exists()
+    with pytest.raises(OSError):
+        compositor.dispatch()
 
 
 def test_a_window_names_the_pointer_it_wants(compositor):
