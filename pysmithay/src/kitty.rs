@@ -23,10 +23,11 @@ const CHUNK: usize = 4096;
 const MOST_RECTANGLES: usize = 16;
 const MOST_SHARE: f64 = 0.5;
 
-/// The pixels of one frame, RGBA, rows with no padding.
+/// The pixels of one frame: RGBA rows, `stride` bytes apart.
 pub struct Pixels<'a> {
     pub width: i32,
     pub height: i32,
+    pub stride: usize,
     pub rgba: &'a [u8],
     /// No pixel is translucent, so three bytes a pixel carry it.
     pub opaque: bool,
@@ -76,7 +77,7 @@ fn coalesced(damage: &[Rect], width: i32, height: i32) -> Vec<Rect> {
 fn encode(pixels: &Pixels, (x, y, w, h): Rect, keys: &str) -> String {
     let format = if pixels.opaque { 24 } else { 32 };
     let size = if pixels.opaque { 3 } else { 4 };
-    let stride = pixels.width as usize * 4;
+    let stride = pixels.stride;
 
     let mut raw = Vec::with_capacity(w as usize * h as usize * size);
     for row in y..y + h {

@@ -21,6 +21,8 @@
   clippy,
   rustfmt,
   libxkbcommon,
+  # The software renderer that composes a window with its popups.
+  pixman,
   foot,
   wl-clipboard,
   dejavu_fonts,
@@ -66,7 +68,7 @@ let
       export HOME="$TMPDIR"
       export PYO3_PYTHON=${python.interpreter}
       export CARGO_TARGET_DIR="$TMPDIR/target"
-      export LIBRARY_PATH=${libxkbcommon}/lib
+      export LIBRARY_PATH=${libxkbcommon}/lib:${pixman}/lib
       # What `cargoSetupHook` writes, which a `runCommand` never runs.
       mkdir -p .cargo
       printf '[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "%s"\n' ${cargoDeps} > .cargo/config.toml
@@ -115,7 +117,10 @@ stdenv.mkDerivation {
     maturin
   ];
 
-  buildInputs = [ libxkbcommon ];
+  buildInputs = [
+    libxkbcommon
+    pixman
+  ];
 
   buildPhase = ''
     runHook preBuild

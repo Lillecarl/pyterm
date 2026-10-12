@@ -14,6 +14,7 @@ use std::io::Write;
 use std::os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pyo3::exceptions::{PyKeyError, PyOSError, PyValueError};
 use pyo3::prelude::*;
@@ -23,16 +24,20 @@ use smithay::input::keyboard::{FilterResult, KeyboardHandle, XkbConfig};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+use smithay::backend::renderer::pixman::PixmanRenderer;
+use smithay::backend::renderer::utils::on_commit_buffer_handler;
+use smithay::desktop::{
+    PopupKind, PopupManager, Window, WindowSurfaceType, find_popup_root_surface,
+    get_popup_toplevel_coords,
+};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
-use smithay::reexports::wayland_server::protocol::wl_shm::Format;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, Display, ListeningSocket};
-use smithay::utils::{SERIAL_COUNTER, Serial, Size};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, Damage,
-    SurfaceAttributes, TraversalAction, with_states, with_surface_tree_downward,
+    CompositorClientState, CompositorHandler, CompositorState, get_parent, with_states,
 };
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::selection::data_device::{
@@ -52,22 +57,17 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
-use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
+use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::{
     delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
     delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
     delegate_xdg_decoration, delegate_xdg_shell,
 };
 
+mod canvas;
 mod kitty;
 
-/// What one buffer held, as RGBA rows with no padding.
-struct Frame {
-    width: i32,
-    height: i32,
-    rgba: Vec<u8>,
-    opaque: bool,
-}
+use canvas::Canvas;
 
 /// How many frames of damage a window remembers. A reader further
 /// behind than this gets the whole frame again.
@@ -75,15 +75,63 @@ const HISTORY: usize = 64;
 
 struct Toplevel {
     id: u64,
-    surface: ToplevelSurface,
-    frame: Option<Frame>,
-    /// Counts the buffers committed. A reader names the last one it saw.
+    window: Window,
+    /// The window drawn whole, once it has drawn anything.
+    canvas: Option<Canvas>,
+    /// The size Python asked for. Until it asks, the window's own.
+    wanted: Option<(i32, i32)>,
+    /// A surface of the window committed since it was last drawn.
+    dirty: bool,
+    /// Counts the frames drawn. A reader names the last one it saw.
     serial: u64,
-    /// The serial whose buffer changed size: nothing before it is an
+    /// The serial whose canvas changed size: nothing before it is an
     /// edit of the current frame.
     resized_at: u64,
     /// The damage of the recent serials, oldest first.
     history: VecDeque<(u64, Vec<Rect>)>,
+}
+
+impl Toplevel {
+    fn surface(&self) -> &ToplevelSurface {
+        self.window
+            .toplevel()
+            .expect("every window here is made from a toplevel")
+    }
+
+    /// Draw the window if a surface of it changed, and return the
+    /// damage; None when there is nothing new to read.
+    fn render(&mut self, renderer: &mut PixmanRenderer) -> Option<Vec<Rect>> {
+        if !std::mem::take(&mut self.dirty) {
+            return None;
+        }
+        let geometry = self.window.geometry();
+        let (width, height) = self.wanted.unwrap_or((geometry.size.w, geometry.size.h));
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let resized = self
+            .canvas
+            .as_ref()
+            .is_none_or(|canvas| (canvas.width, canvas.height) != (width, height));
+        if resized {
+            self.canvas = Some(Canvas::new(renderer, width, height)?);
+        }
+        let canvas = self.canvas.as_mut()?;
+        let damage = canvas.render(renderer, &self.window);
+        if damage.is_empty() && !resized {
+            return None;
+        }
+        self.serial += 1;
+        if resized {
+            self.resized_at = self.serial;
+            self.history.clear();
+        }
+        self.history.push_back((self.serial, damage.clone()));
+        if self.history.len() > HISTORY {
+            self.history.pop_front();
+        }
+        Some(damage)
+    }
 }
 
 /// A rectangle in buffer pixels: x, y, width, height.
@@ -114,6 +162,7 @@ struct State {
     wlr_data_control_state: wlr_data_control::DataControlState,
     ext_data_control_state: ext_data_control::DataControlState,
     _xdg_decoration_state: XdgDecorationState,
+    popups: PopupManager,
     toplevels: Vec<Toplevel>,
     next_id: u64,
     events: Vec<Event>,
@@ -219,14 +268,59 @@ impl State {
     fn toplevel_of(&mut self, surface: &WlSurface) -> Option<&mut Toplevel> {
         self.toplevels
             .iter_mut()
-            .find(|toplevel| toplevel.surface.wl_surface() == surface)
+            .find(|toplevel| toplevel.surface().wl_surface() == surface)
     }
 
     fn id_of(&self, surface: &ToplevelSurface) -> Option<u64> {
         self.toplevels
             .iter()
-            .find(|toplevel| &toplevel.surface == surface)
+            .find(|toplevel| toplevel.surface() == surface)
             .map(|toplevel| toplevel.id)
+    }
+
+    /// Where a popup goes: as its positioner asks, flipped, slid or
+    /// shrunk to stay inside the window it belongs to. The positioner
+    /// reads rectangles relative to the parent's geometry, and the
+    /// window's geometry sits at the canvas origin.
+    fn popup_geometry(
+        &self,
+        popup: &PopupSurface,
+        positioner: &PositionerState,
+    ) -> Rectangle<i32, Logical> {
+        let kind = PopupKind::Xdg(popup.clone());
+        let size = find_popup_root_surface(&kind).ok().and_then(|root| {
+            self.toplevels
+                .iter()
+                .find(|toplevel| toplevel.surface().wl_surface() == &root)
+                .map(|toplevel| {
+                    let geometry = toplevel.window.geometry();
+                    toplevel
+                        .wanted
+                        .unwrap_or((geometry.size.w, geometry.size.h))
+                })
+        });
+        let Some((width, height)) = size else {
+            return positioner.get_geometry();
+        };
+        let parent = get_popup_toplevel_coords(&kind);
+        let target = Rectangle::new((-parent.x, -parent.y).into(), (width, height).into());
+        positioner.get_unconstrained_geometry(target)
+    }
+
+    /// The root surface of the window that shows `surface`: through
+    /// subsurfaces to their parent, and through popups to the toplevel
+    /// they hang from.
+    fn window_root_of(&self, surface: &WlSurface) -> WlSurface {
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        if let Some(popup) = self.popups.find_popup(&root)
+            && let Ok(toplevel) = find_popup_root_surface(&popup)
+        {
+            return toplevel;
+        }
+        root
     }
 }
 
@@ -249,129 +343,32 @@ impl CompositorHandler for State {
         &client.get_data::<ClientState>().unwrap().compositor_state
     }
 
+    /// A surface took new state. Its buffer goes to the renderer, which
+    /// holds it until the next one and releases it then, and the window
+    /// that shows it is drawn on the next `dispatch`.
     fn commit(&mut self, surface: &WlSurface) {
-        let Some(toplevel) = self.toplevel_of(surface) else {
-            return;
-        };
+        on_commit_buffer_handler::<Self>(surface);
+        self.popups.commit(surface);
+
         // xdg-shell: the first commit carries no buffer, and the client
-        // waits for this configure before it draws.
-        if !toplevel.surface.is_initial_configure_sent() {
-            toplevel.surface.send_configure();
-            return;
+        // waits for this configure before it draws. A popup the same.
+        if let Some(toplevel) = self.toplevel_of(surface)
+            && !toplevel.surface().is_initial_configure_sent()
+        {
+            toplevel.surface().send_configure();
+        }
+        if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface)
+            && !popup.is_initial_configure_sent()
+        {
+            let _ = popup.send_configure();
         }
 
-        let (assignment, scale, damage) = with_states(surface, |states| {
-            let mut guard = states.cached_state.get::<SurfaceAttributes>();
-            let attributes = guard.current();
-            (
-                attributes.buffer.take(),
-                attributes.buffer_scale,
-                std::mem::take(&mut attributes.damage),
-            )
-        });
-        let id = toplevel.id;
-        let damaged = match assignment {
-            None => return,
-            Some(BufferAssignment::Removed) => {
-                toplevel.frame = None;
-                vec![]
-            }
-            Some(BufferAssignment::NewBuffer(buffer)) => {
-                let copied = with_buffer_contents(&buffer, |pointer, length, data| {
-                    // SAFETY: smithay maps the pool for the length it
-                    // hands over, and holds it mapped for this call.
-                    let pool = unsafe { std::slice::from_raw_parts(pointer, length) };
-                    rgba_of(pool, data)
-                });
-                buffer.release();
-                let Ok(Some(frame)) = copied else {
-                    return;
-                };
-                let resized = toplevel
-                    .frame
-                    .as_ref()
-                    .is_none_or(|old| (old.width, old.height) != (frame.width, frame.height));
-                let damaged: Vec<Rect> = if resized {
-                    vec![(0, 0, frame.width, frame.height)]
-                } else {
-                    damage
-                        .iter()
-                        .filter_map(|one| clipped(one, scale, frame.width, frame.height))
-                        .collect()
-                };
-                toplevel.serial += 1;
-                if resized {
-                    toplevel.resized_at = toplevel.serial;
-                    toplevel.history.clear();
-                }
-                toplevel
-                    .history
-                    .push_back((toplevel.serial, damaged.clone()));
-                if toplevel.history.len() > HISTORY {
-                    toplevel.history.pop_front();
-                }
-                toplevel.frame = Some(frame);
-                damaged
-            }
-        };
-        self.events.push(Event::Commit(id, damaged));
-    }
-}
-
-/// One damage rectangle in buffer pixels, inside the buffer, or none.
-fn clipped(damage: &Damage, scale: i32, width: i32, height: i32) -> Option<Rect> {
-    let (x, y, w, h) = match damage {
-        Damage::Buffer(rect) => (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h),
-        Damage::Surface(rect) => (
-            rect.loc.x.saturating_mul(scale),
-            rect.loc.y.saturating_mul(scale),
-            rect.size.w.saturating_mul(scale),
-            rect.size.h.saturating_mul(scale),
-        ),
-    };
-    let left = x.clamp(0, width);
-    let top = y.clamp(0, height);
-    let right = x.saturating_add(w).clamp(0, width);
-    let bottom = y.saturating_add(h).clamp(0, height);
-    (right > left && bottom > top).then_some((left, top, right - left, bottom - top))
-}
-
-/// The buffer's pixels as RGBA, or none for a format or a size that
-/// does not fit the pool.
-///
-/// wl_shm's two mandatory formats are the only ones advertised. Both are
-/// little-endian words, so the bytes are B, G, R, A.
-fn rgba_of(pool: &[u8], data: BufferData) -> Option<Frame> {
-    let opaque = match data.format {
-        Format::Argb8888 => false,
-        Format::Xrgb8888 => true,
-        _ => return None,
-    };
-    let width = usize::try_from(data.width).ok()?;
-    let height = usize::try_from(data.height).ok()?;
-    let stride = usize::try_from(data.stride).ok()?;
-    let offset = usize::try_from(data.offset).ok()?;
-    if stride < width * 4 || height == 0 {
-        return None;
-    }
-    let end = offset.checked_add(stride.checked_mul(height - 1)?.checked_add(width * 4)?)?;
-    if end > pool.len() {
-        return None;
-    }
-
-    let mut rgba = Vec::with_capacity(width * height * 4);
-    for row in pool[offset..end].chunks(stride) {
-        for pixel in row[..width * 4].chunks_exact(4) {
-            let alpha = if opaque { 0xff } else { pixel[3] };
-            rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], alpha]);
+        let root = self.window_root_of(surface);
+        if let Some(toplevel) = self.toplevel_of(&root) {
+            toplevel.window.on_commit();
+            toplevel.dirty = true;
         }
     }
-    Some(Frame {
-        width: data.width,
-        height: data.height,
-        rgba,
-        opaque,
-    })
 }
 
 impl BufferHandler for State {
@@ -425,8 +422,10 @@ impl XdgShellHandler for State {
         self.next_id += 1;
         self.toplevels.push(Toplevel {
             id,
-            surface,
-            frame: None,
+            window: Window::new_wayland_window(surface),
+            canvas: None,
+            wanted: None,
+            dirty: false,
             serial: 0,
             resized_at: 0,
             history: VecDeque::new(),
@@ -455,7 +454,14 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}
+    /// A menu or a tooltip. It goes where its positioner says, moved
+    /// back inside the window when it would hang over an edge: the
+    /// canvas is the window, and nothing outside it is seen.
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let geometry = self.popup_geometry(&surface, &positioner);
+        surface.with_pending_state(|state| state.geometry = geometry);
+        let _ = self.popups.track_popup(PopupKind::Xdg(surface));
+    }
 
     fn grab(
         &mut self,
@@ -467,10 +473,16 @@ impl XdgShellHandler for State {
 
     fn reposition_request(
         &mut self,
-        _surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
     ) {
+        let geometry = self.popup_geometry(&surface, &positioner);
+        surface.with_pending_state(|state| {
+            state.geometry = geometry;
+            state.positioner = positioner;
+        });
+        surface.send_repositioned(token);
     }
 }
 
@@ -510,6 +522,8 @@ struct Compositor {
     seat: Seat<State>,
     keyboard: KeyboardHandle<State>,
     pointer: PointerHandle<State>,
+    /// Draws every window into its canvas, in software.
+    renderer: PixmanRenderer,
 }
 
 fn os_error(error: impl std::fmt::Display) -> PyErr {
@@ -521,6 +535,14 @@ impl Compositor {
         self.state
             .toplevels
             .iter()
+            .find(|toplevel| toplevel.id == id)
+            .ok_or_else(|| PyKeyError::new_err(id))
+    }
+
+    fn toplevel_mut(&mut self, id: u64) -> PyResult<&mut Toplevel> {
+        self.state
+            .toplevels
+            .iter_mut()
             .find(|toplevel| toplevel.id == id)
             .ok_or_else(|| PyKeyError::new_err(id))
     }
@@ -605,6 +627,7 @@ impl Compositor {
             wlr_data_control_state,
             ext_data_control_state,
             _xdg_decoration_state: XdgDecorationState::new::<State>(&handle),
+            popups: PopupManager::default(),
             toplevels: Vec::new(),
             next_id: 1,
             events: Vec::new(),
@@ -618,6 +641,7 @@ impl Compositor {
             seat,
             keyboard,
             pointer,
+            renderer: PixmanRenderer::new().map_err(os_error)?,
         })
     }
 
@@ -679,7 +703,7 @@ impl Compositor {
 
     /// Give the keyboard to this window.
     fn focus(&mut self, id: u64) -> PyResult<()> {
-        let surface = self.toplevel(id)?.surface.wl_surface().clone();
+        let surface = self.toplevel(id)?.surface().wl_surface().clone();
         self.keyboard
             .set_focus(&mut self.state, Some(surface), SERIAL_COUNTER.next_serial());
         self.flush()
@@ -706,15 +730,23 @@ impl Compositor {
         self.flush()
     }
 
-    /// Move the pointer to `(x, y)` in the window's surface pixels.
+    /// Move the pointer to `(x, y)` in the window's pixels, as the canvas
+    /// shows them. It goes to whichever surface is under it there: a
+    /// popup, a subsurface, or the window itself.
     fn pointer_motion(&mut self, id: u64, x: f64, y: f64, time: u32) -> PyResult<()> {
-        let surface = self.toplevel(id)?.surface.wl_surface().clone();
-        // Every window sits at the origin: Python places it, not this.
+        let window = &self.toplevel(id)?.window;
+        // The canvas starts at the window's geometry; its surfaces count
+        // from the window's own origin.
+        let origin = window.geometry().loc.to_f64();
+        let location = Point::<f64, Logical>::from((x, y)) + origin;
+        let focus = window
+            .surface_under(location, WindowSurfaceType::ALL)
+            .map(|(surface, at)| (surface, at.to_f64()));
         self.pointer.motion(
             &mut self.state,
-            Some((surface, (0.0, 0.0).into())),
+            focus,
             &MotionEvent {
-                location: (x, y).into(),
+                location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time,
             },
@@ -798,6 +830,15 @@ impl Compositor {
         self.display
             .dispatch_clients(&mut self.state)
             .map_err(os_error)?;
+        self.state.popups.cleanup();
+        // Every window a surface of which committed is drawn once, after
+        // all the requests: a popup and its parent that commit together
+        // make one frame and not two.
+        for toplevel in &mut self.state.toplevels {
+            if let Some(damage) = toplevel.render(&mut self.renderer) {
+                self.state.events.push(Event::Commit(toplevel.id, damage));
+            }
+        }
         self.flush()?;
 
         std::mem::take(&mut self.state.events)
@@ -847,7 +888,7 @@ impl Compositor {
         since: Option<u64>,
     ) -> PyResult<(u64, Option<String>, bool)> {
         let toplevel = self.toplevel(id)?;
-        let Some(frame) = toplevel.frame.as_ref() else {
+        let Some(canvas) = toplevel.canvas.as_ref() else {
             return Ok((toplevel.serial, None, false));
         };
         let serial = toplevel.serial;
@@ -871,12 +912,7 @@ impl Compositor {
                 .collect(),
             _ => Vec::new(),
         };
-        let pixels = kitty::Pixels {
-            width: frame.width,
-            height: frame.height,
-            rgba: &frame.rgba,
-            opaque: frame.opaque,
-        };
+        let pixels = canvas.pixels();
         let commands = py.detach(|| {
             if covered {
                 kitty::edit(&pixels, image_id, &damage)
@@ -887,23 +923,37 @@ impl Compositor {
         Ok((serial, Some(commands), !covered))
     }
 
-    /// The window's last buffer as `(width, height, rgba)`, or None
-    /// before it has drawn.
+    /// The window as last drawn, as `(width, height, rgba)` with no row
+    /// padding, or None before it has drawn.
     fn frame<'py>(
         &self,
         py: Python<'py>,
         id: u64,
     ) -> PyResult<Option<(i32, i32, Bound<'py, PyBytes>)>> {
-        Ok(self
-            .toplevel(id)?
-            .frame
-            .as_ref()
-            .map(|frame| (frame.width, frame.height, PyBytes::new(py, &frame.rgba))))
+        let Some(canvas) = self.toplevel(id)?.canvas.as_ref() else {
+            return Ok(None);
+        };
+        let pixels = canvas.pixels();
+        let row = pixels.width as usize * 4;
+        let mut rgba = Vec::with_capacity(row * pixels.height as usize);
+        for line in pixels
+            .rgba
+            .chunks(pixels.stride)
+            .take(pixels.height as usize)
+        {
+            rgba.extend_from_slice(&line[..row]);
+        }
+        Ok(Some((pixels.width, pixels.height, PyBytes::new(py, &rgba))))
     }
 
-    /// Ask the window to be this size, in surface pixels.
+    /// Ask the window to be this size, in pixels. The canvas takes the
+    /// size at once, so a window that keeps a smaller buffer shows the
+    /// rest as the clear colour and a larger one is cut off.
     fn configure(&mut self, id: u64, width: i32, height: i32) -> PyResult<()> {
-        let surface = self.toplevel(id)?.surface.clone();
+        let toplevel = self.toplevel_mut(id)?;
+        toplevel.wanted = Some((width, height));
+        toplevel.dirty = true;
+        let surface = toplevel.surface().clone();
         surface.with_pending_state(|state| {
             state.size = Some(Size::from((width, height)));
         });
@@ -915,30 +965,21 @@ impl Compositor {
 
     /// Ask the window to close. The client decides.
     fn close(&mut self, id: u64) -> PyResult<()> {
-        self.toplevel(id)?.surface.send_close();
+        self.toplevel(id)?.surface().send_close();
         self.flush()
     }
 
-    /// Tell every window that its last frame was shown, so it may draw
-    /// the next. `time` is in milliseconds, from any fixed start.
+    /// Tell every window, its popups included, that its last frame was
+    /// shown, so it may draw the next. `time` is in milliseconds, from
+    /// any fixed start.
     fn frame_done(&mut self, time: u32) -> PyResult<()> {
+        let output = self.output.clone();
         for toplevel in &self.state.toplevels {
-            with_surface_tree_downward(
-                toplevel.surface.wl_surface(),
-                (),
-                |_, _, &()| TraversalAction::DoChildren(()),
-                |_, states, &()| {
-                    for callback in states
-                        .cached_state
-                        .get::<SurfaceAttributes>()
-                        .current()
-                        .frame_callbacks
-                        .drain(..)
-                    {
-                        callback.done(time);
-                    }
-                },
-                |_, _, &()| true,
+            toplevel.window.send_frame(
+                &output,
+                Duration::from_millis(u64::from(time)),
+                None,
+                |_, _| Some(output.clone()),
             );
         }
         self.flush()

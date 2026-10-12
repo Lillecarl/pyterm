@@ -47,9 +47,10 @@ def test_the_first_update_sends_the_whole_frame(compositor):
     assert whole
     assert serial == 2
     ((keys, pixels),) = commands(text)
-    assert (keys["a"], keys["i"], keys["s"], keys["v"], keys["f"]) == ("t", "7", "64", "32", "32")
-    assert len(pixels) == 64 * 32 * 4
-    assert pixels[(5 * 64 + 10) * 4 : (5 * 64 + 10) * 4 + 4] == bytes([0xFF, 0, 0, 0xFF])
+    # The canvas is opaque, so the frame goes as RGB.
+    assert (keys["a"], keys["i"], keys["s"], keys["v"], keys["f"]) == ("t", "7", "64", "32", "24")
+    assert len(pixels) == 64 * 32 * 3
+    assert pixels[(5 * 64 + 10) * 3 : (5 * 64 + 10) * 3 + 3] == bytes([0xFF, 0, 0])
     client.kill()
 
 
@@ -69,7 +70,7 @@ def test_a_reader_one_frame_behind_gets_the_damage_only(compositor):
         "4",
         "1",
     )
-    assert pixels == bytes([0xFF, 0, 0, 0xFF]) * 16
+    assert pixels == bytes([0xFF, 0, 0]) * 16
     client.kill()
 
 
