@@ -15,7 +15,7 @@ use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, Color32F, Offscreen};
 use smithay::desktop::Window;
 use smithay::reexports::pixman::Image;
-use smithay::utils::{Scale, Transform};
+use smithay::utils::{Physical, Point, Scale, Transform};
 
 use crate::Rect;
 use crate::kitty::Pixels;
@@ -29,6 +29,8 @@ pub struct Canvas {
     tracker: OutputDamageTracker,
     pub width: i32,
     pub height: i32,
+    /// Canvas pixels per logical pixel of the window.
+    pub scale: f64,
     /// Whether the image holds the last frame, so the next one draws
     /// only what changed.
     drawn: bool,
@@ -36,7 +38,7 @@ pub struct Canvas {
 
 impl Canvas {
     /// An empty canvas, or none for a size pixman cannot make.
-    pub fn new(renderer: &mut PixmanRenderer, width: i32, height: i32) -> Option<Self> {
+    pub fn new(renderer: &mut PixmanRenderer, width: i32, height: i32, scale: f64) -> Option<Self> {
         // Abgr8888 is R, G, B, A in memory on a little-endian machine:
         // the order the kitty encoder reads.
         let image = renderer
@@ -44,9 +46,10 @@ impl Canvas {
             .ok()?;
         Some(Self {
             image,
-            tracker: OutputDamageTracker::new((width, height), 1.0, Transform::Normal),
+            tracker: OutputDamageTracker::new((width, height), scale, Transform::Normal),
             width,
             height,
+            scale,
             drawn: false,
         })
     }
@@ -57,11 +60,12 @@ impl Canvas {
     /// The window's geometry lands at the canvas origin, so a shadow or
     /// a margin outside it is cut off, as a desktop would show it.
     pub fn render(&mut self, renderer: &mut PixmanRenderer, window: &Window) -> Vec<Rect> {
-        let origin = window.geometry().loc.to_physical(1);
+        let origin: Point<i32, Physical> =
+            window.geometry().loc.to_physical_precise_round(self.scale);
         let elements: Vec<WaylandSurfaceRenderElement<PixmanRenderer>> = window.render_elements(
             renderer,
             (-origin.x, -origin.y).into(),
-            Scale::from(1.0),
+            Scale::from(self.scale),
             1.0,
         );
         let Ok(mut target) = renderer.bind(&mut self.image) else {

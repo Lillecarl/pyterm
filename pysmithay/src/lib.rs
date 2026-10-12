@@ -35,10 +35,14 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, Display, ListeningSocket, Resource};
-use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, get_parent, with_states,
+    CompositorClientState, CompositorHandler, CompositorState, SurfaceData, get_parent,
+    send_surface_state, with_states,
+};
+use smithay::wayland::fractional_scale::{
+    FractionalScaleHandler, FractionalScaleManagerState, with_fractional_scale,
 };
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::selection::data_device::{
@@ -62,7 +66,7 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::{
     delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
-    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
+    delegate_fractional_scale, delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
     delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell,
 };
 
@@ -80,8 +84,12 @@ struct Toplevel {
     window: Window,
     /// The window drawn whole, once it has drawn anything.
     canvas: Option<Canvas>,
-    /// The size Python asked for. Until it asks, the window's own.
+    /// The size Python asked for, in canvas pixels. Until it asks, the
+    /// window's own.
     wanted: Option<(i32, i32)>,
+    /// Canvas pixels per logical pixel: the window is configured at
+    /// `wanted / scale` and drawn back up to `wanted`.
+    scale: f64,
     /// A surface of the window committed since it was last drawn.
     dirty: bool,
     /// Counts the frames drawn. A reader names the last one it saw.
@@ -106,17 +114,18 @@ impl Toplevel {
         if !std::mem::take(&mut self.dirty) {
             return None;
         }
-        let geometry = self.window.geometry();
-        let (width, height) = self.wanted.unwrap_or((geometry.size.w, geometry.size.h));
+        let (width, height) = self.wanted.unwrap_or_else(|| {
+            let size = self.window.geometry().size.to_f64().to_physical(self.scale);
+            (size.w.round() as i32, size.h.round() as i32)
+        });
         if width <= 0 || height <= 0 {
             return None;
         }
-        let resized = self
-            .canvas
-            .as_ref()
-            .is_none_or(|canvas| (canvas.width, canvas.height) != (width, height));
+        let resized = self.canvas.as_ref().is_none_or(|canvas| {
+            (canvas.width, canvas.height, canvas.scale) != (width, height, self.scale)
+        });
         if resized {
-            self.canvas = Some(Canvas::new(renderer, width, height)?);
+            self.canvas = Some(Canvas::new(renderer, width, height, self.scale)?);
         }
         let canvas = self.canvas.as_mut()?;
         let damage = canvas.render(renderer, &self.window);
@@ -134,6 +143,35 @@ impl Toplevel {
         }
         Some(damage)
     }
+
+    /// The canvas size in the window's own, logical pixels.
+    fn logical_size(&self) -> Option<Size<i32, Logical>> {
+        self.wanted
+            .map(|(width, height)| logical(width, height, self.scale))
+    }
+
+    /// Tell every surface of the window, its popups and subsurfaces
+    /// included, the scale to draw at. Each is told once per change.
+    fn tell_scale(&self) {
+        let scale = self.scale;
+        self.window
+            .with_surfaces(|surface, states| tell_scale(surface, states, scale));
+    }
+}
+
+fn logical(width: i32, height: i32, scale: f64) -> Size<i32, Logical> {
+    Size::from((
+        (f64::from(width) / scale).round() as i32,
+        (f64::from(height) / scale).round() as i32,
+    ))
+}
+
+/// A client with `wp_fractional_scale_v1` draws at `scale` exactly. One
+/// with only `wl_surface` 6 draws at the next whole number, and the
+/// canvas takes it back down.
+fn tell_scale(surface: &WlSurface, states: &SurfaceData, scale: f64) {
+    with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
+    send_surface_state(surface, states, scale.ceil() as i32, Transform::Normal);
 }
 
 /// A rectangle in buffer pixels: x, y, width, height.
@@ -168,6 +206,10 @@ struct State {
     /// Scaling and cropping of a surface, which mpv's software output
     /// will not run without. The renderer honours it when it draws.
     _viewporter_state: ViewporterState,
+    _fractional_scale_state: FractionalScaleManagerState,
+    /// The one output, which every surface is on: a client that reads
+    /// its scale from `wl_output` sees it only on a surface it entered.
+    output: Output,
     popups: PopupManager,
     toplevels: Vec<Toplevel>,
     next_id: u64,
@@ -299,17 +341,16 @@ impl State {
                 .iter()
                 .find(|toplevel| toplevel.surface().wl_surface() == &root)
                 .map(|toplevel| {
-                    let geometry = toplevel.window.geometry();
                     toplevel
-                        .wanted
-                        .unwrap_or((geometry.size.w, geometry.size.h))
+                        .logical_size()
+                        .unwrap_or_else(|| toplevel.window.geometry().size)
                 })
         });
-        let Some((width, height)) = size else {
+        let Some(size) = size else {
             return positioner.get_geometry();
         };
         let parent = get_popup_toplevel_coords(&kind);
-        let target = Rectangle::new((-parent.x, -parent.y).into(), (width, height).into());
+        let target = Rectangle::new((-parent.x, -parent.y).into(), size);
         positioner.get_unconstrained_geometry(target)
     }
 
@@ -371,10 +412,23 @@ impl CompositorHandler for State {
             let _ = popup.send_configure();
         }
 
+        self.output.enter(surface);
         let root = self.window_root_of(surface);
         if let Some(toplevel) = self.toplevel_of(&root) {
             toplevel.window.on_commit();
             toplevel.dirty = true;
+            let scale = toplevel.scale;
+            with_states(surface, |states| tell_scale(surface, states, scale));
+        }
+    }
+}
+
+impl FractionalScaleHandler for State {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let root = self.window_root_of(&surface);
+        if let Some(toplevel) = self.toplevel_of(&root) {
+            let scale = toplevel.scale;
+            with_states(&surface, |states| tell_scale(&surface, states, scale));
         }
     }
 }
@@ -438,6 +492,7 @@ impl XdgShellHandler for State {
             window: Window::new_wayland_window(surface),
             canvas: None,
             wanted: None,
+            scale: 1.0,
             dirty: false,
             serial: 0,
             resized_at: 0,
@@ -555,6 +610,7 @@ delegate_data_control!(State);
 delegate_ext_data_control!(State);
 delegate_xdg_decoration!(State);
 delegate_viewporter!(State);
+delegate_fractional_scale!(State);
 
 /// A Wayland compositor that draws nowhere, and hands every window's
 /// pixels to Python.
@@ -674,7 +730,8 @@ impl Compositor {
         );
 
         let state = State {
-            compositor_state: CompositorState::new::<State>(&handle),
+            // Version 6 has `preferred_buffer_scale`, which `tell_scale` sends.
+            compositor_state: CompositorState::new_v6::<State>(&handle),
             xdg_shell_state: XdgShellState::new::<State>(&handle),
             shm_state: ShmState::new::<State>(&handle, vec![]),
             _output_manager_state: OutputManagerState::new_with_xdg_output::<State>(&handle),
@@ -685,6 +742,8 @@ impl Compositor {
             ext_data_control_state,
             _xdg_decoration_state: XdgDecorationState::new::<State>(&handle),
             _viewporter_state: ViewporterState::new::<State>(&handle),
+            _fractional_scale_state: FractionalScaleManagerState::new::<State>(&handle),
+            output: output.clone(),
             popups: PopupManager::default(),
             toplevels: Vec::new(),
             next_id: 1,
@@ -798,11 +857,13 @@ impl Compositor {
     /// shows them. It goes to whichever surface is under it there: a
     /// popup, a subsurface, or the window itself.
     fn pointer_motion(&mut self, id: u64, x: f64, y: f64, time: u32) -> PyResult<()> {
-        let window = &self.toplevel(id)?.window;
+        let toplevel = self.toplevel(id)?;
+        let window = &toplevel.window;
         // The canvas starts at the window's geometry; its surfaces count
         // from the window's own origin.
         let origin = window.geometry().loc.to_f64();
-        let location = Point::<f64, Logical>::from((x, y)) + origin;
+        let location =
+            Point::<f64, Logical>::from((x / toplevel.scale, y / toplevel.scale)) + origin;
         let focus = window
             .surface_under(location, WindowSurfaceType::ALL)
             .map(|(surface, at)| (surface, at.to_f64()));
@@ -1046,17 +1107,40 @@ impl Compositor {
         Ok(Some((pixels.width, pixels.height, PyBytes::new(py, &rgba))))
     }
 
-    /// Ask the window to be this size, in pixels. The canvas takes the
-    /// size at once, so a window that keeps a smaller buffer shows the
-    /// rest as the clear colour and a larger one is cut off.
-    fn configure(&mut self, id: u64, width: i32, height: i32) -> PyResult<()> {
+    /// Ask the window to fill a canvas this size, in pixels, at `scale`
+    /// canvas pixels to one of its own: at 2 it lays out in half as many
+    /// and draws its buffer twice as dense. The canvas takes the size at
+    /// once, so a window that keeps a smaller buffer shows the rest as
+    /// the clear colour and a larger one is cut off.
+    #[pyo3(signature = (id, width, height, scale=1.0))]
+    fn configure(&mut self, id: u64, width: i32, height: i32, scale: f64) -> PyResult<()> {
+        if !(scale.is_finite() && scale > 0.0) {
+            return Err(PyValueError::new_err(format!(
+                "a scale is a positive number, not {scale}"
+            )));
+        }
         let toplevel = self.toplevel_mut(id)?;
         toplevel.wanted = Some((width, height));
         toplevel.dirty = true;
+        if toplevel.scale != scale {
+            toplevel.scale = scale;
+            toplevel.tell_scale();
+        }
+        let size = logical(width, height, scale);
         let surface = toplevel.surface().clone();
         surface.with_pending_state(|state| {
-            state.size = Some(Size::from((width, height)));
+            state.size = Some(size);
         });
+        // Only for a client that reads its scale from the output; the
+        // last window configured speaks for all of them.
+        if self.output.current_scale().fractional_scale() != scale {
+            self.output.change_current_state(
+                None,
+                None,
+                Some(smithay::output::Scale::Fractional(scale)),
+                None,
+            );
+        }
         if surface.is_initial_configure_sent() {
             surface.send_pending_configure();
         }

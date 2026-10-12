@@ -109,6 +109,42 @@ def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
     second.wait(10)
 
 
+@pytest.mark.parametrize(
+    ("scale", "flags", "told"),
+    [(1.5, [], "60 40 180"), (2.0, ["--integer"], "45 30 240")],
+    ids=["fractional", "integer"],
+)
+def test_a_scaled_window_lays_out_small_and_draws_dense(compositor, scale, flags, told):
+    "The canvas is the pixels asked for, and the window's buffer lands on them one to one."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("scale_client.py")), *flags)
+    try:
+        pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+        compositor.configure(1, 90, 60, scale)
+        # The first frame at the new size is the clear colour, before the
+        # client has drawn into it.
+        red = bytes([0xFF, 0x00, 0x00, 0xFF])
+        pump(compositor, lambda seen: commits(seen) and compositor.frame(1)[2][-4:] == red)
+        assert client.stdout.readline().decode().strip() == told
+        width, height, rgba = compositor.frame(1)
+        assert (width, height) == (90, 60)
+        assert rgba[:4] == bytes([0x33, 0x66, 0x99, 0xFF])
+        assert rgba[-8:-4] == bytes([0x33, 0x66, 0x99, 0xFF])
+    finally:
+        client.kill()
+        print(client.communicate()[0].decode(errors="replace"))
+
+
+def test_a_scale_that_is_not_positive_is_refused(compositor):
+    client = launch(compositor, sys.executable, str(CLIENT))
+    try:
+        pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+        with pytest.raises(ValueError):
+            compositor.configure(1, 90, 60, 0.0)
+    finally:
+        client.kill()
+        client.wait(10)
+
+
 def test_a_window_draws_no_title_bar_of_its_own(compositor):
     "It asks for client side and is told server side: the pane draws the frame."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("decoration_client.py")))
