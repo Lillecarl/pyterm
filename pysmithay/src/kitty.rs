@@ -33,6 +33,40 @@ pub struct Pixels<'a> {
     pub opaque: bool,
 }
 
+impl Pixels<'_> {
+    /// A copy that owns its bytes, to encode on another thread.
+    pub fn to_owned(&self) -> OwnedPixels {
+        OwnedPixels {
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            rgba: self.rgba.to_vec(),
+            opaque: self.opaque,
+        }
+    }
+}
+
+/// `Pixels` that own their bytes.
+pub struct OwnedPixels {
+    width: i32,
+    height: i32,
+    stride: usize,
+    rgba: Vec<u8>,
+    opaque: bool,
+}
+
+impl OwnedPixels {
+    pub fn view(&self) -> Pixels<'_> {
+        Pixels {
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            rgba: &self.rgba,
+            opaque: self.opaque,
+        }
+    }
+}
+
 /// The commands that send the whole frame under `image_id`.
 pub fn transmit(pixels: &Pixels, image_id: u32) -> String {
     let rect = (0, 0, pixels.width, pixels.height);

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pyo3::exceptions::{PyKeyError, PyOSError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
@@ -574,6 +574,15 @@ struct Compositor {
     renderer: PixmanRenderer,
 }
 
+/// An awaitable that has its answer already, so that a call answers an
+/// awaitable on every path.
+fn ready<'py, T>(py: Python<'py>, value: T) -> PyResult<Bound<'py, PyAny>>
+where
+    T: for<'a> IntoPyObject<'a> + Send + 'static,
+{
+    pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(value) })
+}
+
 fn os_error(error: impl std::fmt::Display) -> PyErr {
     PyOSError::new_err(error.to_string())
 }
@@ -955,26 +964,31 @@ impl Compositor {
     /// buffer as image `image_id`, given the serial of the last buffer it
     /// was sent (`since`, None for never).
     ///
-    /// Returns `(serial, commands, whole)`. `commands` is None before the
-    /// window has drawn, and empty when the terminal is up to date.
-    /// `whole` says the image was sent again, so its placement has to be
-    /// put again too. Edits carry only the damage since `since`, unless a
-    /// resize or more history than the window keeps lies in between.
+    /// An awaitable of `(serial, commands, whole)`. `commands` is None
+    /// before the window has drawn, and empty when the terminal is up to
+    /// date. `whole` says the image was sent again, so its placement has
+    /// to be put again too. Edits carry only the damage since `since`,
+    /// unless a resize or more history than the window keeps lies in
+    /// between.
+    ///
+    /// The pixels are copied at the call, and the encode runs on a
+    /// worker thread: at 1600x900 it takes 12 ms, which the event loop
+    /// that awaits it does not wait for. Lillecarl/pymux#631.
     #[pyo3(signature = (id, image_id, since=None))]
-    fn kitty_update(
+    fn kitty_update<'py>(
         &self,
-        py: Python<'_>,
+        py: Python<'py>,
         id: u64,
         image_id: u32,
         since: Option<u64>,
-    ) -> PyResult<(u64, Option<String>, bool)> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let toplevel = self.toplevel(id)?;
-        let Some(canvas) = toplevel.canvas.as_ref() else {
-            return Ok((toplevel.serial, None, false));
-        };
         let serial = toplevel.serial;
+        let Some(canvas) = toplevel.canvas.as_ref() else {
+            return ready(py, (serial, None::<String>, false));
+        };
         if since == Some(serial) {
-            return Ok((serial, Some(String::new()), false));
+            return ready(py, (serial, Some(String::new()), false));
         }
         let covered = since.is_some_and(|since| {
             since >= toplevel.resized_at
@@ -993,15 +1007,20 @@ impl Compositor {
                 .collect(),
             _ => Vec::new(),
         };
-        let pixels = canvas.pixels();
-        let commands = py.detach(|| {
-            if covered {
-                kitty::edit(&pixels, image_id, &damage)
-            } else {
-                kitty::transmit(&pixels, image_id)
-            }
-        });
-        Ok((serial, Some(commands), !covered))
+        let pixels = canvas.pixels().to_owned();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let commands = tokio::task::spawn_blocking(move || {
+                let pixels = pixels.view();
+                if covered {
+                    kitty::edit(&pixels, image_id, &damage)
+                } else {
+                    kitty::transmit(&pixels, image_id)
+                }
+            })
+            .await
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+            Ok((serial, Some(commands), !covered))
+        })
     }
 
     /// The window as last drawn, as `(width, height, rgba)` with no row

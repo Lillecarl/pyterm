@@ -5,6 +5,7 @@ what the client damaged, as edits of the root frame.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
 import sys
@@ -33,6 +34,18 @@ def commands(text: str) -> list[tuple[dict[str, str], bytes]]:
     return [(keys, zlib.decompress(base64.b64decode(payload))) for keys, payload in joined]
 
 
+def update(compositor, *args, **kwargs):
+    """
+    `kitty_update`, awaited. Its awaitable is an asyncio future, which
+    pyo3-async-runtimes ties to the loop running when it is made.
+    """
+
+    async def awaited():
+        return await compositor.kitty_update(*args, **kwargs)
+
+    return asyncio.run(awaited())
+
+
 def probe(compositor):
     "The probe client drawn twice: its full frame, then a 4x4 red square."
     client = launch(compositor, sys.executable, str(CLIENT))
@@ -42,7 +55,7 @@ def probe(compositor):
 
 def test_the_first_update_sends_the_whole_frame(compositor):
     client = probe(compositor)
-    serial, text, whole = compositor.kitty_update(1, 7)
+    serial, text, whole = update(compositor, 1, 7)
 
     assert whole
     assert serial == 2
@@ -56,7 +69,7 @@ def test_the_first_update_sends_the_whole_frame(compositor):
 
 def test_a_reader_one_frame_behind_gets_the_damage_only(compositor):
     client = probe(compositor)
-    serial, text, whole = compositor.kitty_update(1, 7, since=1)
+    serial, text, whole = update(compositor, 1, 7, since=1)
 
     assert not whole
     assert serial == 2
@@ -76,13 +89,13 @@ def test_a_reader_one_frame_behind_gets_the_damage_only(compositor):
 
 def test_a_reader_up_to_date_gets_nothing(compositor):
     client = probe(compositor)
-    assert compositor.kitty_update(1, 7, since=2) == (2, "", False)
+    assert update(compositor, 1, 7, since=2) == (2, "", False)
     client.kill()
 
 
 def test_a_reader_from_the_future_gets_the_whole_frame(compositor):
     "A serial it cannot place, as after the window was replaced."
     client = probe(compositor)
-    _serial, _text, whole = compositor.kitty_update(1, 7, since=99)
+    _serial, _text, whole = update(compositor, 1, 7, since=99)
     assert whole
     client.kill()
