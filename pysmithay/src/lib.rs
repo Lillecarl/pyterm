@@ -22,7 +22,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, XkbConfig};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, Focus, MotionEvent, PointerHandle};
+use smithay::input::pointer::{
+    AxisFrame, ButtonEvent, CursorImageStatus, Focus, MotionEvent, PointerHandle,
+};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::backend::renderer::pixman::PixmanRenderer;
@@ -37,6 +39,7 @@ use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurf
 use smithay::reexports::wayland_server::{Client, Display, ListeningSocket, Resource};
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform};
 use smithay::wayland::buffer::BufferHandler;
+use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState, SurfaceData, get_parent,
     send_surface_state, with_states,
@@ -63,9 +66,10 @@ use smithay::wayland::shell::xdg::{
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
+use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::{
-    delegate_compositor, delegate_data_control, delegate_data_device, delegate_ext_data_control,
+    delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_ext_data_control,
     delegate_fractional_scale, delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
     delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell,
 };
@@ -230,6 +234,9 @@ enum Event {
     AppId(u64, String),
     Commit(u64, Vec<Rect>),
     Closed(u64),
+    /// A window asked for a pointer of this CSS name, or for one the
+    /// terminal picks: "" for a hidden pointer or a picture of its own.
+    Pointer(u64, String),
     /// A client set a selection, offering these mime types, or cleared
     /// it when there are none.
     Selection(SelectionTarget, Vec<String>),
@@ -253,6 +260,11 @@ struct State {
     /// will not run without. The renderer honours it when it draws.
     _viewporter_state: ViewporterState,
     _fractional_scale_state: FractionalScaleManagerState,
+    /// `wp_cursor_shape_v1`: a pointer named, which a terminal can show.
+    _cursor_shape_state: CursorShapeManagerState,
+    /// The window the pointer last moved over. A pointer request names
+    /// no window, and only the client under the pointer may make one.
+    pointer_over: Option<u64>,
     /// The one output, which every surface is on: a client that reads
     /// its scale from `wl_output` sees it only on a surface it entered.
     output: Output,
@@ -356,7 +368,20 @@ impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
+
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        let Some(id) = self.pointer_over else {
+            return;
+        };
+        let name = match image {
+            CursorImageStatus::Named(icon) => icon.name(),
+            CursorImageStatus::Hidden | CursorImageStatus::Surface(_) => "",
+        };
+        self.events.push(Event::Pointer(id, name.to_owned()));
+    }
 }
+
+impl TabletSeatHandler for State {}
 
 impl State {
     fn toplevel_of(&mut self, surface: &WlSurface) -> Option<&mut Toplevel> {
@@ -550,6 +575,9 @@ impl XdgShellHandler for State {
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(id) = self.id_of(&surface) {
             self.toplevels.retain(|toplevel| toplevel.id != id);
+            if self.pointer_over == Some(id) {
+                self.pointer_over = None;
+            }
             self.events.push(Event::Closed(id));
         }
     }
@@ -657,6 +685,7 @@ delegate_ext_data_control!(State);
 delegate_xdg_decoration!(State);
 delegate_viewporter!(State);
 delegate_fractional_scale!(State);
+delegate_cursor_shape!(State);
 
 /// A Wayland compositor that draws nowhere, and hands every window's
 /// pixels to Python.
@@ -789,6 +818,8 @@ impl Compositor {
             _xdg_decoration_state: XdgDecorationState::new::<State>(&handle),
             _viewporter_state: ViewporterState::new::<State>(&handle),
             _fractional_scale_state: FractionalScaleManagerState::new::<State>(&handle),
+            _cursor_shape_state: CursorShapeManagerState::new::<State>(&handle),
+            pointer_over: None,
             output: output.clone(),
             popups: PopupManager::default(),
             toplevels: Vec::new(),
@@ -913,6 +944,7 @@ impl Compositor {
         let focus = window
             .surface_under(location, WindowSurfaceType::ALL)
             .map(|(surface, at)| (surface, at.to_f64()));
+        self.state.pointer_over = Some(id);
         self.pointer.motion(
             &mut self.state,
             focus,
@@ -1052,6 +1084,7 @@ impl Compositor {
                         ("commit", id, damage).into_pyobject(py)?.into_any()
                     }
                     Event::Closed(id) => ("closed", id).into_pyobject(py)?.into_any(),
+                    Event::Pointer(id, name) => ("pointer", id, name).into_pyobject(py)?.into_any(),
                     Event::Selection(target, mime_types) => {
                         ("selection", name_of(target), mime_types)
                             .into_pyobject(py)?

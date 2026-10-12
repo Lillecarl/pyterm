@@ -152,6 +152,18 @@ def test_a_window_draws_no_title_bar_of_its_own(compositor):
     assert client.stdout.read().decode().strip() == "2"
 
 
+def test_a_window_names_the_pointer_it_wants(compositor):
+    "Lillecarl/pymux#650."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("cursor_client.py")))
+    try:
+        pump(compositor, lambda seen: commits(seen))
+        compositor.pointer_motion(1, 5.0, 5.0, 1)
+        pump(compositor, lambda seen: ("pointer", 1, "pointer") in seen)
+    finally:
+        client.kill()
+        client.wait(10)
+
+
 def test_a_real_terminal_draws(compositor):
     "foot asks for a size, gets one, and paints something that is not blank."
     foot = launch(compositor, "foot", "--override=main.font=DejaVu Sans Mono:size=8", "sh", "-c", "sleep 30")
