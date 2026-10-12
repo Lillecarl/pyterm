@@ -18,9 +18,9 @@ use std::sync::Arc;
 use pyo3::exceptions::{PyKeyError, PyOSError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use smithay::backend::input::{ButtonState, KeyState};
+use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, XkbConfig};
-use smithay::input::pointer::{ButtonEvent, MotionEvent, PointerHandle};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -687,6 +687,25 @@ impl Compositor {
                 time,
             },
         );
+        self.pointer.frame(&mut self.state);
+        self.flush()
+    }
+
+    /// Scroll the wheel by `steps` notches: positive is down, or right
+    /// when `horizontal`. One notch is 15 units of scroll, as libinput
+    /// counts a wheel click.
+    #[pyo3(signature = (steps, time, horizontal=false))]
+    fn pointer_scroll(&mut self, steps: i32, time: u32, horizontal: bool) -> PyResult<()> {
+        let axis = if horizontal {
+            Axis::Horizontal
+        } else {
+            Axis::Vertical
+        };
+        let frame = AxisFrame::new(time)
+            .source(AxisSource::Wheel)
+            .value(axis, 15.0 * f64::from(steps))
+            .v120(axis, 120 * steps);
+        self.pointer.axis(&mut self.state, frame);
         self.pointer.frame(&mut self.state);
         self.flush()
     }
