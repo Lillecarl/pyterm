@@ -40,6 +40,14 @@
       "rev": "6a8a7881d75b6f98967e7b8069f4ead331384301",
       "type": "github"
     },
+    "pysmithay": {
+      "lastModified": 1791782272,
+      "narHash": "sha256-FhRkQXzVM9BLqviH4ZSJTzBKsMAhUNyTceqOqqWHA+Y=",
+      "owner": "Lillecarl",
+      "repo": "pysmithay",
+      "rev": "14d2feb5edad785730163796b19e03ba27f7ffb8",
+      "type": "github"
+    },
     "pyte": {
       "lastModified": 1791766676,
       "narHash": "sha256-5MbS0Ae0QJjMt8rdN+/Pn15KXRGznoCBYhRx6KLEeF4=",

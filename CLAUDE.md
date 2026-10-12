@@ -5,8 +5,8 @@ This file is the part that is easy to get wrong.
 
 ## What you are working in
 
-Eight repositories, each colocated with jj, held together by an umbrella that
-locks one revision per source in `nix/sources.lock`. Six of them are the code,
+Nine repositories, each colocated with jj, held together by an umbrella that
+locks one revision per source in `nix/sources.lock`. Seven of them are the code,
 and each one claims one job:
 
 | | job |
@@ -16,12 +16,16 @@ and each one claims one job:
 | `ptterm` | draw one terminal, with prompt-toolkit |
 | `txterm` | draw one terminal, with Textual |
 | `pymux` | arrange several of them |
+| `pysmithay` | a headless Wayland compositor, for a GUI program in a pane |
 | `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
 
-The seventh is `pyterm-pytest`, the test equipment the suites share. The
-eighth is `umbrella` itself, the tool that holds the others together.
-`umbrella status` tells you the state of all eight at once. Run it before you
+The eighth is `pyterm-pytest`, the test equipment the suites share. The
+ninth is `umbrella` itself, the tool that holds the others together.
+`umbrella status` tells you the state of all nine at once. Run it before you
 start and after you finish.
+
+`pysmithay` is Rust only and Linux only: a pymux feature built on it has
+to be absent, not broken, where it cannot load.
 
 **They are not submodules.** They were until 2026-09-13. Now `nix/sources.nix`
 says where each comes from and `nix/sources.lock` says which revision, and the
@@ -52,7 +56,7 @@ The mode is jj, and this repository is a jj repo too, colocated like the
 sources. It could not be while the sources were submodules: jj ignores
 gitlinks, so a jj working copy here would have dropped every pointer. With
 the pointers gone there is nothing left for it to drop -- jj tracks the
-umbrella's own two dozen files and ignores the eight checkouts, which
+umbrella's own two dozen files and ignores the nine checkouts, which
 `.git/info/exclude` lists.
 
 ## The rules that matter
@@ -346,7 +350,7 @@ since #416 moved their default bookmarks over -- so `land` closes it.
 **A cross-repository `Closes` closes it too.** Measured: pyte `03aba48a` carried
 `Closes Lillecarl/pymux#426`, and the closing event on #426 names that commit,
 seconds after the push. GitHub resolves the keyword across repositories when the
-pusher can write to both, and one person owns all eight.
+pusher can write to both, and one person owns all nine.
 
 So nothing needs closing by hand. What is left is the comment naming the
 revision, because the issue is where somebody looks for it. Write that with `gh

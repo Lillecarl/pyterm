@@ -233,6 +233,7 @@ let
     sources.prompt-toolkit
     sources.ptyhost
     sources.pyterm-pytest
+    sources.pysmithay
   ];
 
   /**
@@ -249,6 +250,7 @@ let
     "prompt-toolkit"
     "prompt-toolkit-rs"
     "pymux-rs"
+    "pysmithay"
     "pyterm-pytest"
     "pyte"
     "pyte-rs"
@@ -271,7 +273,9 @@ let
   */
   nixpkgsRootsOn = python: ps.nixpkgsRootsFor {
     inherit python projectRoots;
-    exclude = suppliedNames;
+    # maturin is pysmithay's build system, and nixpkgs ships it as a
+    # program, not in a Python scope. The package runs that program.
+    exclude = suppliedNames ++ [ "maturin" ];
   };
 
   /**
@@ -378,6 +382,23 @@ let
         ;
     };
 
+    # A headless Wayland compositor on Smithay, which hands each window's
+    # pixels to Python. Its own source, because nothing of pymux is in it.
+    pysmithay = final.callPackage sources.pysmithay {
+      inherit (pkgs)
+        rustPlatform
+        cargo
+        rustc
+        maturin
+        clippy
+        rustfmt
+        libxkbcommon
+        foot
+        dejavu_fonts
+        makeFontsConf
+        ;
+    };
+
     # The client library, and the smallest thing here anybody imports:
     # a socket, a JSON message and platformdirs. It is what a program
     # that drives a server takes, in place of pymux and the toolkit
@@ -439,6 +460,7 @@ let
         prompt-toolkit
         prompt-toolkit-rs
         pymux-rs
+        pysmithay
         ptyhost
         pyterm-pytest
         libpymux
@@ -569,6 +591,8 @@ rec {
   prompt-toolkit-rs = default.prompt-toolkit-rs;
 
   pymux-rs = default.pymux-rs;
+
+  pysmithay = default.pysmithay;
 
   ptyhost = default.ptyhost;
 
@@ -712,6 +736,9 @@ rec {
     # Lillecarl/pymux#574.
     pymux-rs-parity = pymux-rs.checks.parity;
     pymux-rs-lint = pymux-rs.checks.lint;
+    # The compositor against real Wayland clients, and its Rust's style.
+    pysmithay-unit = pysmithay.checks.unit;
+    pysmithay-lint = pysmithay.checks.lint;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     pyte-ruff = pyte.checks.ruff;

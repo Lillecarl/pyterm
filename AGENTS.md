@@ -1,6 +1,6 @@
 # The collection
 
-Eight repositories; `umbrella status` shows all eight at once. Each
+Nine repositories; `umbrella status` shows all nine at once. Each
 has one job:
 
 | repo | job |
@@ -10,6 +10,7 @@ has one job:
 | `ptterm` | draw one terminal (prompt-toolkit) |
 | `txterm` | draw one terminal (Textual) |
 | `pymux` | arrange several terminals |
+| `pysmithay` | headless Wayland compositor (Rust, Linux) |
 | `pyterm-pytest` | test equipment the suites share |
 | `prompt-toolkit` | upstream toolkit under `ptterm`/`pymux` |
 | `umbrella` | source control: pins revisions, lands, marks |
@@ -22,7 +23,7 @@ writes `nix/sources.lock`, never a hand.
 upstream could take: minimal, in upstream style, about one thing
 (`prompt-toolkit-upstreaming.md`).
 
-The other six are ours. Maintain them to collection standards:
+The other seven are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),
 one `checks.*-ruff` gate per package, tests beside the code they
 judge, no backwards compatibility. `CLAUDE.md` holds the rest.

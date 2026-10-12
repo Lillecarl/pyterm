@@ -64,6 +64,14 @@
     path = ../prompt-toolkit;
   };
 
+  # A headless Wayland compositor on Smithay, so a pane can show a GUI
+  # program. Rust only, and Linux only.
+  pysmithay = {
+    url = "https://github.com/Lillecarl/pysmithay.git";
+    branch = "main";
+    path = ../pysmithay;
+  };
+
   # The test equipment the suites share.
   pyterm-pytest = {
     url = "https://github.com/Lillecarl/pyterm-pytest.git";

@@ -1,7 +1,7 @@
 # pyterm
 
 A glorified lock file. There is no code of its own here. What it holds is the
-record of eight repositories that are worked on together, a nix expression that
+record of nine repositories that are worked on together, a nix expression that
 builds each of them, and the wiring that keeps them in step.
 
 | source | branch | upstream | job |
@@ -12,6 +12,7 @@ builds each of them, and the wiring that keeps them in step.
 | `ptyhost` | `main` | Lillecarl/ptyhost | run a program and carry its bytes |
 | `pyte` | `graphics-protocol` | selectel/pyte | parse, and hold a screen |
 | `prompt-toolkit` | `render-performance` | prompt-toolkit/python-prompt-toolkit | the toolkit under it all |
+| `pysmithay` | `main` | Lillecarl/pysmithay | a headless Wayland compositor, for GUI programs in a pane |
 | `pyterm-pytest` | `main` | Lillecarl/pyterm-pytest | the test equipment the suites share |
 | `umbrella` | `main` | Lillecarl/umbrella | hold the others together |
 
