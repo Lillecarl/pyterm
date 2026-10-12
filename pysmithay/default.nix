@@ -38,7 +38,7 @@ let
       ./Cargo.lock
       ./pyproject.toml
       ./src
-      (fs.fileFilter (file: file.hasExt "py") ./python)
+      ./python
     ];
   };
 
