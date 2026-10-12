@@ -9,27 +9,27 @@
       "type": "github"
     },
     "ptterm": {
-      "lastModified": 1791758691,
-      "narHash": "sha256-kt6Qlda78MVStXjUUH884a6gIKoMlc/Igx9vnFviw+g=",
+      "lastModified": 1791765580,
+      "narHash": "sha256-X2aNY9o0U+ZdUda1PA1eExtRdkAenySJPHx5oOPmVak=",
       "owner": "Lillecarl",
       "repo": "ptterm",
-      "rev": "e9b7c67ac845e8746cd7a334937ceef7e35974c5",
+      "rev": "cf11340d9c6d684e2d575784b310b3d4112e8050",
       "type": "github"
     },
     "ptyhost": {
-      "lastModified": 1791742748,
-      "narHash": "sha256-gWCe3jYPSsOH91OPIfA02y32T16Ef7KzdSwBJcJ/RoM=",
+      "lastModified": 1791765195,
+      "narHash": "sha256-/FfW5UqJ23NePsXkrCnw+g/40tBjSHLavIEXGrQo0RI=",
       "owner": "Lillecarl",
       "repo": "ptyhost",
-      "rev": "c111dfc4442644ccac26ec5e1ccde44303e317ea",
+      "rev": "979986d5633682b9d58418eab23088b9116de4b6",
       "type": "github"
     },
     "pymux": {
-      "lastModified": 1791762274,
-      "narHash": "sha256-WLrswnF6AYRKwkxFIJOZlgJruWafPb4rq8a39GGICno=",
+      "lastModified": 1791765728,
+      "narHash": "sha256-cFKrJSS+yxTUtPYPZp1UT7hvXeq/6ifzhTfJVMyN9ZQ=",
       "owner": "Lillecarl",
       "repo": "pymux",
-      "rev": "b7a099c59a2808c43a9e213295117d4289e67a98",
+      "rev": "a3850e1407f05b7df38fc6910b5f0e8c9c5f6ee8",
       "type": "github"
     },
     "pyproject-nix": {
