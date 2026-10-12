@@ -242,6 +242,11 @@ let
     A name left off this list would not fail: nixpkgs has a `pyte` and
     a `prompt-toolkit` of its own, so the lookup would succeed and the
     set would hold upstream's package under our name.
+
+    maturin is here too. It is pysmithay's build system, and nixpkgs
+    ships it as a program and not in a Python scope, so the package runs
+    that program. A set outside this repository excludes this list, so
+    the name has to be on it and not beside it.
   */
   suppliedNames = [
     "pymux"
@@ -256,6 +261,7 @@ let
     "pyte-rs"
     "ptyhost"
     "txterm"
+    "maturin"
   ];
 
   /**
@@ -273,9 +279,7 @@ let
   */
   nixpkgsRootsOn = python: ps.nixpkgsRootsFor {
     inherit python projectRoots;
-    # maturin is pysmithay's build system, and nixpkgs ships it as a
-    # program, not in a Python scope. The package runs that program.
-    exclude = suppliedNames ++ [ "maturin" ];
+    exclude = suppliedNames;
   };
 
   /**
