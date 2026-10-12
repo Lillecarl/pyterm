@@ -21,14 +21,14 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, XkbConfig};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, Focus, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
-    PopupKind, PopupManager, Window, WindowSurfaceType, find_popup_root_surface,
-    get_popup_toplevel_coords,
+    PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Window,
+    WindowSurfaceType, find_popup_root_surface, get_popup_toplevel_coords,
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
@@ -463,12 +463,44 @@ impl XdgShellHandler for State {
         let _ = self.popups.track_popup(PopupKind::Xdg(surface));
     }
 
+    /// A menu takes the keyboard and the pointer until it is dismissed:
+    /// keys go to it, and a click outside closes it and every menu it
+    /// opened (`popup_done`). Smithay's anvil does the same.
     fn grab(
         &mut self,
-        _surface: PopupSurface,
-        _seat: smithay::reexports::wayland_server::protocol::wl_seat::WlSeat,
-        _serial: Serial,
+        surface: PopupSurface,
+        seat: smithay::reexports::wayland_server::protocol::wl_seat::WlSeat,
+        serial: Serial,
     ) {
+        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+            return;
+        };
+        let kind = PopupKind::Xdg(surface);
+        let Ok(root) = find_popup_root_surface(&kind) else {
+            return;
+        };
+        let Ok(mut grab) = self.popups.grab_popup(root, kind, &seat, serial) else {
+            return;
+        };
+        // A grab another one holds, other than the menu this one opens
+        // from, may not be taken over.
+        let previous = grab.previous_serial().unwrap_or_else(|| grab.serial());
+        if let Some(keyboard) = seat.get_keyboard() {
+            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
+            {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            keyboard.set_focus(self, grab.current_grab(), serial);
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        }
+        if let Some(pointer) = seat.get_pointer() {
+            if pointer.is_grabbed() && !(pointer.has_grab(serial) || pointer.has_grab(previous)) {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        }
     }
 
     fn reposition_request(
@@ -702,10 +734,15 @@ impl Compositor {
     }
 
     /// Give the keyboard to this window.
+    ///
+    /// Not while a menu holds the keyboard: the keys are the menu's
+    /// until it is dismissed.
     fn focus(&mut self, id: u64) -> PyResult<()> {
         let surface = self.toplevel(id)?.surface().wl_surface().clone();
-        self.keyboard
-            .set_focus(&mut self.state, Some(surface), SERIAL_COUNTER.next_serial());
+        if !self.keyboard.is_grabbed() {
+            self.keyboard
+                .set_focus(&mut self.state, Some(surface), SERIAL_COUNTER.next_serial());
+        }
         self.flush()
     }
 
