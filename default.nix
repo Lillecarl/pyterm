@@ -426,6 +426,10 @@ let
       inherit (pkgs) ruff;
       # The model API that the scenario check aims claude-code at.
       inherit aimock;
+      # The PipeWire of `audio-server private`, in the closure on Linux.
+      # Pass null for either to leave it out. Lillecarl/pymux#657.
+      pipewire = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire else null;
+      wireplumber = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber else null;
     };
 
     # The second front end: the same screen, drawn with Textual. It
@@ -822,6 +826,8 @@ rec {
     # `wayland` extra that every other pymux suite leaves out.
     # Lillecarl/pymux#383.
     pymux-wayland = pymux.checks.wayland;
+    # Sound through a real PipeWire. Lillecarl/pymux#657.
+    pymux-audio = pymux.checks.audio;
     # The types of pymux, held by a static checker rather than by a run:
     # a `Mode` member added and not handled by the `match` in
     # `run_pymux` fails here. Lillecarl/pymux#486.
