@@ -1,0 +1,173 @@
+# Every difference between a picture with pymux and one without.
+# `tests/take_picture.py` says what this is and how to write it.
+#
+# Not every difference is a fault. A pane reads what a program asked
+# for and writes the request again in a form the terminal of the user
+# understands, so a pane can draw more than that terminal draws on its
+# own.
+#
+# A count is a number of pixels, so it belongs to the font and the size
+# that `take_picture.py` asks each terminal for. Change either and
+# every count has to be recorded again.
+#
+# It is a number of pixels since Lillecarl/pymux#368. It was a channel
+# error sum before that, which is why the counts below are not the ones
+# this file held: `compare -metric AE` says it counts pixels and does
+# not, and a small difference over few pixels came back as none at all.
+
+# "CSI 4:1 m" asks for a single underline. xterm draws nothing for it.
+# A pane reads the shape and writes a plain "CSI 4 m", which xterm does
+# draw, so a word asked for with the colon form has a line through
+# pymux and none without it.
+#
+# Two rows of the fixture use that form, and they are the whole count:
+#
+#     row 1  "straight"        79 pixels, a line 80 wide
+#     row 7  "blue straight"  129 pixels, a line 130 wide
+#
+# Ten pixels a character, one short of the width each time. The other
+# four shapes -- double, curly, dotted, dashed -- and the red curly row
+# have no line in either picture of xterm, so they differ nowhere.
+#
+# foot has no difference at all on this fixture. It reads the colon
+# form itself, so both of its pictures carry every shape. Two seats say
+# the same thing two ways: the difference belongs to xterm, and not to
+# pymux.
+xterm underlines 208
+
+# Eight pixels, and they are all the same eight: the seam between the
+# last two cells of a run of "-" box drawing, on the two rows that hold
+# one. x is 789 and 790, which is the join of column 78 and column 79,
+# and y is 389, 390, 429 and 430.
+#
+# **Both sides draw the same line.** Replaying the recording says so:
+# rows 19 and 21 are a run of "-" across all eighty columns, every cell
+# of them plain and one column wide. The glyph does not quite fill its
+# cell, so a run of them has a darker seam at every cell join, and both
+# pictures have that seam at every join but the last. There xterm joins
+# the two glyphs in the pymux picture and leaves the seam in the bare
+# one, four pixels of grey each on two rows.
+#
+# **The cause is one write against two.** The bare program writes the
+# whole row at once, so xterm places all eighty glyphs of one string
+# against each other. The renderer of prompt_toolkit cannot: in
+# `move_cursor`, a cursor that stands in the last column is a cursor
+# waiting to wrap, and relative motion from there is not reliable, so
+# it writes a carriage return and an absolute move instead. Every full
+# width row therefore reaches the terminal as columns 0 to 78, then
+# column 79 on its own. xterm rounds the glyph of a new string against
+# the cursor cell and the glyph of a continued string against the one
+# before it, and for "-" the two roundings differ by one pixel of grey.
+#
+# It shows here and nowhere else because nowhere else is a run of a
+# glyph whose ink reaches the edge of its cell *and* runs to column 79.
+# A pane cannot give up the guard, so this is what a pane costs: eight
+# pixels. Lillecarl/pymux#371.
+#
+# Three more, at the "●" before "high". U+25CF is a symbol some
+# terminals draw as an emoji, so the renderer no longer trusts the
+# column after it: the cell that follows goes out after a carriage
+# return and a move, as a new string, where the bare program wrote
+# both in one. xterm's "●" inks a pixel past its cell, and the cell
+# written after it on its own covers that ink. Same mechanism as the
+# seam above; the guard against a terminal counting the symbol two
+# columns wide is what it costs. Lillecarl/pymux#539.
+xterm recorded-claude-code 11
+
+# ----------------------------------------------------------------------
+# The image fixtures.
+#
+# A pane cannot draw pixels. It decodes the image its program wrote and
+# pymux writes that image again in whatever the outer terminal speaks:
+# the kitty graphics protocol for kitty, sixel for foot, half blocks for
+# an xterm with no graphics.
+#
+# **There are two protocols going in as well as three coming out**, so
+# the fixtures are a matrix. `sixel-image-*` writes a sixel and
+# `kitty-image-*` writes a kitty transmission of the same four
+# quadrants -- `tests/take_picture.py` builds both and they decode to
+# the same bytes of RGB. The number is the height: 114 fills six rows
+# of the nineteen pixel cell kitty and foot have, and 120 fills six
+# rows of xterm's twenty pixel one.
+#
+# **Every image that can be compared is now exact, and every one of
+# those lines is absent.** Only a difference is written down:
+#
+#     wrote    line                                       count
+#     sixel    foot sixel-image-114                           0
+#     sixel    foot sixel-image-120                           0
+#     sixel    kitty-against-foot sixel-image-114             0
+#     sixel    kitty-against-foot sixel-image-120             0
+#     kitty    kitty kitty-image-114                          0
+#     kitty    kitty kitty-image-120                          0
+#     kitty    kitty-against-foot kitty-image-114             0
+#     kitty    kitty-against-foot kitty-image-120             0
+#
+# Four of them are one terminal judging pymux against itself, which is
+# the strongest shape this farm has: foot draws a sixel bare and kitty
+# draws a kitty transmission bare, so there the bare picture is the
+# program's own image and the pymux picture is pymux's re-encoding of
+# it, in the same terminal, to the pixel. The other four put the two
+# ways *out* against each other, and they cross two terminals because
+# no terminal here speaks both; `take_picture.py` says at length why an
+# image may be compared that way when nothing else may.
+#
+# **Four of these eight were differences until the fix for
+# Lillecarl/pymux#369.**
+# A pane used to reserve `ceil(pixels / 20)` rows against a cell size
+# it had invented, and every client whose cell was not ten by twenty
+# drew a resampled picture:
+#
+#     foot sixel-image-120                1080 -> gone
+#     kitty kitty-image-120               1200 -> gone
+#     kitty-against-foot sixel-image-120   120 -> gone
+#     kitty-against-foot kitty-image-120   120 -> gone
+#
+# A pane now takes the cell of the client that has been attached
+# longest and knows one, and a client draws an image at its own size
+# whenever the cells reserved for it are big enough. Nobody resamples
+# anything.
+#
+# On the wire the two protocols are nothing alike, and cannot be: one is
+# a sixel DCS and the other an APC transmission with a placement. What
+# is the same is the RGBA under them. The kitty path sends the decoded
+# pixels untouched, and the sixel path encodes them again without loss
+# -- which is what the six colours of the fixtures are chosen for.
+#
+# What is left below is a terminal that drew nothing at all bare. An
+# image is not a glyph, so then every pixel of it counts.
+
+# kitty has no sixel decoder. Its log says so in as many words:
+# "[PARSE ERROR] Unknown DCS escape code: 7;1;0q". So the bare picture
+# is empty and the pymux one carries the image over the kitty graphics
+# protocol, which kitty does speak.
+#
+# The two counts are the two image heights, drawn at the size the
+# program wrote them: 120 by 120 and 120 by 114.
+kitty sixel-image-120 14400
+kitty sixel-image-114 13680
+
+# foot is the other way round: it draws a sixel and knows no kitty
+# graphics at all, so the APC reaches it and draws nothing. Measured:
+# `getbbox()` on the bare picture is None. The pymux picture is the
+# same image as a sixel, at the same two heights.
+foot kitty-image-120 14400
+foot kitty-image-114 13680
+
+# xterm draws neither. The sixel is a setting rather than a missing
+# decoder -- `decGraphicsID` defaults to 0 and `decTerminalID` to 420,
+# which is not one of the DEC models that had graphics (125, 240, 241,
+# 330, 340, 382) -- and there is no kitty graphics either. So pymux
+# falls back to half blocks, and this is the only picture that judges
+# them.
+#
+# **All four are 120 by 120, and the two 114 pixel images among them
+# are not a resampling that #369 left behind.** A half block renderer
+# holds no pixels: `_blocks_for` averages the image down to two samples
+# per cell, so a cell is the smallest thing it can draw. Twelve by six
+# cells of xterm's ten by twenty cell is 120 by 120 whatever the height
+# of the image was. There is no natural size to keep.
+xterm sixel-image-120 14400
+xterm sixel-image-114 14400
+xterm kitty-image-120 14400
+xterm kitty-image-114 14400

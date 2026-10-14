@@ -1,0 +1,31 @@
+"""
+Who `has-session` says yes to.
+
+It is the command a driver asks first, so a wrong answer stops
+everything that follows. With no target it means "is there a session",
+and a server that answers at all has one.
+"""
+
+from __future__ import annotations
+
+from pymux.commands.has_session import pane_matches_session_name
+from pymux.main import Pymux
+
+
+def test_no_target_asks_whether_there_is_session():
+    "It compared the name against the empty string, so it always said no."
+    assert pane_matches_session_name(Pymux(), "")
+
+
+def test_name_of_session_matches():
+    pymux = Pymux()
+    assert pane_matches_session_name(pymux, pymux.session_name)
+
+
+def test_exact_form_that_libtmux_sends_matches():
+    pymux = Pymux()
+    assert pane_matches_session_name(pymux, "=" + pymux.session_name)
+
+
+def test_another_name_does_not_match():
+    assert not pane_matches_session_name(Pymux(), "not-the-session")

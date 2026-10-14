@@ -1,0 +1,1082 @@
+"""
+Photograph what pymux draws around a pane, in a real terminal.
+
+`take_picture.py` subtracts two pictures of the same program, one
+bare and one in a pymux pane. It writes `set-client-option
+full-screen on` before
+every fixture, which is right for what it asks -- anything pymux drew
+around the pane would count as a difference on every fixture -- and it
+means **no check has ever photographed pymux's own chrome**: the status
+line, a pane title bar, the command palette, the overlay pane.
+
+Nothing could, either. A headless compositor owns no input device and
+the terminal's pty belongs to the terminal, so nothing could press a
+key at pymux to open any of it. `drive_in_terminal.py` is the way
+round: it runs as the terminal's child, runs pymux on a pty of its own,
+copies what pymux writes to the terminal's tty, and types the keys.
+Lillecarl/pymux#161.
+
+    the keys ──▶ the relay's pty ──▶ pymux ──▶ the terminal's tty
+                                                     │
+                                                a picture
+
+The keys are fenced the way `middleman.py` fences a write. The pane
+runs the forwarder, the fence goes down the fifo behind the keys, and
+the relay touches the fence file when the fence comes back. The
+picture waits for that file: it is of a frame pymux finished, and not
+of a moment that happened to be quiet. Lillecarl/pymux#275.
+
+**This does not judge what the chrome draws.** It keeps a picture of
+each fixture for a person to read, the way `photograph_vttest.py`
+does. A picture of chrome has nothing to subtract: there is no bare
+side, because the chrome is the thing pymux adds. Judging it needs a
+recorded image, and recording one before anybody has looked at it
+would record whatever it does today, faults and all. So this is not a
+gate, and reading the pictures is the work.
+
+**It does judge the state.** Each fixture says how many panes it ends
+with, what is drawn over the active pane, and whether the client still
+holds the prefix. The server is asked before the picture is kept, so a
+run whose split never landed leaves no picture. The fence cannot say
+any of this -- it proves pymux finished the keys, not that a key
+arrived. Lillecarl/pymux#353, Lillecarl/pymux#363.
+
+    PYMUX_CHROME=palette nix build --file . checks.pymux-chrome-pictures
+
+`PYMUX_CHROME` narrows the run to the fixtures whose name holds that
+text, and `PYMUX_CHROME_TERMINALS` to the terminals whose name does.
+`PYMUX_CHROME_LIST` and `PYMUX_CHROME_TERMINALS_LIST` name them
+exactly, comma separated, and beat the substrings: three fixtures that
+share no substring are what a probe of the judge asks for.
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+import sys
+import time
+from collections import Counter
+from functools import partial
+from pathlib import Path
+from typing import NamedTuple
+
+# `tests/`, for the harness beside this file, and the directory above
+# it, for `pymux` itself. Running a script puts the script's own
+# directory on the path and not the one it was started from.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from middleman import FORWARDER, run_cli
+from PIL import Image, ImageChops
+from pyterm_pytest.seats import (
+    TheSeatIsGone,
+    open_the_seats,
+    with_no_answer,
+)
+from take_picture import (
+    HOLD,
+    TERMINALS,
+    every_log,
+)
+
+from pymux import wayland
+
+#: The terminals whose cursor blinks for ever, and the argv that asks
+#: each one to hold still.
+#:
+#: This run keeps one picture of each fixture; it subtracts nothing,
+#: so it has no use for a blinking cursor, and a settle waits for two
+#: pictures in a row to be the same. Both are configured to blink for
+#: ever, because `take_picture.py` has a fixture that measures the
+#: blink.
+#:
+#: kitty was the first to show it: `chooser-search`, the first chrome
+#: fixture to leave a cursor on the screen, never settled there and
+#: took no picture at all (Lillecarl/pymux#338). foot was the same
+#: fault and it cost far more, because every chrome fixture leaves a
+#: cursor somewhere: 16 of 20 pictures lost in one measured run.
+#: Lillecarl/pymux#362.
+STILL = ("kitty", "foot")
+
+
+def holding_still(terminals):
+    "The same terminals, with every cursor asked to hold still."
+    return [one.asked(blink=False) if one.program in STILL else one for one in terminals]
+
+
+CHROME_TERMINALS = holding_still(TERMINALS)
+
+#: Where the pictures go. The check points this at `$out`.
+PICTURES = Path(os.environ.get("PYMUX_CHROME_OUT", "chrome-pictures"))
+
+#: Which fixtures and which terminals to run, as a piece of a name.
+ONLY = os.environ.get("PYMUX_CHROME", "")
+
+#: `render-mode` for every fixture: "" leaves pymux's default,
+#: "optimized" or "reference" sets it, and "both" photographs each
+#: fixture each way and fails it unless the two pictures are the same.
+#: `picture_of` says why that is a judge.
+RENDER_MODE = os.environ.get("PYMUX_CHROME_RENDER_MODE", "")
+ONLY_TERMINALS = os.environ.get("PYMUX_CHROME_TERMINALS", "")
+
+
+def exact_list(env):
+    """
+    An exact list of names from the environment, or None.
+
+    The gallery builds in pieces, one derivation per terminal and per
+    batch of themes, and a piece names what it holds exactly: a
+    substring would run a theme in every combo that holds a piece of
+    its name. Lillecarl/pymux#284.
+
+    A person reaches for it too, and for the other reason: a probe of
+    the judge wants `which-key,clock,copy-mode`, three fixtures that
+    share no substring. Lillecarl/pymux#365.
+    """
+    value = os.environ.get(env, "")
+    names = [one for one in value.split(",") if one]
+    return names or None
+
+
+def chosen_by_name(have, wanted, what):
+    """
+    The names of `have` that `wanted` asks for, in `have`'s order.
+
+    Raises unless every asked-for name is one there is.
+    """
+    missing = [one for one in wanted if one not in have]
+    if missing:
+        raise SystemExit("no %s is named %s. There is: %s" % (what, ", ".join(missing), ", ".join(have)))
+    return [one for one in have if one in set(wanted)]
+
+
+#: The relay, beside this file.
+RELAY = Path(__file__).parent / "drive_in_terminal.py"
+
+#: The demo, beside this file: the program a fixture types at a
+#: pane, the way the theme pictures put it there. A pane that has run
+#: it holds rows a person can read, which is what the copy-mode
+#: fixture needs.
+DEMO = Path(__file__).parent / "demo_application.py"
+
+#: What every fixture turns on. The status line and a pane's title bar
+#: are the two pieces of chrome a person looks at all day, and both are
+#: what `full-screen on` takes away.
+#:
+#: **`test-mode` pins the clock** to 13:37 on the 14th of March.
+#: `Pymux.displayed_now` is where every clock a person reads goes
+#: through, and the status line draws one by default: a picture taken
+#: either side of a second is a different picture, for a reason no
+#: fixture chose. `photograph_themes.py` takes one of these for every
+#: theme, so the race was paid for on every one of them.
+#:
+#: **`paint-screen` gives the theme the whole screen.** A pane's own
+#: cells carry the scheme's background instead of the terminal's, so a
+#: picture shows what a theme does rather than what it does around the
+#: edges. That is the point of photographing a theme at all.
+#: `photograph_themes.py` set it on two fixtures by hand before this,
+#: which is the same thing said once.
+CHROME = "set-option status on\nset-option pane-border-status on\nset-option test-mode on\nset-option paint-screen on\n"
+
+#: The prefix, and the keys that reach a binding behind it. `rc.py` is
+#: where these are bound: `"` splits a pane in two, top and bottom, and
+#: `%` splits it left and right.
+PREFIX = b"\x02"
+
+
+def keys(*steps):
+    """
+    A keys file from (seconds to wait, bytes) pairs.
+
+    The first wait is counted from pymux's first frame, which the
+    relay waits for. The rest are counted from the step before them.
+    `("quiet", seconds)` waits until pymux has written nothing for that
+    long. `drive_in_terminal.py` says the format.
+    """
+    return "".join("quiet %s\n" % (one,) if delay == "quiet" else "%s %r\n" % (delay, one) for delay, one in steps)
+
+
+class Fixture(NamedTuple):
+    """
+    One picture: the configuration pymux reads, the keys pressed at
+    it, and the arrangement those keys ask for.
+
+    `panes` is how many panes each window holds, window 0 first. It is
+    what the fence cannot prove. **The fence says pymux finished the
+    keys, never that a key arrived**: it travels through the forwarder
+    pane, which is alive whether or not a split happened, so a run
+    whose `%` reached nothing comes back fenced, settles on a still
+    screen and keeps a picture of one pane. One run of
+    `cut-follows-the-terminal` did exactly that, and its server log has
+    no second process in it. Lillecarl/pymux#353.
+
+    An overlay pane is not counted. It belongs to the session and not
+    to a window's arrangement, so `list-panes` never lists it.
+
+    `mode` is what the keys draw over the active pane, and `prefix` is
+    whether they leave the client waiting for the key after the prefix.
+    Both default to the quiet answer, so **every fixture is judged on
+    them**: a run that opened copy mode where none was asked for goes
+    red too. Lillecarl/pymux#363.
+
+    Only the two modes tmux names belong in `mode`. pymux draws more
+    over a pane than tmux does -- the chooser, the command palette, the
+    overlay -- and nothing has named those yet.
+    """
+
+    config: str
+    keys: str = ""
+    panes: tuple = (1,)
+    mode: str = ""
+    prefix: bool = False
+
+
+def count_panes(listing):
+    """
+    How many panes each window holds, window 0 first, from the lines
+    of `list-panes -a -F "#{window_index}"`.
+
+    One line per pane, holding the number of the window it is in. The
+    numbers are sorted as numbers: a server with ten windows lists
+    "10" before "2" otherwise.
+    """
+    counted = Counter(listing.split())
+    return tuple(counted[index] for index in sorted(counted, key=int))
+
+
+def answers_to(socket_path, argv):
+    """
+    What the server says, one line per thing it listed.
+
+    The server answers over its own socket. An integrated server
+    refuses an attach and answers a command, and this is a command.
+    Lillecarl/pymux#159.
+    """
+    done = run_cli(socket_path, argv)
+    if done.returncode != 0:
+        raise RuntimeError(
+            "%s exited %d: %s"
+            % (
+                argv[0],
+                done.returncode,
+                done.stderr.decode("utf-8", "replace").strip(),
+            )
+        )
+    return done.stdout.decode("utf-8", "replace").splitlines()
+
+
+def panes_now(socket_path):
+    "How many panes each window of this server holds, window 0 first."
+    return count_panes(" ".join(answers_to(socket_path, ["list-panes", "-a", "-F", "#{window_index}"])))
+
+
+def mode_now(socket_path):
+    """
+    What is drawn over the active pane of the window in view, or "".
+
+    The active pane, and not any pane: a fixture that opens copy mode
+    opens it on the pane that took the keyboard, which is the one the
+    split made and never the forwarder. `list-panes` with no `-a` lists
+    that window alone, so there is exactly one active pane to read.
+    """
+    lines = answers_to(socket_path, ["list-panes", "-F", "#{pane_active}\t#{pane_mode}"])
+    active = [line.split("\t", 1)[1] for line in lines if line.startswith("1\t")]
+    if len(active) != 1:
+        raise RuntimeError("the window has %d active panes: %r" % (len(active), lines))
+    return active[0]
+
+
+def prefix_now(socket_path):
+    "Whether a client is waiting for the key after the prefix."
+    lines = answers_to(socket_path, ["list-clients", "-F", "#{client_prefix}"])
+    if not lines:
+        raise RuntimeError("the server has no client to ask about the prefix")
+    return "1" in lines
+
+
+def judge_the_fixture(socket_path, fixture):
+    "Raise unless the server holds the state the keys asked for."
+    found = panes_now(socket_path)
+    if found != tuple(fixture.panes):
+        raise RuntimeError(
+            "the keys ask for %r panes per window and the server holds %r" % (tuple(fixture.panes), found)
+        )
+
+    mode = mode_now(socket_path)
+    if mode != fixture.mode:
+        raise RuntimeError("the keys ask for %r over the active pane and the server draws %r" % (fixture.mode, mode))
+
+    prefix = prefix_now(socket_path)
+    if prefix != fixture.prefix:
+        raise RuntimeError("the keys ask for the prefix held=%r and the client holds it=%r" % (fixture.prefix, prefix))
+
+
+def create_command(text):
+    """
+    The keys that run one pymux command from the command line.
+
+    A window option cannot be set from a configuration file: that file
+    is read before the first window is made, and a window option
+    belongs to a window. Lillecarl/pymux#199.
+    """
+    return [
+        (0.6, PREFIX),
+        (0.4, b":"),
+        (0.6, text.encode("ascii") + b"\r"),
+    ]
+
+
+def demo_keys():
+    """
+    Split the window in two, and run the demo in the pane that took
+    the keyboard.
+
+    The command is typed, so the pane shows a shell that received it
+    and then the program that answered, which is what a pane looks
+    like in use rather than at rest. **The split is also what keeps
+    the fence alive**: the first pane stays the forwarder, and the
+    fence needs it -- a pane whose program is suspended carries
+    nothing back, and copy mode suspends the one it opens on.
+    """
+    return keys(
+        (0.0, PREFIX),
+        (0.4, b"%"),
+        (0.8, ("python %s\n" % (shlex.quote(str(DEMO)),)).encode("ascii")),
+    )
+
+
+#: Opens foot on the pymux server's own compositor.
+OPEN_A_WINDOW = Path(__file__).parent / "open_a_window.sh"
+
+#: What `demo_keys` builds, for a fixture's `panes`. It lives beside
+#: the keys so the two stay in step.
+DEMO_PANES = (2,)
+
+
+#: What each fixture is. `Fixture` says what the three parts are.
+FIXTURES = {
+    # The plainest one. One pane, and everything pymux draws around it.
+    "bare": Fixture(CHROME),
+    # Two panes side by side, so a focused title bar and an unfocused
+    # one are both in the picture, in their two colours.
+    "two-panes": Fixture(CHROME, keys((0.0, PREFIX), (0.4, b"%")), (2,)),
+    # Two panes side by side after the focus went left and came back,
+    # in a theme that paints every cell, the configuration a person
+    # reported the border going missing in after a switch. The line
+    # between the two changes weight with the focus, so a switch
+    # redraws it, and each picture is one stage of that.
+    "switch-panes-none": Fixture(
+        CHROME + "set-client-option theme pygments:catppuccin-mocha\n",
+        keys((0.0, PREFIX), (0.4, b"%")),
+        (2,),
+    ),
+    "switch-panes-left": Fixture(
+        CHROME + "set-client-option theme pygments:catppuccin-mocha\n",
+        keys((0.0, PREFIX), (0.4, b"%"), *create_command("select-pane -L")),
+        (2,),
+    ),
+    # The same switch with text in both panes: the demo on the right,
+    # and the forwarder's own lines on the left.
+    "switch-panes-full": Fixture(
+        CHROME + "set-client-option theme pygments:catppuccin-mocha\n",
+        demo_keys()
+        + keys(
+            *create_command("select-pane -L"),
+            *create_command("select-pane -R"),
+            *create_command("select-pane -L"),
+        ),
+        DEMO_PANES,
+    ),
+    # A pane that has scrolled lines a coding agent writes, and the
+    # focus walked by the keys that walk it in order. Lillecarl's own
+    # configuration binds M-h and M-l to `select-pane -t :.-` and
+    # `:.+`, and that is the switch the report came from.
+    "switch-panes-agent": Fixture(
+        CHROME
+        + "set-client-option theme pygments:catppuccin-mocha\n"
+        + "bind-key -n M-h select-pane -t :.-\n"
+        + "bind-key -n M-l select-pane -t :.+\n",
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (
+                0.8,
+                b'python -c \'for i in range(120): print("\\u23fa line %d \\u2733 \\u25cf " % i + "x" * (i * 7 % 50))\'\n',
+            ),
+            (1.0, b"\x1bh"),
+            (0.6, b"\x1bl"),
+            (0.6, b"\x1bh"),
+            (0.6, b"\x1bl"),
+            (0.6, b"\x1bh"),
+        ),
+        (2,),
+    ),
+    # Lines that fill their pane exactly, on a background, each led by
+    # a symbol with the emoji variation selector: pymux counts that
+    # pair one column, and a terminal that draws it as an emoji draws
+    # two. The pane is the middle of three, so a line one column too
+    # long lands on the line between it and the next.
+    "switch-panes-emoji": Fixture(
+        CHROME
+        + "set-client-option theme pygments:catppuccin-mocha\n"
+        + "bind-key -n M-h select-pane -t :.-\n"
+        + "bind-key -n M-l select-pane -t :.+\n",
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (0.6, PREFIX),
+            (0.4, b"%"),
+            *create_command("select-pane -L"),
+            (
+                0.8,
+                (
+                    b"python -c 'import shutil; w = shutil.get_terminal_size().columns; "
+                    b'[print("\\x1b[42m\\u2733\\ufe0f " + ("line %d " % i).ljust(w - 2, "x") + "\\x1b[0m") for i in range(60)]\'\n'
+                ),
+            ),
+            (1.0, b"\x1bl"),
+            (0.6, b"\x1bh"),
+        ),
+        (3,),
+    ),
+    "switch-panes-back": Fixture(
+        CHROME + "set-client-option theme pygments:catppuccin-mocha\n",
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            *create_command("select-pane -L"),
+            *create_command("select-pane -R"),
+        ),
+        (2,),
+    ),
+    # A pane over a pane, which is the other border and the other
+    # arrangement of the two title bars.
+    "stacked-panes": Fixture(CHROME, keys((0.0, PREFIX), (0.4, b'"')), (2,)),
+    # The command line as a bar along the bottom, which is what pymux
+    # draws by default. It is left open, so the picture holds it.
+    "command-line": Fixture(
+        CHROME,
+        keys((0.0, PREFIX), (0.4, b":"), (0.4, b"list-panes")),
+    ),
+    # And as a box in the middle of the screen. Lillecarl/pymux#158
+    # built it, and a picture of it is what found four faults in it.
+    "command-palette": Fixture(
+        CHROME + "set-option command-palette on\n",
+        keys((0.0, PREFIX), (0.4, b":"), (0.4, b"list-panes")),
+    ),
+    # The box that composes a key, with a modifier written and the keys
+    # a keyboard leaves out under it. Lillecarl/pymux#220.
+    "compose-a-key": Fixture(
+        CHROME,
+        keys(*create_command("compose-key"), (0.8, b"ctrl+")),
+    ),
+    # Both splits at once: a pane on the left, and two stacked on the
+    # right. This is the default layout, and it is the one picture that
+    # holds every line it draws -- the border down the middle, which
+    # runs the whole height because the split that left it does, and
+    # the border across the right column, which stops where that
+    # column does. The stack also means every pane draws the bar below
+    # it. Lillecarl/pymux#217, Lillecarl/pymux#211.
+    "divided": Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (0.6, PREFIX),
+            (0.4, b'"'),
+        ),
+        (3,),
+    ),
+    # One pane filling the window, with the other two behind it. Zoom
+    # is a layout that wraps the layout underneath, so the pane keeps
+    # the row its title bar hangs in and the bar carries the "Z".
+    # Lillecarl/pymux#215.
+    # Zoom is a flag on the window and not a layout that drops the
+    # others, so both panes are still in the arrangement.
+    "zoomed": Fixture(
+        CHROME,
+        keys((0.0, PREFIX), (0.4, b"%"), *create_command("resize-pane -Z")),
+        (2,),
+    ),
+    # A strip whose second column is two thirds of the window, with the
+    # focus on the first. The pair does not fit, so the second one runs
+    # off the right edge and is tinted: **the one case where what a
+    # person sees is not what the program wrote**, and the only thing
+    # on the screen that says so. Lillecarl/pymux#222.
+    #
+    # The `strip` fixture below cuts nothing. Half a window each means
+    # two columns fit exactly, which is why a half is the default.
+    "strip-cut": Fixture(
+        CHROME + "set-window-option -g strip on\n",
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            *create_command("switch-column-width"),
+            *create_command("select-pane -L"),
+        ),
+        (2,),
+    ),
+    # A strip of three columns, which runs past the edge of the screen.
+    # Lillecarl/pymux#198.
+    "strip": Fixture(
+        # `-g` says what every new window starts with, and it is the
+        # only way a configuration file can set a window option: the
+        # file is read before there is a window. Lillecarl/pymux#199.
+        CHROME + "set-window-option -g strip on\n",
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (0.6, PREFIX),
+            (0.4, b"%"),
+        ),
+        (3,),
+    ),
+    # The pane numbers, which `display-panes` puts up for a moment.
+    "pane-numbers": Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (0.6, PREFIX),
+            (0.4, b"q"),
+        ),
+        (2,),
+    ),
+    # The clock, which a pane draws over itself.
+    "clock": Fixture(
+        CHROME,
+        keys((0.0, PREFIX), (0.4, b"t")),
+        mode="clock-mode",
+    ),
+    # The keys a prefix leads to, while the prefix waits. The popup
+    # draws on the view, diagonally opposite the cursor: the pane runs
+    # a script that printed nothing, so the cursor sits at the top
+    # left and the box belongs at the bottom right. The empty step
+    # after the prefix is a wait, so the frame the prefix asked for is
+    # on the screen before the fence comes back.
+    # Lillecarl/pymux#29.
+    "which-key": Fixture(
+        CHROME + "set-option which-key on\n",
+        keys((0.0, PREFIX), (0.8, b"")),
+        prefix=True,
+    ),
+    # The window chooser: a bar across the top, over the window it
+    # points at. It is not a box, and the preview is the switch itself
+    # -- the rows under the bar are the real window, drawn by the
+    # layout that owns it. Lillecarl/pymux#325, Lillecarl/pymux#326,
+    # Lillecarl/pymux#327.
+    #
+    # Three windows, so the bar has a list to wrap, and the one it
+    # opens on is split in two, so the preview is a layout and not an
+    # empty shell. **`-d` leaves the new windows unfocused**, which
+    # keeps the client on window 0: that is where the forwarder pane
+    # runs, and the fence comes back through it.
+    "chooser": Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            *create_command("new-window -d -n logs"),
+            *create_command("new-window -d -n build"),
+            (0.8, PREFIX),
+            (0.6, b"w"),
+        ),
+        (2, 1, 1),
+    ),
+    # The same bar with a search typed into it, which narrows the list
+    # and points at what is left. Pointing switches, so this is also
+    # the picture of a preview of a window the client was not on.
+    "chooser-search": Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            *create_command("new-window -d -n logs"),
+            *create_command("new-window -d -n build"),
+            (0.8, PREFIX),
+            (0.6, b"w"),
+            (0.6, b"/"),
+            (0.8, b"bui"),
+        ),
+        (2, 1, 1),
+    ),
+    # A question waiting for an answer. `prefix x` is
+    # `confirm-before -p "kill-pane #P?" kill-pane`, so the prompt is
+    # also the one piece of chrome that expands a format string into
+    # itself. Two panes, so the pane it names is not the only one and
+    # the number in the question means something.
+    "confirm": Fixture(
+        CHROME,
+        keys((0.0, PREFIX), (0.4, b"%"), (0.8, PREFIX), (0.6, b"x")),
+        (2,),
+    ),
+    # The demo in a pane, and copy mode over it. The two hold the
+    # same rows a person can read, and the difference between the two
+    # pictures is what copy mode does.
+    "pane-text": Fixture(CHROME, demo_keys(), (2,)),
+    # Copy mode opens once the demo has redrawn for the terminal's
+    # colour replies, so the history it reads is the same every run.
+    "copy-mode": Fixture(
+        CHROME,
+        demo_keys() + keys(("quiet", 0.5), (0.0, PREFIX), (0.6, b"[")),
+        (2,),
+        mode="copy-mode",
+    ),
+    # An overlay pane, floating in the middle of the screen over two
+    # panes. Its body runs a program, so its default-background cells
+    # have to show the terminal's own background, the way a normal
+    # pane does: a rule that named a colour behind it drew a slab of
+    # chrome over the layout instead. Lillecarl/pymux#223.
+    # The overlay itself is not among the counted panes: it belongs to
+    # the session and not to a window's arrangement.
+    "overlay": Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (0.6, PREFIX),
+            (0.4, b"g"),
+        ),
+        (2,),
+    ),
+    # Two lines of a configuration file that fail. Every error is joined
+    # into one message and each names the file and the line, so the pair
+    # runs past the width of the screen.
+    #
+    # The message toolbar used to draw from its end, so the first of the
+    # two could not be read: a person fixed the one they could see and
+    # met the other on the next run. It wraps now, and no keys are
+    # pressed here because the message is up before anything is.
+    # Lillecarl/pymux#205, Lillecarl/pymux#38.
+    "startup-errors": Fixture(
+        CHROME + "not-a-command-alpha\nnot-a-command-beta\n",
+    ),
+}
+
+
+# foot as a Wayland window in a pane: split, start it on the server's
+# compositor from the new pane, and its window opens a third pane and
+# takes the keyboard. What is typed then goes through the compositor
+# to foot, whose `cat` writes it back. A kitty client shows the
+# window's pixels, every other terminal a notice. Only where pysmithay
+# loads, which `checks.pymux-window-pane-pictures` sees to.
+# Lillecarl/pymux#620.
+def window_keys(program="", typed=b""):
+    """
+    Split, run `program` on the server's compositor from the new pane,
+    and type `typed` at the window it opens. The window takes the
+    keyboard as it opens a pane of its own.
+    """
+    command = "sh %s %s" % (shlex.quote(str(OPEN_A_WINDOW)), program)
+    steps = [
+        (0.0, PREFIX),
+        (0.4, b"%"),
+        (0.8, (command.rstrip() + "\n").encode("ascii")),
+        ("quiet", 2.0),
+    ]
+    if typed:
+        steps += [(0.2, typed), ("quiet", 1.0)]
+    return keys(*steps)
+
+
+if wayland.available():
+    # The programs worth showing a window pane with, each a picture.
+    # What every one needs today: software drawing (wl_shm), and nothing
+    # that only a GPU draws. mpv is paused on its first frame, because a
+    # picture settles only on a still screen.
+    FIXTURES["window-pane"] = Fixture(CHROME, window_keys(typed=b"typed at the window\r"), (3,))
+    FIXTURES["window-pane-flower"] = Fixture(CHROME, window_keys("weston-flower"), (3,))
+    FIXTURES["window-pane-mpv"] = Fixture(
+        CHROME,
+        window_keys("mpv --vo=wlshm --pause --no-terminal av://lavfi:testsrc=size=320x240"),
+        (3,),
+    )
+    FIXTURES["window-pane-wev"] = Fixture(CHROME, window_keys("wev", typed=b"wev"), (3,))
+    # `pymux wl` in the new pane: foot takes that pane's place, so the
+    # window holds two panes and not three. Lillecarl/pymux#630.
+    FIXTURES["window-pane-wl"] = Fixture(
+        CHROME,
+        keys(
+            (0.0, PREFIX),
+            (0.4, b"%"),
+            (
+                0.8,
+                (
+                    b"pymux wl -- foot --override=main.font='DejaVu Sans Mono:size=11'"
+                    b" sh -c 'printf \"foot took the pane wl ran in\\n\"; exec cat'\n"
+                ),
+            ),
+            ("quiet", 2.0),
+            (0.2, b"typed at the window\r"),
+            ("quiet", 1.0),
+        ),
+        (2,),
+    )
+
+
+def every_fixture():
+    return sorted(FIXTURES)
+
+
+def chrome_command(
+    keys_path,
+    socket_path,
+    config_path,
+    log_path,
+    error_path,
+    fifo_path,
+    size_path,
+    forwarder_path,
+    fence_path,
+):
+    """
+    The command the terminal runs: the relay, and pymux under it.
+
+    pymux runs through `sh -c` so that its own stderr goes to a file.
+    It shares a terminal with the client in the integrated mode, so
+    anything it writes there lands in the picture
+    (Lillecarl/pymux#36), and the relay would copy a traceback onto
+    the screen along with everything else. The relay's stderr goes to
+    a file for the same reason, and the file is in the room, where
+    `every_log` reads it.
+
+    The integrated mode holds the server and the client in one
+    process, so the picture is of the pymux this check built and not of
+    a server that was already running. The pane runs the forwarder,
+    which copies the fifo to its own output: that is the road the
+    fence travels.
+    """
+    relay_error = Path(error_path).parent / "relay-error.log"
+    # xterm hands its children the invoking user's login shell in
+    # $SHELL, whatever this harness was started with, and in the build
+    # sandbox that passwd shell is /noshell: every pane died at exec
+    # and the keys typed after it went nowhere. The shell the harness
+    # itself carries is the one pymux gives a pane.
+    shell = os.environ.get("SHELL")
+    inside = (
+        "export SHELL=%s\n" % shlex.quote(shell) if shell is not None else ""
+    ) + "exec python3 -m pymux -S %s -f %s --log %s integrated python3 %s %s %s 2>%s" % (
+        shlex.quote(str(socket_path)),
+        shlex.quote(str(config_path)),
+        shlex.quote(str(log_path)),
+        shlex.quote(str(forwarder_path)),
+        shlex.quote(str(fifo_path)),
+        shlex.quote(str(size_path)),
+        shlex.quote(str(error_path)),
+    )
+    return "exec python3 %s %s %d %s %s 2>%s -- sh -c %s" % (
+        shlex.quote(str(RELAY)),
+        shlex.quote(str(keys_path)),
+        HOLD,
+        shlex.quote(str(fifo_path)),
+        shlex.quote(str(fence_path)),
+        shlex.quote(str(relay_error)),
+        shlex.quote(inside),
+    )
+
+
+#: The terminals whose glyphs ink past their cell, and the width of
+#: that cell in pixels.
+#:
+#: xterm's glyph can put a pixel of ink in the first pixel column of
+#: the cell after it. It keeps that ink when both cells come in one
+#: string, and the second cell's background covers it when that cell is
+#: written alone. The optimized writer joins cells and the reference
+#: writer writes each alone, so the two pictures differ there, by
+#: however the writes happened to group: 18 pixels of `pane-text` in
+#: one run and 14 in the next. Measured over three runs and five
+#: fixtures, every differing xterm pixel had x % 10 == 0. A cell drawn
+#: wrong or in the wrong place changes pixels inside cells, which still
+#: count. This is the seam of Lillecarl/pymux#371. kitty and foot show
+#: no such difference.
+INK_PAST_THE_CELL = {"xterm": 10}
+
+
+def difference_of(one, other, marked, cell_width=None):
+    """
+    How many pixels two pictures of one screen differ in, and where.
+
+    Returns (0, None) when they are the same. When they differ, `marked`
+    is the first picture with every differing pixel painted red, for a
+    person to read. With `cell_width`, a pixel in the first pixel
+    column of a cell does not count: `INK_PAST_THE_CELL` says why.
+    """
+    first = Image.open(one).convert("RGB")
+    second = Image.open(other).convert("RGB")
+    if first.size != second.size:
+        return -1, "size, %s against %s" % (first.size, second.size)
+    mask = ImageChops.difference(first, second).convert("L").point(lambda value: 255 if value else 0)
+    if cell_width is not None:
+        for x in range(0, mask.width, cell_width):
+            mask.paste(0, (x, 0, x + 1, mask.height))
+    box = mask.getbbox()
+    if box is None:
+        return 0, None
+    pixels = mask.histogram()[255]
+    first.paste((255, 0, 0), mask=mask)
+    first.save(marked)
+    return pixels, "%d pixels within %s" % (pixels, box)
+
+
+class RenderingsDiffer(RuntimeError):
+    "The optimized and the reference rendering of one fixture are not the same picture."
+
+
+def picture_of(terminal, seat, name, work, out, fixtures=None, render_mode=None):
+    """
+    One fixture, in one terminal, left as a picture.
+
+    `render_mode` is `render-mode`'s value, or "" for pymux's default.
+    "both" takes the picture twice, once each way, and raises
+    `RenderingsDiffer` unless the two are the same pixels: the
+    reference rendering writes every cell where it belongs, so any
+    difference is the optimized one drawing something else. The real
+    terminal is the judge, which is what a check on cells cannot be.
+    """
+    if render_mode is None:
+        render_mode = RENDER_MODE
+    if render_mode == "both":
+        optimized = picture_of(terminal, seat, name, work, out, fixtures, "optimized")
+        reference = picture_of(terminal, seat, name, work, out, fixtures, "reference")
+        pixels, where = difference_of(
+            optimized,
+            reference,
+            optimized.parent / "difference.png",
+            INK_PAST_THE_CELL.get(terminal.name),
+        )
+        if pixels:
+            raise RenderingsDiffer(
+                "%s in %s: the optimized and reference renderings differ in %s; difference.png marks where"
+                % (name, terminal.name, where)
+            )
+        return optimized
+
+    room = out / terminal.name / name
+    room.mkdir(parents=True, exist_ok=True)
+    picture = room / ("reference.png" if render_mode == "reference" else "pymux.png")
+
+    if fixtures is None:
+        fixtures = FIXTURES
+    fixture = fixtures[name]
+    config_path = work / ("%s-%s.conf" % (name, render_mode or "default"))
+    config_path.write_text(fixture.config + ("set-option render-mode %s\n" % render_mode if render_mode else ""))
+
+    keys_path = work / ("%s.keys" % name)
+    keys_path.write_text(fixture.keys)
+
+    # The name of the terminal is in it: every terminal runs every
+    # fixture, and a socket a run before left behind is a socket this
+    # one cannot bind.
+    # A fixture taken both ways runs twice, so the mode is in every
+    # name a run leaves behind as well.
+    run = "%s-%s-%s" % (terminal.name, name, render_mode or "default")
+    socket_path = work / ("%s.sock" % run)
+
+    # The pane runs the forwarder, which copies the fifo to its own
+    # output: the fence goes down the fifo behind the keys and comes
+    # back on the wire when pymux has done with them. middleman.py
+    # says why. Every name carries the terminal's and the fixture's,
+    # the way the socket's does: a run before left its own behind.
+    forwarder_path = work / "chrome-forwarder.py"
+    forwarder_path.write_text(FORWARDER)
+    fifo_path = work / ("%s.fifo" % run)
+    size_path = work / ("%s-pane-size.txt" % run)
+    stem = picture.stem
+
+    seat.picture_of(
+        terminal,
+        chrome_command(
+            keys_path,
+            socket_path,
+            config_path,
+            room / ("%s-server.log" % stem),
+            room / ("%s-stderr.log" % stem),
+            fifo_path,
+            size_path,
+            forwarder_path,
+            # The file the relay touches when the fence comes back.
+            room / ("%s.fence" % stem),
+        ),
+        work,
+        picture,
+        room / ("%s.log" % stem),
+        # The relay touches the fence when pymux has done with the
+        # keys. A settle before that keeps the screen from before the
+        # keys and calls it finished.
+        not_before=room / ("%s.fence" % stem),
+        # And the fence cannot say a key arrived, so the server is
+        # asked what the keys built. Lillecarl/pymux#353.
+        judge=partial(judge_the_fixture, socket_path, fixture),
+    )
+
+    return picture
+
+
+#: What the server log says when a terminal has a window pane feature,
+#: by the feature's name. Lillecarl/pymux#651.
+SUPPORT = {
+    "kitty graphics": "kitty graphics yes",
+    "shared memory": "reads window frames from shared memory",
+    "pixel mouse": "reports the mouse in pixels",
+}
+
+
+def support_of(out, terminals) -> str:
+    """
+    Which window pane features each terminal turned on, as a table read
+    from the server logs of its window pane pictures. "" when no window
+    pane was photographed.
+    """
+    rows = []
+    for terminal in terminals:
+        logs = [path.read_text(errors="replace") for path in (out / terminal.name).glob("window-pane*/*server.log")]
+        if logs:
+            said = "\n".join(logs)
+            rows.append([terminal.name, *("yes" if marker in said else "no" for marker in SUPPORT.values())])
+    if not rows:
+        return ""
+    header = ["terminal", *SUPPORT]
+    widths = [max(len(row[column]) for row in [header, *rows]) for column in range(len(header))]
+    lines = ("  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip() for row in [header, *rows])
+    return "\n".join(lines) + "\n"
+
+
+def main(
+    fixtures=None,
+    only=None,
+    only_terminals=None,
+    out=None,
+    terminals=None,
+    only_list=None,
+    only_terminals_list=None,
+):
+    """
+    Photograph every fixture, in every terminal.
+
+    The arguments are the knobs of the run, and default to this
+    module's own: `photograph_themes.py` passes its own fixtures
+    and its own knob names, and the same machinery takes the pictures.
+
+    `only_list` and `only_terminals_list` are exact names, and beat
+    the substrings: a derivation that builds one terminal and a batch
+    of themes needs to name them exactly, where a person typing a
+    knob narrows with a piece of a name.
+    """
+    if fixtures is None:
+        fixtures = FIXTURES
+    if only is None:
+        only = ONLY
+    if only_terminals is None:
+        only_terminals = ONLY_TERMINALS
+    if out is None:
+        out = PICTURES
+    if terminals is None:
+        terminals = CHROME_TERMINALS
+
+    work = Path(os.environ.get("TMPDIR", "/tmp")) / "pymux-chrome"
+    work.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    if only_list is not None:
+        # Every name, and not "did any of them match": a list of four
+        # where one is misspelt would otherwise run the other three and
+        # say nothing about the fourth. An exact list is asked for by a
+        # derivation that holds a batch, and a batch that quietly
+        # shrank is a gap in the gallery nobody sees.
+        names = chosen_by_name(sorted(fixtures), only_list, "fixture")
+    else:
+        names = [name for name in sorted(fixtures) if only in name]
+        if not names:
+            raise SystemExit("no fixture holds %r" % only)
+
+    if only_terminals_list is not None:
+        wanted = set(chosen_by_name([t.name for t in terminals], only_terminals_list, "terminal"))
+        terminals = [t for t in terminals if t.name in wanted]
+    else:
+        terminals = [t for t in terminals if only_terminals in t.name]
+        if not terminals:
+            raise SystemExit("no terminal holds %r" % ONLY_TERMINALS)
+
+    missing = [t.name for t in terminals if not t.is_available()]
+    if missing:
+        raise SystemExit("these terminals are not here: %s" % ", ".join(missing))
+
+    taken = []
+    lost = []
+    try:
+        seats = open_the_seats(terminals, work)
+    except TheSeatIsGone as reason:
+        return with_no_answer(str(reason))
+
+    try:
+        for terminal in terminals:
+            for name in names:
+                started = time.time()
+                try:
+                    path = picture_of(terminal, seats[terminal.seat], name, work, out, fixtures)
+                except RuntimeError as reason:
+                    # **Ask the seat before blaming the fixture.** A
+                    # display server that went away makes every picture
+                    # after it fail, and there is no answer in that.
+                    # Lillecarl/pymux#216.
+                    try:
+                        seats[terminal.seat].still_there()
+                    except TheSeatIsGone as gone:
+                        return with_no_answer(str(gone))
+                    room = out / terminal.name / name
+                    lost.append("%s %s" % (terminal.name, name))
+                    print(
+                        "%s %s: no picture (%s)\n%s" % (terminal.name, name, reason, every_log(room)),
+                        flush=True,
+                    )
+                else:
+                    taken.append(path)
+                    print(
+                        "%s %s: %s (%.1fs)"
+                        % (
+                            terminal.name,
+                            name,
+                            path.relative_to(out),
+                            time.time() - started,
+                        ),
+                        flush=True,
+                    )
+    except TheSeatIsGone as gone:
+        # The seat said so itself, so there is nothing to ask.
+        return with_no_answer(str(gone))
+    finally:
+        for seat in seats.values():
+            seat.keep_the_log(out)
+            seat.stop()
+
+    print()
+    print("%d pictures of pymux's chrome, under:" % len(taken))
+    print("    %s" % out)
+    print()
+    # Only the arrangement is judged, and a picture of the wrong one is
+    # not kept. What the chrome looks like is still for a person.
+    print("What these draw is not judged. Reading them is the work.")
+    support = support_of(out, terminals)
+    if support:
+        (out / "support.txt").write_text(support)
+        print()
+        print(support, end="")
+    if lost:
+        print()
+        print("%d took no picture:" % len(lost))
+        for one in lost:
+            print("    %s" % one)
+
+    # A run that photographed nothing at all is a broken run and not an
+    # empty one.
+    return 0 if taken else 1
+
+
+if __name__ == "__main__":
+    sys.exit(
+        main(
+            only_list=exact_list("PYMUX_CHROME_LIST"),
+            only_terminals_list=exact_list("PYMUX_CHROME_TERMINALS_LIST"),
+        )
+    )

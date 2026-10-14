@@ -1,0 +1,100 @@
+"""
+The menu of `display-menu`.
+
+A menu is a box of lines with a key each; the key of a line runs the
+command it carries, Escape leaves, and a line answers a click. The
+tests drive `menu_key_pressed` the way a key press would.
+Lillecarl/pymux#297.
+"""
+
+from __future__ import annotations
+
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.keys import Keys
+from session import create_session
+
+
+async def test_menu_opens_with_its_entries_and_title():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command(
+                "display-menu -T ' The question ' 'Do this' o 'display did-this' 'Leave' q 'display left'"
+            )
+
+            assert state.menu_title == " The question "
+            assert state.menu_entries == [
+                ("o", "Do this", "display did-this"),
+                ("q", "Leave", "display left"),
+            ]
+
+            rows = state.layout_manager._menu_tokens()
+            assert "Do this" in "".join(text for _style, text, *_ in rows)
+
+
+async def test_key_of_entry_runs_it():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command("display-menu 'Do this' o 'display did-this'")
+
+            state.layout_manager.menu_key_pressed("o", "o")
+
+        assert state.message == "did-this"
+        assert not state.menu_entries
+
+
+async def test_nobody_s_key_stays_in_menu():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command("display-menu 'Do this' o 'display did-this'")
+
+            state.layout_manager.menu_key_pressed("z", "z")
+
+        assert state.menu_entries
+
+
+async def test_escape_leaves_menu():
+    "Through the binding a person reaches, not the method under it."
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command("display-menu 'Do this' o 'display did-this'")
+
+            (quit_menu,) = [
+                binding
+                for binding in state.app.key_bindings.get_bindings_for_keys((Keys.Escape,))
+                if binding.handler.__name__ == "_quit_menu"
+            ]
+            assert quit_menu.filter()
+            quit_menu.handler(None)
+
+        assert not state.menu_entries
+        assert state.message != "did-this"
+
+
+async def test_partial_triple_is_refused():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command("display-menu 'Do this' o")
+
+        assert "menu entry" in state.message
+
+
+async def test_clicking_row_runs_it():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            pymux.handle_command("display-menu 'Do this' o 'display did-this'")
+
+            rows = state.layout_manager._menu_tokens()
+            handler = rows[0][2]
+            from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
+
+            handler(
+                MouseEvent(
+                    position=None,
+                    event_type=MouseEventType.MOUSE_DOWN,
+                    button=1,
+                    modifiers=frozenset(),
+                )
+            )
+
+        assert state.message == "did-this"
+        assert not state.menu_entries

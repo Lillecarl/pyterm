@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import argparse
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pymux.main import Pymux
+
+
+import anyio
+
+from pymux.commands import CommandParser, add_command, handle_command
+from pymux.format import Language, format_pymux_string
+
+
+def if_shell(pymux: Pymux, args: argparse.Namespace):
+    """
+    Run one command or the other, by what a shell answers.
+
+    `if-shell 'test -f ~/.tmux.conf' "set -g status off" "set -g status on"`:
+    the shell command runs, and when it exits zero the first command
+    runs, else the second, when there is one. -F asks the question of
+    a format instead of a shell: no program runs, and a non-empty
+    answer is yes. -J asks the same of a jinja2 template.
+
+    **A question for a shell is a question this answers later.** The
+    client that asked waits for it and the server does not, which is
+    what `run-shell` beside this says. -F asks a format, which is
+    answered here and now. Lillecarl/pymux#297, #311.
+    """
+    if args.F or args.J:
+        # No program runs, so there is nothing to wait for and -b
+        # changes nothing. tmux answers this one on the spot as well.
+        # `-F` asks a tmux format and `-J` the same question written as
+        # a template. Lillecarl/pymux#333.
+        answer = format_pymux_string(
+            pymux,
+            args.shell_command,
+            language=Language.JINJA if args.J else Language.TMUX,
+        )
+        return _then_run(pymux, args, bool(answer))
+
+    if args.b:
+        pymux.spawn_command(_ask_the_shell(pymux, args))
+        return None
+
+    return _ask_the_shell(pymux, args)
+
+
+async def _ask_the_shell(pymux: Pymux, args: argparse.Namespace) -> None:
+    # Captured and dropped. Only the status is read, and the output
+    # would otherwise go to whatever the server's stdout is: /dev/null
+    # under a daemon, and the person's own terminal in the integrated
+    # route, where it draws over the frame. tmux sends
+    # it to /dev/null for the same reason. Lillecarl/pymux#312.
+    done = await anyio.run_process(args.shell_command, check=False)
+
+    answer = _then_run(pymux, args, done.returncode == 0)
+    if answer is not None:
+        await answer
+
+
+def _then_run(pymux: Pymux, args: argparse.Namespace, yes: bool):
+    command = args.then_command if yes else args.else_command
+
+    if command:
+        # The answer of the command it chose is this command's answer:
+        # `if-shell yes 'wait-for done'` waits, rather than leaving the
+        # wait behind it.
+        return handle_command(pymux, command)
+
+    return None
+
+
+def register(subparsers: argparse._SubParsersAction[CommandParser]):
+    parser = add_command(subparsers, if_shell)
+    parser.add_argument(
+        "-F",
+        dest="F",
+        action="store_true",
+        help="Ask a format, not a shell: no program runs, and a non-empty answer is yes.",
+    )
+    parser.add_argument(
+        "-J", dest="J", action="store_true", help="Ask a jinja2 template, not a shell. Like -F, in the other language."
+    )
+    parser.add_argument(
+        "-b",
+        dest="b",
+        action="store_true",
+        help="Run in the background: the command that asked does not wait for the shell. -F answers at once either way.",
+    )
+    parser.add_argument(
+        "shell_command", metavar="<shell-command>", help="The question, through the shell, or the format with -F."
+    )
+    parser.add_argument("then_command", metavar="<then-command>", nargs="?")
+    parser.add_argument("else_command", metavar="<else-command>", nargs="?")

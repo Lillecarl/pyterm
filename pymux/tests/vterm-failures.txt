@@ -1,0 +1,28 @@
+# The libvterm assertions that failed with pymux in the middle.
+# Each line names the test file, the line in it, and the
+# assertion. Each one is a difference between what pymux emits
+# and what the program in the pane asked for.
+#
+# ptterm/tests/vterm-failures.txt is the same list for ptterm
+# alone, judged on its own model. A name here and not there is
+# what the wire loses.
+#
+# This is what the run saw. To make it what the check expects:
+#     nix build --file . checks.pymux-vterm.run
+#     cp result/failures.txt pymux/tests/vterm-failures.txt
+67screen_dbl_wh.test:16 screen_cell 0,0
+67screen_dbl_wh.test:24 screen_cell 0,0
+67screen_dbl_wh.test:25 screen_cell 1,0
+67screen_dbl_wh.test:32 screen_cell 0,0
+67screen_dbl_wh.test:37 screen_cell 23,0
+69screen_reflow.test:14 lineinfo 1
+69screen_reflow.test:38 lineinfo 1
+69screen_reflow.test:43 lineinfo 1
+69screen_reflow.test:54 lineinfo 3
+69screen_reflow.test:62 lineinfo 3
+69screen_reflow.test:70 lineinfo 3
+69screen_reflow.test:74 ?screen_row 0
+69screen_reflow.test:75 ?screen_row 1
+69screen_reflow.test:76 ?screen_row 2
+69screen_reflow.test:78 ?screen_row 3
+69screen_reflow.test:79 cursor

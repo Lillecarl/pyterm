@@ -1,0 +1,13 @@
+# What one keystroke costs pymux, in bytecode instructions.
+# `tests/measure_keystroke.py` says what each stage covers
+# and why the number is the same on every machine.
+#
+# This is what the run saw. To make it what the check expects:
+#     nix build --file . checks.pymux-keystroke.run
+#     cp result/keystroke-budgets.txt pymux/tests/keystroke-budgets.txt
+key 11476
+key (wide) 11476
+parse 310
+parse (wide) 310
+render 73244
+render (wide) 110376

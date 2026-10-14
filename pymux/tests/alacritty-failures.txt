@@ -1,0 +1,24 @@
+# The Alacritty reference tests whose grid differs with pymux
+# in the middle. Each line is one test.
+#
+# A difference is between the grid Alacritty recorded for a
+# real program and the grid a real Term builds out of what
+# pymux emitted for the same program. So each one is something
+# our wire loses or adds.
+#
+# This is what the run saw. To make it what the check expects:
+#     nix build --file . checks.pymux-alacritty.run
+#     cp result/failures.txt pymux/tests/alacritty-failures.txt
+decaln_reset
+deccolm_reset
+delete_chars_reset
+indexed_256_colors
+origin_goto
+saved_cursor
+saved_cursor_alt
+selective_erasure
+sgr
+tab_rendering
+underline
+vttest_tab_clear_set
+wrapline_alt_toggle

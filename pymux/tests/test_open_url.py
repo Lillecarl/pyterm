@@ -1,0 +1,571 @@
+"""
+Opening a URL in the browser of a client.
+
+The server opens none itself: it has no browser, and the browser of the
+user runs on the machine of the client. What the server owns is who
+receives the request and whether it asks first, and that is what these
+tests judge. The client half is one call to `webbrowser`, judged on its
+own at the bottom.
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+import sys
+import webbrowser
+
+import anyio
+import pytest
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
+from session import in_this_process, once, over_connection
+
+from pymux.client.terminal import TerminalClient
+from pymux.options import ALL_OPTIONS, SetOptionError
+
+URL = "https://example.com/auth"
+
+#: A pane that is still there when the test looks at it. A program that
+#: exits takes its pane, and then its window, with it.
+PANE_THAT_STAYS = "%s -c 'import time; time.sleep(30)'" % (sys.executable,)
+
+SIZE = Size(rows=24, columns=80)
+
+
+def opens(packets):
+    "The open packets among everything the server wrote."
+    return [packet for packet in packets if packet.get("cmd") == "open"]
+
+
+async def create_pane(pymux, state):
+    "A window with a pane in it, so a pane can ask for something."
+    with set_app(state.app):
+        await pymux.create_window(PANE_THAT_STAYS)
+    return pymux.arrangement.get_active_window().panes[0]
+
+
+# ----------------------------------------------------------------------
+# Who receives it.
+
+
+async def test_command_opens_on_client():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+
+        pymux.handle_command("open-url %s" % URL)
+
+        # The write of a packet is a turn of the loop behind the
+        # command that asked for it.
+        await once(lambda: opens(packets), 5.0, "the command never opened anything")
+
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+        assert URL in state.message
+
+
+async def test_last_targets_client_used_last():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        a, _ = await session.attach("a", SIZE)
+        b, _ = await session.attach("b", SIZE)
+
+        # Attaching counts as using, so b is the last one until a types.
+        assert pymux.clients_to_open_on() == [b]
+        session.typed(a, "x")
+        await once(lambda: a.last_used > b.last_used, 5.0, "the typing never counted")
+        assert pymux.clients_to_open_on() == [a]
+
+        pymux.handle_command("open-url %s" % URL)
+
+        # One packet, for one client: `last` is not a broadcast.
+        await once(lambda: opens(packets), 5.0, "the command never opened anything")
+        assert len(opens(packets)) == 1
+
+
+async def test_broadcast_reaches_every_client():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        await session.attach("a", SIZE)
+        await session.attach("b", SIZE)
+        pymux.open_url_target = "broadcast"
+
+        pymux.handle_command("open-url %s" % URL)
+
+        await once(lambda: len(opens(packets)) == 2, 5.0, "the broadcast never reached both")
+        assert opens(packets) == [{"cmd": "open", "data": URL}] * 2
+
+
+async def test_command_from_pane_opens_in_browser_of_client():
+    """
+    `pymux open-url` typed in a pane reaches the server over a socket,
+    and the server runs it under a fake CLI: a client state for the
+    connection of the command, which closes the moment the command
+    answers. It used to carry the newest "used last" stamp, so the
+    open packet went to that connection and no browser opened.
+    Lillecarl/pymux#261, found on a machine.
+    """
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+
+        got = await session.command("open-url %s" % URL)
+
+        await once(
+            lambda: opens(packets),
+            5.0,
+            "the command from a pane never opened anything",
+        )
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+
+        # What the connection of the command received back: the answer
+        # of the command, and nothing a browser was meant to read.
+        await once(
+            lambda: any(packet.get("cmd") == "exit" for packet in got),
+            5.0,
+            "the command never answered",
+        )
+        assert opens(got) == []
+
+
+async def test_fake_cli_of_command_is_not_client_anybody_used():
+    """
+    The client state of a command that arrived over a socket is never
+    stamped, never a target, and gone when the command is done.
+    """
+    async with in_this_process() as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+
+        temp = session.command("open-url %s" % URL)
+
+        assert temp.temporary is True
+        assert temp.last_used == 0
+        assert temp not in pymux._client_states.values()
+
+        # The message of the command went to the client a person is
+        # at, not to the connection of the command.
+        assert URL in (state.message or "")
+        assert URL not in (temp.message or "")
+
+
+# ----------------------------------------------------------------------
+# Whether it asks first.
+
+
+async def test_ask_asks_and_opens_nothing():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+
+        pymux.handle_command("open-url %s" % URL)
+
+        assert opens(packets) == []
+        assert URL in state.confirm_text
+        assert state.confirm_command == "open-url -c %s" % URL
+
+
+async def test_a_pane_cannot_confirm_its_own_open():
+    """
+    **`open-url-mode ask` read as a gate and was not one.**
+
+    `-c` is the answer to a question, and a program in a pane runs
+    pymux commands too -- over the socket, under a temporary client. It
+    could send the flag itself and reach the browser of the person at
+    the keyboard with the option set to ask. Lillecarl/pymux#443.
+    """
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+
+        await session.command("open-url -c %s" % URL)
+
+        await once(lambda: state.confirm_command, 5.0, "the pane's -c was taken as an answer")
+        assert opens(packets) == []
+
+
+async def test_yes_opens():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+        pymux.handle_command("open-url %s" % URL)
+
+        session.typed(state, "y")
+        await once(lambda: opens(packets), 5.0, "the yes never opened anything")
+
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+        assert state.confirm_command is None
+
+
+async def test_no_opens_nothing():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+        pymux.handle_command("open-url %s" % URL)
+
+        session.typed(state, "n")
+        await once(lambda: state.confirm_command is None, 5.0, "the no never cleared")
+
+        assert opens(packets) == []
+
+
+async def test_a_second_question_waits_its_turn():
+    """
+    An ask must not take the place of a question already on screen.
+
+    There used to be one `confirm_text`/`confirm_command` pair, so the
+    URL question replaced whatever was waiting: a pane asked to confirm
+    `kill-pane` had its question taken, and the `y` that followed opened
+    the URL while the kill was lost with nothing said about either. Ask
+    mode exists so that nothing happens without a yes, and losing a yes
+    is the same surprise the other way round. Lillecarl/pymux#266.
+    """
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+
+        # `confirm-before` asks the client that ran it, so it needs the
+        # app in context; `open-url` walks the attached clients instead.
+        with set_app(state.app):
+            pymux.handle_command("confirm-before -p 'Really? (y/n)' 'display-message kept'")
+        pymux.handle_command("open-url %s" % URL)
+
+        # The first question is still the one on screen.
+        assert state.confirm_text == "Really? (y/n)"
+        assert state.confirm_command == "display-message kept"
+
+        session.typed(state, "y")
+        await once(lambda: state.message == "kept", 5.0, "the first command never ran")
+
+        # Answering it brings the second one up rather than losing it.
+        assert URL in state.confirm_text
+        assert state.confirm_command == "open-url -c %s" % URL
+        assert opens(packets) == []
+
+        session.typed(state, "y")
+        await once(lambda: opens(packets), 5.0, "the second yes never opened anything")
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+        assert state.confirm_text is None
+
+
+async def test_no_answers_one_question_and_leaves_the_rest():
+    async with over_connection() as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+
+        with set_app(state.app):
+            pymux.handle_command("confirm-before -p 'First? (y/n)' 'display-message one'")
+            pymux.handle_command("confirm-before -p 'Second? (y/n)' 'display-message two'")
+
+        session.typed(state, "n")
+        await once(
+            lambda: state.confirm_text == "Second? (y/n)",
+            5.0,
+            "the no did not bring the next question up",
+        )
+        assert state.message != "one", "the no ran the command anyway"
+
+
+async def test_off_opens_nothing():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "off"
+
+        pymux.handle_command("open-url %s" % URL)
+
+        assert opens(packets) == []
+        assert state.confirm_text is None
+
+
+async def test_ask_asks_on_every_client_of_broadcast():
+    async with over_connection() as session:
+        pymux = session.pymux
+        a, _ = await session.attach("a", SIZE)
+        b, _ = await session.attach("b", SIZE)
+        pymux.open_url_mode = "ask"
+        pymux.open_url_target = "broadcast"
+
+        pymux.handle_command("open-url %s" % URL)
+
+        for state in (a, b):
+            assert URL in state.confirm_text
+            assert state.confirm_command == "open-url -c %s" % URL
+
+
+async def test_confirmed_command_opens_without_asking():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pymux.open_url_mode = "ask"
+
+        # Inside the client's application, which is where a person's
+        # yes runs it: `ClientState` answers the question from its own
+        # context. A bare `handle_command` has no client and therefore
+        # looks like a pane, whose `-c` answers nothing.
+        # Lillecarl/pymux#443.
+        with set_app(state.app):
+            pymux.handle_command("open-url -c %s" % URL)
+
+        await once(lambda: opens(packets), 5.0, "the command never opened anything")
+
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+        assert state.confirm_text is None
+
+
+# ----------------------------------------------------------------------
+# What a pane asks for.
+
+
+async def test_openurl_of_pane_opens():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pane = await create_pane(pymux, state)
+
+        payload = "OpenURL=:" + base64.b64encode(URL.encode()).decode()
+        pymux.forward_osc(pane, "1337", payload)
+
+        await once(lambda: opens(packets), 5.0, "the pane's request never arrived")
+        assert opens(packets) == [{"cmd": "open", "data": URL}]
+
+
+async def test_another_subcommand_of_1337_opens_nothing():
+    packets = []
+    async with over_connection(read_packet=packets.append) as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        pane = await create_pane(pymux, state)
+
+        pymux.forward_osc(pane, "1337", "File=name=t.png;inline=1:AAAA")
+        await anyio.sleep(0.3)
+
+        assert opens(packets) == []
+
+
+# ----------------------------------------------------------------------
+# The words an option takes.
+
+
+def test_open_url_option_takes_its_words_only():
+    class _Holder:
+        open_url_target = "last"
+        open_url_mode = "open"
+
+    holder = _Holder()
+    # The words, not their order: `commands/completer.py` sorts what it
+    # offers, so nothing reads the order.
+    assert sorted(ALL_OPTIONS["open-url-target"].get_all_values(holder)) == [
+        "broadcast",
+        "last",
+    ]
+
+    with pytest.raises(SetOptionError):
+        ALL_OPTIONS["open-url-target"].set_value(holder, "nonsense")
+    with pytest.raises(SetOptionError):
+        ALL_OPTIONS["open-url-mode"].set_value(holder, "nonsense")
+
+    ALL_OPTIONS["open-url-target"].set_value(holder, "broadcast")
+    assert holder.open_url_target == "broadcast"
+
+
+# ----------------------------------------------------------------------
+# The client half.
+
+
+def test_client_asks_its_platform_to_open(monkeypatch):
+    opened = []
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+    TerminalClient()._process({"cmd": "open", "data": URL})
+
+    assert opened == [URL]
+
+
+def test_client_reports_browser_it_could_not_open(monkeypatch):
+    sent = []
+    client = TerminalClient()
+    monkeypatch.setattr(client, "_send_packet", sent.append)
+    monkeypatch.setattr(webbrowser, "open", lambda url: False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    client._process({"cmd": "open", "data": URL})
+
+    assert sent == [{"cmd": "open-failed", "data": URL}]
+
+
+def test_client_reports_browser_that_raised(monkeypatch):
+    sent = []
+    client = TerminalClient()
+    monkeypatch.setattr(client, "_send_packet", sent.append)
+
+    def broken(url):
+        raise webbrowser.Error("could not locate a browser")
+
+    monkeypatch.setattr(webbrowser, "open", broken)
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    client._process({"cmd": "open", "data": URL})
+
+    assert sent == [{"cmd": "open-failed", "data": URL}]
+
+
+def test_client_reports_nothing_when_browser_opened(monkeypatch):
+    sent = []
+    client = TerminalClient()
+    monkeypatch.setattr(client, "_send_packet", sent.append)
+    monkeypatch.setattr(webbrowser, "open", lambda url: True)
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    client._process({"cmd": "open", "data": URL})
+
+    assert sent == []
+
+
+def test_linux_machine_without_display_tries_no_browser(monkeypatch):
+    asked = []
+    sent = []
+    client = TerminalClient()
+    monkeypatch.setattr(client, "_send_packet", sent.append)
+    monkeypatch.setattr(webbrowser, "open", asked.append)
+    monkeypatch.setattr("pymux.client.terminal.sys.platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    client._process({"cmd": "open", "data": URL})
+
+    assert asked == []  # A text browser in $BROWSER cannot run either.
+    assert sent == [{"cmd": "open-failed", "data": URL}]
+
+
+def test_mac_tries_its_opener_with_no_display(monkeypatch):
+    "macOS opens through `open`, which needs neither variable."
+    asked = []
+    client = TerminalClient()
+    monkeypatch.setattr(client, "_send_packet", lambda packet: None)
+    monkeypatch.setattr(webbrowser, "open", lambda url: asked.append(url) or True)
+    monkeypatch.setattr("pymux.client.terminal.sys.platform", "darwin")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    client._process({"cmd": "open", "data": URL})
+
+    assert asked == [URL]
+
+
+# ----------------------------------------------------------------------
+# The shim.
+
+
+async def test_shim_names_opener_of_session():
+    async with in_this_process() as session:
+        pymux = session.pymux
+        pymux.open_url_shim = True
+        pymux._ensure_open_url_shim()
+
+        directory = pymux._open_url_shim_dir
+        script = os.path.join(directory, "pymux-open-url")
+        assert os.access(script, os.X_OK)
+        assert os.path.islink(os.path.join(directory, "xdg-open"))
+        with open(script) as f:
+            assert f.read() == '#!/bin/sh\nexec pymux open-url -- "$@"\n'
+
+        # A pane that starts again asks for nothing new.
+        pymux._ensure_open_url_shim()
+        assert pymux._open_url_shim_dir == directory
+
+
+async def test_shim_rides_path_of_new_pane():
+    async with in_this_process() as session:
+        pymux = session.pymux
+        pymux.open_url_shim = True
+        pymux._ensure_open_url_shim()
+
+        environment = {"PATH": "/usr/bin"}
+        pymux._shim_pane_environment(environment)
+
+        assert environment["PATH"].startswith(pymux._open_url_shim_dir + os.pathsep)
+        assert environment["BROWSER"] == os.path.join(pymux._open_url_shim_dir, "pymux-open-url")
+
+
+async def test_pane_that_starts_with_shim_finds_opener():
+    "The whole hook, from the option through the fork to the program."
+    async with in_this_process() as session:
+        pymux = session.pymux
+        pymux.open_url_shim = True
+        state, _ = await session.attach("only", SIZE)
+
+        # The pane prints the whole verdict on one line: is $BROWSER the
+        # opener of the shim directory, and is that directory the first
+        # thing on PATH?
+        #
+        # It used to have to fit in six characters. A pane of this route
+        # started at nought columns, because `create_pane` sized the pty
+        # and not the screen, so anything longer wrapped a character to
+        # a row and the reader below saw it cut. Lillecarl/pymux#267,
+        # fixed with Lillecarl/pymux#321.
+        program = (
+            '%s -c \'import os, time; p = os.environ["PATH"].split(":")[0];'
+            ' b = os.environ.get("BROWSER");'
+            ' print("MATCH=" + str(b == p + "/pymux-open-url") +'
+            ' " and the shim directory leads PATH"); time.sleep(30)\''
+        ) % (sys.executable,)
+        with set_app(state.app):
+            await pymux.create_window(program)
+        pane = pymux.arrangement.get_active_window().panes[0]
+
+        def page_text():
+            return pane.screen.page.text(0, 23)
+
+        await once(
+            lambda: "MATCH=" in page_text(),
+            5.0,
+            "the pane never printed its environment",
+        )
+        assert "MATCH=True and the shim directory leads PATH" in page_text()
+
+
+async def test_shim_leaves_pane_alone_when_it_is_off():
+    async with in_this_process() as session:
+        pymux = session.pymux
+        # The browser of the person is another shim's, with its own option.
+        pymux.handle_command("set-option pane-browser off")
+
+        environment = {"PATH": "/usr/bin"}
+        pymux._shim_pane_environment(environment)
+
+        assert environment == {"PATH": "/usr/bin"}
+
+
+# ----------------------------------------------------------------------
+# What a server says when a client reports back.
+
+
+async def test_client_that_could_not_open_says_so_in_its_status_line():
+    async with over_connection() as session:
+        pymux = session.pymux
+        state, _ = await session.attach("only", SIZE)
+        connection = state.connection
+
+        connection._process({"cmd": "open-failed", "data": URL})
+
+        assert state.message == "Could not open %s in a browser on this machine." % URL

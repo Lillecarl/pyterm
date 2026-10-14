@@ -1,0 +1,407 @@
+"""
+Where the view sits after the focus moves. Lillecarl/pymux#209.
+
+Carl: "There's still an off-by-one error if you open 3 strips and move
+to the rightmost one and then back."
+
+Two properties a strip owes a person, and neither is about arithmetic
+for its own sake:
+
+- **A column the focus lands on is wholly on screen.** All of it,
+  including the border it owns, because that border is the column's
+  right edge and a half-drawn edge reads as a clipped pane.
+- **Moving the focus to a column that is already wholly on screen does
+  not move the view.** Otherwise walking right and back again leaves
+  the strip somewhere it has never been, and every column shifts under
+  a person who only changed which pane they were typing in.
+
+The scroll is read off the container, and what is on screen is read off
+the cells, because those are two different claims.
+"""
+
+from __future__ import annotations
+
+import io
+from contextlib import asynccontextmanager
+
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Screen, WritePosition
+from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output.vt100 import Vt100_Output
+from session import Connection
+
+from pymux.commands import handle_command
+from pymux.main import Pymux
+from pymux.plan_container import PlanContainer
+
+ROWS = 12
+COLUMNS = 80
+
+STRIP = ["set-option pane-border-status on", "set-window-option strip on"]
+
+
+@asynccontextmanager
+async def create_client(commands=(), rows=ROWS, columns=COLUMNS):
+    pymux = Pymux()
+    output = Vt100_Output(stdout=io.StringIO(), get_size=lambda: Size(rows=rows, columns=columns))
+    async with pymux.running():
+        with create_pipe_input() as pipe:
+            state = pymux.add_client(
+                output=output,
+                input=pipe,
+                color_depth=ColorDepth.DEPTH_8_BIT,
+                connection=Connection(),
+            )
+            try:
+                with set_app(state.app):
+                    # What attaching brings: the bindings, and the
+                    # window the drawing below looks at.
+                    await pymux.startup()
+                    for command in commands:
+                        await run(pymux, command)
+
+                    def draw():
+                        screen = Screen()
+                        state.app.layout.container.write_to_screen(
+                            screen,
+                            MouseHandlers(),
+                            WritePosition(xpos=0, ypos=0, width=columns, height=rows),
+                            "",
+                            False,
+                            None,
+                        )
+                        screen.draw_all_floats()
+                        state.app.renderer._last_screen = screen
+                        return screen
+
+                    yield pymux, state, draw
+            finally:
+                for window in list(pymux.arrangement.windows):
+                    for pane in list(window.panes):
+                        process = getattr(pane, "process", None)
+                        if process is not None and not process.is_terminated:
+                            process.kill()
+
+
+async def run(pymux, command):
+    """
+    Run a command, and wait for what it started.
+
+    A key binding does not wait, but a test that did not would draw
+    before the pane exists. The end state is the same either way.
+    """
+    answer = handle_command(pymux, command)
+    if answer is not None:
+        await answer
+
+
+async def columns_of(pymux, how_many):
+    window = pymux.arrangement.get_active_window()
+    opened = [window.active_pane]
+    for _ in range(how_many - 1):
+        await run(pymux, "split-window -h")
+        opened.append(window.active_pane)
+    return window, opened
+
+
+def strip(state):
+    "The container that draws the strip of the layout built now."
+    found = []
+
+    def walk(container):
+        if isinstance(container, PlanContainer):
+            found.append(container)
+        for child in container.get_children():
+            walk(child)
+
+    walk(state.app.layout.container)
+    assert len(found) == 1, found
+    return found[0]
+
+
+def view(state) -> int:
+    "How far along the row the view sits."
+    return strip(state).view.offset.x
+
+
+def where(pymux, pane):
+    "Where a pane was drawn, on the screen."
+    return pymux.get_client_state().layout_manager.pane_write_positions[pane]
+
+
+async def test_whole_walk_left_and_right_and_back():
+    """
+    Three columns of half an 80 column window: 120 cells of strip seen
+    through 80, so the view is either at 0 or at 39 and nowhere else.
+
+    **The repeated numbers are the property.** Two 39s in a row say
+    that landing on the middle column from the right moved nothing, and
+    two 0s say the same coming from the left. Before, the view went
+    40, 38, 0, 1, 40 -- two cells of peek measured against a pane one
+    cell narrower than its column. Lillecarl/pymux#209.
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        window, panes = await columns_of(pymux, 3)
+        draw()
+
+        walk = [view(state)]
+        for direction in "LLRRLL":
+            move(pymux, state, direction)
+            draw()
+            walk.append(view(state))
+
+        # 39 and not 40: the last column's border is not worth a scroll
+        # (#617).
+        assert walk == [39, 39, 0, 0, 39, 39, 0], walk
+        # And the focus really did travel, or the test says nothing.
+        assert panes.index(window.active_pane) == 0
+
+
+async def test_focus_inside_stack_still_finds_its_column():
+    """
+    A column can be a stack of panes, which is what a niri column is.
+    The focused pane is then one of several, and the thing to scroll to
+    is still the column.
+
+    Walking the containers answers this for nothing. Reading the
+    focused pane's write position got it right only because a pane's
+    x-extent happens to equal its column's content, so it was never
+    tested and never owned. Lillecarl/pymux#209.
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        _window, panes = await columns_of(pymux, 3)
+        draw()
+        third = view(state)
+
+        # Split the third column downwards, so it holds two panes.
+        await run(pymux, "split-window -v")
+        state.sync_focus()
+        draw()
+
+        # Still the same column, so the same view.
+        assert view(state) == third, view(state)
+
+        # And moving out of the stack and back does not move it either.
+        move(pymux, state, "L")
+        draw()
+        move(pymux, state, "R")
+        draw()
+        assert view(state) == third, view(state)
+
+
+async def test_column_wider_than_view_still_starts_on_screen():
+    """
+    It cannot be shown whole, so part of it is off the screen, and the
+    part a person is looking at may not be.
+
+    Two thirds of a window is wider than the window once a second
+    column is beside it, so this asks for the case rather than
+    inventing it.
+
+    **The left edge is the one that is kept**, and it is kept whether
+    the column fits or not: Lillecarl/pymux#218. So this holds for a
+    column wider than the whole view as well, and
+    `test_column_wider_than_view_shows_left_edge`
+    (`test_strip_plan.py`) reads the offset that says which end it
+    is.
+    """
+    async with create_client(STRIP, columns=20) as (pymux, state, draw):
+        _window, panes = await columns_of(pymux, 2)
+        draw()
+
+        # Make the focused column wider than the whole view.
+        pymux.handle_command("switch-column-width")
+        pymux.handle_command("switch-column-width")
+        draw()
+
+        drawn = where(pymux, panes[1])
+        # Its left edge is on screen, whatever it costs the right.
+        assert drawn.xpos >= 0, drawn
+        assert drawn.xpos < 20, drawn
+
+
+async def test_focused_column_is_wholly_on_screen():
+    """
+    Its border is its right edge, and the column is not on screen
+    until that is -- unless it is the last column, whose border has
+    nothing past it to hint at (#617).
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        _window, panes = await columns_of(pymux, 3)
+        draw()
+
+        # The focus is on the third column, the one that was just made,
+        # and the last: its pane is on screen, and its border need not be.
+        drawn = where(pymux, panes[2])
+        assert drawn.xpos >= 0, drawn
+        assert drawn.xpos + drawn.width <= COLUMNS, drawn
+
+        # The middle one has a column past it, so its border shows too.
+        move(pymux, state, "L")
+        draw()
+        drawn = where(pymux, panes[1])
+        assert drawn.xpos >= 0, drawn
+        assert drawn.xpos + drawn.width + 1 <= COLUMNS, drawn
+
+
+def move(pymux, state, direction):
+    """
+    Move the focus the way a key moves it.
+
+    **Two steps, and the second is easy to miss.** `select-pane` sets
+    `window.active_pane`, and that setter records the pane and nothing
+    else. What the strip follows is `layout.current_window`, and
+    `ClientState.sync_focus` is what brings that to the active pane --
+    bound to `after_key_press`, so a real key does it and a command
+    handled directly does not.
+
+    A test that skipped it passed while measuring nothing: the strip
+    kept scrolling to the pane that had the focus all along.
+    """
+    pymux.handle_command("select-pane -%s" % (direction,))
+    state.sync_focus()
+
+
+async def test_opening_pane_leaves_row_where_person_scrolled_it():
+    """
+    The containers are built again whenever the arrangement changes
+    shape, and the view used to be one of them, so it went back to the
+    origin every time.
+
+    The trap is that the view is often put back by the rule that moves
+    it: a focused column that does not fit at the origin is scrolled
+    to again. So this scrolls right, moves the focus **back to a
+    column that the origin also shows**, and then splits. Nothing then
+    asks the view to move, and only a view that was kept stays.
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        _window, _panes = await columns_of(pymux, 3)
+        draw()
+
+        # Three half-width columns: at 39 the second and third show, at
+        # 0 the first and second do. So the second is on screen either
+        # way, and moving to it moves nothing.
+        move(pymux, state, "L")
+        draw()
+        scrolled = view(state)
+        assert scrolled == 39, scrolled
+
+        await run(pymux, "split-window -v")
+        state.sync_focus()
+        draw()
+
+        assert view(state) == scrolled, (scrolled, view(state))
+
+
+async def test_moving_back_to_column_that_is_on_screen_does_not_move_view():
+    """
+    The reported fault. Three columns are wider than the screen, so
+    landing on the third scrolls. The second is then wholly on screen,
+    and moving to it may not scroll again.
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        _window, _panes = await columns_of(pymux, 3)
+        draw()
+        third = view(state)
+
+        move(pymux, state, "L")
+        draw()
+
+        assert view(state) == third, (third, view(state))
+
+
+def shown(state) -> int:
+    "How far along the row this frame drew the view."
+    return strip(state).view.shown.x
+
+
+async def test_the_view_glides_and_eases_out():
+    """
+    A move draws frames between the two places, quick at first and slow
+    at the end, and lands exactly where the jump would have.
+    """
+    async with create_client([*STRIP, "set-option strip-animation-time 100"]) as (pymux, state, draw):
+        await columns_of(pymux, 3)
+        now = [0.0]
+        draw()
+        strip(state).clock = lambda: now[0]
+        assert shown(state) == 39
+
+        move(pymux, state, "L")
+        move(pymux, state, "L")
+        frames = []
+        for at in (0.0, 0.025, 0.05, 0.075, 0.1, 0.2):
+            now[0] = at
+            draw()
+            frames.append(shown(state))
+
+        assert view(state) == 0
+        assert frames == [39, 16, 5, 1, 0, 0], frames
+
+
+async def test_a_move_during_a_glide_starts_where_the_view_is():
+    "The view never jumps: a new target leaves from the frame on screen."
+    async with create_client([*STRIP, "set-option strip-animation-time 100"]) as (pymux, state, draw):
+        await columns_of(pymux, 3)
+        now = [0.0]
+        draw()
+        strip(state).clock = lambda: now[0]
+
+        move(pymux, state, "L")
+        move(pymux, state, "L")
+        draw()
+        now[0] = 0.025
+        draw()
+        midway = shown(state)
+        assert 0 < midway < 39, midway
+
+        move(pymux, state, "R")
+        move(pymux, state, "R")
+        draw()
+        assert shown(state) == midway
+        now[0] = 0.2
+        draw()
+        assert shown(state) == view(state) == 39
+
+
+async def test_no_glide_when_the_time_is_zero():
+    async with create_client([*STRIP, "set-option strip-animation-time 0"]) as (pymux, state, draw):
+        await columns_of(pymux, 3)
+        draw()
+        move(pymux, state, "L")
+        move(pymux, state, "L")
+        draw()
+        assert shown(state) == view(state) == 0
+
+
+async def test_walking_right_and_back_returns_same_view():
+    """
+    The same property, said as a round trip.
+
+    Every move is drawn before the next one, because `select-pane` is
+    geometric: it reads where each pane was drawn last time, so two
+    moves with no frame between them ask a stale question.
+    """
+    async with create_client(STRIP) as (pymux, state, draw):
+        _window, _panes = await columns_of(pymux, 3)
+
+        def step(direction):
+            move(pymux, state, direction)
+            draw()
+
+        # The first frame, so that there are write positions to read.
+        # Without it the first move asks an empty question and does
+        # nothing, which is the trap this test fell into.
+        draw()
+
+        step("L")
+        step("L")
+        start = view(state)
+
+        for direction in "RRLL":
+            step(direction)
+
+        assert view(state) == start, (start, view(state))

@@ -1,0 +1,136 @@
+"""
+The overlay pane: a pane that floats in the middle of the screen.
+
+It belongs to the session, like a window does, so every client sees the
+same one. It takes the keyboard while it is open, and it closes when
+the program in it ends.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from pymux.layout import DEFAULT_OVERLAY_SIZE, MIN_OVERLAY_SIZE, overlay_size
+from pymux.main import Pymux
+
+# ----------------------------------------------------------------------
+# How large it is.
+
+
+@pytest.mark.parametrize(
+    ("given", "available", "expected"),
+    [
+        (None, 80, 48),  # The default is 60%.
+        ("50%", 80, 40),
+        ("100%", 80, 80),
+        ("20", 80, 20),
+        ("200", 80, 80),  # Never wider than the screen.
+        ("1", 80, MIN_OVERLAY_SIZE),  # Never too small to show anything.
+        ("nonsense", 80, 48),  # Back to the default.
+        ("", 80, 48),
+        ("60%", 45, 27),
+    ],
+)
+def test_size_of_overlay(given, available, expected):
+    assert overlay_size(given, available) == expected
+
+
+def test_default_is_share_of_screen():
+    assert DEFAULT_OVERLAY_SIZE.endswith("%")
+
+
+# ----------------------------------------------------------------------
+# Opening and closing it.
+
+
+def test_session_starts_without_overlay():
+    pymux = Pymux()
+    assert pymux.overlay_pane is None
+
+
+async def test_opening_overlay_starts_pane():
+    pymux = Pymux()
+    async with pymux.running():
+        pane = await pymux.display_overlay(command="%s -c pass" % _python(), title="a title")
+        try:
+            assert pymux.overlay_pane is pane
+            assert pymux.current_session.overlay_title == "a title"
+            # The overlay takes the keyboard.
+            assert pymux.get_focused_pane() is pane
+        finally:
+            pymux.close_overlay()
+
+
+async def test_title_falls_back_to_command():
+    pymux = Pymux()
+    command = "%s -c pass" % _python()
+    async with pymux.running():
+        await pymux.display_overlay(command=command)
+        try:
+            assert pymux.current_session.overlay_title == command
+        finally:
+            pymux.close_overlay()
+
+
+async def test_second_overlay_replaces_first():
+    pymux = Pymux()
+    async with pymux.running():
+        first = await pymux.display_overlay(command="%s -c pass" % _python())
+        second = await pymux.display_overlay(command="%s -c pass" % _python())
+        try:
+            assert first is not second
+            assert pymux.overlay_pane is second
+        finally:
+            pymux.close_overlay()
+
+
+async def test_closing_overlay_gives_keyboard_back():
+    pymux = Pymux()
+    async with pymux.running():
+        await pymux.display_overlay(command="%s -c pass" % _python())
+        pymux.close_overlay()
+        assert pymux.overlay_pane is None
+
+
+def test_closing_when_there_is_none_is_fine():
+    Pymux().close_overlay()  # Does not raise.
+
+
+async def test_every_client_of_the_session_looks_at_overlay():
+    """
+    The overlay belongs to the session, so it has the focus for every
+    client on that session -- and for no client on another.
+    Lillecarl/pymux#324.
+    """
+
+    class FakeClientState:
+        app = None
+
+        def __init__(self, session):
+            self.session = session
+
+    class FakePane:
+        pass
+
+    pymux = Pymux()
+    # The overlay lands on the session a command with no client means,
+    # and that is the newest session on the server: nothing has looked
+    # at either of these, so `last_used_session` answers with the one
+    # made last. Lillecarl/pymux#473.
+    elsewhere = pymux.current_session
+    here = pymux.create_session(name="here")
+
+    async with pymux.running():
+        pane = await pymux.display_overlay(command="%s -c pass" % _python())
+        try:
+            assert pymux._has_focus(FakeClientState(here), pane) is True
+            assert pymux._has_focus(FakeClientState(here), FakePane()) is False
+            assert pymux._has_focus(FakeClientState(elsewhere), pane) is False
+        finally:
+            pymux.close_overlay()
+
+
+def _python():
+    import sys
+
+    return sys.executable

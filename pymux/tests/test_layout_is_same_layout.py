@@ -1,0 +1,44 @@
+"""
+Walking the layout twice finds the same controls.
+
+prompt_toolkit keys the key bindings of the whole application by the
+set of controls it can reach: `_CombinedRegistry._key_bindings` builds
+`(current_window, frozenset(other_controls))` and looks that up in a
+cache of eight. A container that hands back a fresh object each walk is
+a key that never matches, so every key press rebuilt every binding.
+
+`checks.pymux-keystroke` holds the total, and a total says a stage grew
+without saying why. This says which invariant the number rests on.
+Lillecarl/pymux#233.
+"""
+
+from __future__ import annotations
+
+from prompt_toolkit.application.current import set_app
+from session import create_session
+
+
+def controls(app):
+    "What `_CombinedRegistry` would key its cache by."
+    return frozenset(app.layout.find_all_controls())
+
+
+async def test_walking_layout_twice_finds_same_controls():
+    async with create_session() as (pymux, state):
+        with set_app(state.app):
+            first = controls(state.app)
+            second = controls(state.app)
+
+    assert first == second
+
+
+async def test_empty_overlay_is_one_window_and_not_new_one():
+    """
+    The container that held a fresh `Window()`, which makes a
+    `DummyControl` of its own every time it is asked.
+    """
+    async with create_session() as (pymux, state):
+        manager = state.layout_manager
+        with set_app(state.app):
+            assert pymux.overlay_pane is None
+            assert manager._overlay_container() is manager._overlay_container()

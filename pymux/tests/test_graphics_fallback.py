@@ -1,0 +1,470 @@
+"""
+Tests for what a client draws when its terminal does not speak the
+kitty graphics protocol, and for the detection that picks the way.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+from pyte import escape
+from pyte.images import PixelFormat
+from pyte.sequences import Csi, apc, csi
+from pyte.sixel import decode_sixel
+from test_graphics_output import IMAGE_DATA, make_state, placement, view
+
+from pymux import sixel as sixel_module
+from pymux.blocks import LOWER_HALF, UPPER_HALF
+from pymux.graphics import ClientGraphics
+
+
+def make_client(kitty=False, sixel=False, repaint=None):
+    "Return (client graphics, list that collects what it writes)."
+    written = []
+    client = ClientGraphics(written.append, lambda: None, repaint)
+    client.kitty_supported = kitty
+    client.sixel_supported = sixel
+    return client, written
+
+
+def sixels(written):
+    "The sixel sequences that were written, with their cursor position."
+    return re.findall(r"\x1b\[(\d+);(\d+)H(\x1bP[^\x1b]*\x1b\\)", "".join(written))
+
+
+# ----------------------------------------------------------------------
+# Detection.
+
+
+def test_graphics_query_reply_turns_on_kitty():
+    client, _written = make_client()
+    client.handle_reply(apc("Gi=31;OK"))
+    assert client.kitty_supported
+    assert not client.sixel_supported
+
+
+def test_device_attributes_with_four_turn_on_sixel():
+    client, _written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 4, 6, private="?"))
+    assert client.sixel_supported
+    assert client.supported
+
+
+def test_device_attributes_without_four_leave_sixel_off():
+    client, _written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    assert not client.sixel_supported
+    # It still draws: half blocks need nothing but colour.
+    assert client.supported
+    assert client.blocks_wanted
+
+
+def test_forty_in_attributes_is_not_four():
+    client, _written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 40, 46, private="?"))
+    assert not client.sixel_supported
+
+
+def test_cell_size_report_is_read():
+    client, _written = make_client()
+    assert (client.cell_width, client.cell_height) == (10, 20)
+    client.handle_reply(csi(Csi.XTWINOPS, 6, 17, 8))  # Height first, then width.
+    assert (client.cell_width, client.cell_height) == (8, 17)
+
+
+def test_impossible_cell_size_is_ignored():
+    client, _written = make_client()
+    client.handle_reply(csi(Csi.XTWINOPS, 6, 0, 0))
+    client.handle_reply(csi(Csi.XTWINOPS, 6, 9999, 9999))
+    assert (client.cell_width, client.cell_height) == (10, 20)
+
+
+def test_terminal_that_answers_nothing_draws_half_blocks():
+    "It used to draw nothing at all. Every client shows something now."
+    client, written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    client.render([view(make_state(placement()))])
+    joined = "".join(written)
+    assert UPPER_HALF in joined or LOWER_HALF in joined
+    assert "\x1bP" not in joined  # No sixel.
+    assert "\x1b_G" not in joined  # No kitty.
+
+
+def test_nothing_is_drawn_before_detection_answers():
+    """
+    The device attributes reply closes the detection. Drawing half
+    blocks before it would put text where an image is about to go.
+    """
+    client, written = make_client()
+    assert not client.supported
+    client.render([view(make_state(placement()))])
+    assert written == []
+
+
+# ----------------------------------------------------------------------
+# Choosing the way to draw.
+
+
+def test_kitty_wins_over_sixel():
+    client, written = make_client(kitty=True, sixel=True)
+    client.render([view(make_state(placement()))])
+    joined = "".join(written)
+    assert "\x1b_Ga=t," in joined  # The kitty transmission.
+    assert "\x1bP" not in joined  # No sixel.
+
+
+def test_sixel_is_used_when_kitty_is_missing():
+    client, written = make_client(sixel=True)
+    client.render([view(make_state(placement()), x=4, y=2)])
+    found = sixels(written)
+    assert len(found) == 1
+    row, column, _sequence = found[0]
+    assert (int(row), int(column)) == (3, 5)  # One based.
+
+
+def test_sixel_batch_saves_and_restores_cursor():
+    client, written = make_client(sixel=True)
+    client.render([view(make_state(placement()))])
+    assert written[-1].startswith("\x1b7")
+    assert written[-1].endswith("\x1b8")
+
+
+def test_half_blocks_land_on_cells_of_placement():
+    "One cursor move for each row, at the left edge of the placement."
+    client, written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    client.render([view(make_state(placement(columns=3, rows=2)), x=4, y=2)])
+    joined = "".join(written)
+    moves = re.findall(r"\x1b\[(\d+);(\d+)H", joined)
+    assert moves == [("3", "5"), ("4", "5")]
+
+
+def test_half_blocks_save_and_restore_cursor():
+    client, written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    client.render([view(make_state(placement()))])
+    assert written[-1].startswith("\x1b7")
+    assert written[-1].endswith("\x1b8")
+
+
+def test_second_frame_that_did_not_change_writes_nothing():
+    client, written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    views = [view(make_state(placement()))]
+    client.render(views)
+    assert written
+    written.clear()
+    client.render(views)
+    assert written == []
+
+
+# ----------------------------------------------------------------------
+# The image itself.
+
+
+def test_image_is_scaled_to_cells_of_terminal():
+    client, written = make_client(sixel=True)
+    client.cell_width, client.cell_height = 8, 17
+    # The placement covers three columns and two rows.
+    client.render([view(make_state(placement(columns=3, rows=2)))])
+
+    _row, _column, sequence = sixels(written)[0]
+    width, height, _pixels = decode_sixel(sequence[2:-2])
+    assert (width, height) == (3 * 8, 2 * 17)
+
+
+def test_image_keeps_its_pixels_without_cell_size_report():
+    client, written = make_client(sixel=True)
+    # The default cell matches the one that the pane assumes, so a
+    # 2x2 pixel image over one cell grows to that cell.
+    client.render([view(make_state(placement(columns=1, rows=1)))])
+    _row, _column, sequence = sixels(written)[0]
+    width, height, _pixels = decode_sixel(sequence[2:-2])
+    assert (width, height) == (10, 20)
+
+
+def test_colours_of_image_survive():
+    client, written = make_client(sixel=True)
+    client.cell_width, client.cell_height = 1, 1
+    state = make_state(placement(columns=2, rows=2), data=IMAGE_DATA)
+    client.render([view(state)])
+
+    _row, _column, sequence = sixels(written)[0]
+    width, height, pixels = decode_sixel(sequence[2:-2])
+    assert (width, height) == (2, 2)
+    # The source is a 2x2 RGB image of the bytes 0 to 11. Sixel holds a
+    # colour as three percentages, so every channel is approximated.
+    for index, expected in enumerate([(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11)]):
+        got = tuple(pixels[index * 4 : index * 4 + 3])
+        assert max(abs(a - b) for a, b in zip(got, expected)) <= 3
+        assert pixels[index * 4 + 3] == 255
+
+
+def test_cropped_placement_is_encoded_smaller():
+    client, written = make_client(sixel=True)
+    client.cell_width, client.cell_height = 1, 1
+    # Two of the four columns of the placement fit in the pane.
+    client.render([view(make_state(placement(x=2, columns=4, rows=2)), width=4)])
+    _row, _column, sequence = sixels(written)[0]
+    width, _height, _pixels = decode_sixel(sequence[2:-2])
+    assert width == 2
+
+
+def test_image_outside_pane_draws_nothing():
+    client, written = make_client(sixel=True)
+    client.render([view(make_state(placement(y=50)), height=24)])
+    assert sixels(written) == []
+
+
+def test_png_image_is_drawn():
+    from test_sixel_encoder import _png
+
+    client, written = make_client(sixel=True)
+    client.cell_width, client.cell_height = 1, 1
+    png = _png(2, 1, [(10, 20, 30), (200, 100, 50)])
+    state = make_state(placement(columns=2, rows=1), data=png, format=100, width=2, height=1)
+    client.render([view(state)])
+
+    _row, _column, sequence = sixels(written)[0]
+    width, height, pixels = decode_sixel(sequence[2:-2])
+    assert (width, height) == (2, 1)
+    assert max(abs(pixels[i] - (10, 20, 30)[i]) for i in range(3)) <= 3
+
+
+def test_sixel_image_of_a_pane_is_drawn():
+    from test_graphics_output import SIXEL_DATA
+
+    client, written = make_client(sixel=True)
+    client.cell_width, client.cell_height = 1, 1
+    state = make_state(placement(columns=2, rows=2), data=SIXEL_DATA, format=PixelFormat.SIXEL)
+    client.render([view(state)])
+
+    _row, _column, sequence = sixels(written)[0]
+    width, height, pixels = decode_sixel(sequence[2:-2])
+    assert (width, height) == (2, 2)
+    assert tuple(pixels[:4]) == (255, 0, 0, 255)
+
+
+def test_sixel_image_of_a_pane_is_drawn_in_half_blocks():
+    from test_graphics_output import SIXEL_DATA
+
+    client, written = make_client()
+    client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    state = make_state(placement(columns=2, rows=1), data=SIXEL_DATA, format=PixelFormat.SIXEL)
+    client.render([view(state)])
+    assert UPPER_HALF in "".join(written) or LOWER_HALF in "".join(written)
+
+
+def test_image_that_cannot_be_read_is_skipped():
+    client, written = make_client(sixel=True)
+    state = make_state(placement(), data=b"nonsense", format=100)
+    client.render([view(state)])
+    assert sixels(written) == []
+
+
+# ----------------------------------------------------------------------
+# Frames and repainting.
+
+
+def test_unchanged_frame_draws_nothing_more():
+    calls = []
+    client, written = make_client(sixel=True, repaint=lambda: calls.append(1))
+    state = make_state(placement())
+
+    client.render([view(state)])
+    assert len(calls) == 1  # The image appeared.
+    written.clear()
+
+    # The repaint of the renderer wipes the pixels, so they go out
+    # again.
+    client.render([view(state)])
+    assert sixels(written) != []
+    written.clear()
+
+    # After that, nothing changes any more.
+    client.render([view(state)])
+    assert written == []
+    assert len(calls) == 1
+
+
+def test_moved_image_asks_for_repaint():
+    calls = []
+    client, written = make_client(sixel=True, repaint=lambda: calls.append(1))
+    state = make_state(placement())
+    client.render([view(state)])
+    client.render([view(state)])  # Settle.
+    written.clear()
+    calls.clear()
+
+    state.placements[0].y = 4
+    client.render([view(state)])
+    assert len(calls) == 1
+    row, _column, _sequence = sixels(written)[0]
+    assert int(row) == 5
+
+
+def test_removed_image_asks_for_repaint_and_draws_nothing():
+    calls = []
+    client, written = make_client(sixel=True, repaint=lambda: calls.append(1))
+    state = make_state(placement())
+    client.render([view(state)])
+    client.render([view(state)])
+    written.clear()
+    calls.clear()
+
+    state.placements = []
+    client.render([view(state)])
+    assert len(calls) == 1
+    assert sixels(written) == []
+
+
+def test_no_views_removes_images():
+    client, written = make_client(sixel=True)
+    state = make_state(placement())
+    client.render([view(state)])
+    client.render([view(state)])
+    written.clear()
+
+    client.render([])
+    assert sixels(written) == []
+    client.render([])
+    assert written == []
+
+
+def test_reset_asks_for_repaint():
+    calls = []
+    client, _written = make_client(sixel=True, repaint=lambda: calls.append(1))
+    client.render([view(make_state(placement()))])
+    calls.clear()
+
+    client.reset()
+    assert len(calls) == 1
+
+    # And it forgot everything: the image goes out again.
+    client, written = make_client(sixel=True)
+    client.render([view(make_state(placement()))])
+    client.reset()
+    written.clear()
+    client.render([view(make_state(placement()))])
+    assert sixels(written) != []
+
+
+# ----------------------------------------------------------------------
+# The encoder cache.
+
+
+@pytest.fixture
+def counted_encoder(monkeypatch):
+    "Count the calls of the sixel encoder."
+    calls = []
+    original = sixel_module.encode_sixel
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    # Where `graphics` looks it up, at the call.
+    monkeypatch.setattr(sixel_module, "encode_sixel", counting)
+    return calls
+
+
+def test_unchanged_image_is_encoded_once(counted_encoder):
+    client, _written = make_client(sixel=True)
+    state = make_state(placement())
+    for _ in range(4):
+        client.render([view(state)])
+    assert len(counted_encoder) == 1
+
+
+def test_moving_image_does_not_encode_it_again(counted_encoder):
+    client, _written = make_client(sixel=True)
+    state = make_state(placement())
+    client.render([view(state)])
+    state.placements[0].y = 3
+    client.render([view(state)])
+    # Same pixels, same size: only the cursor position differs.
+    assert len(counted_encoder) == 1
+
+
+def test_new_crop_is_encoded_again(counted_encoder):
+    client, _written = make_client(sixel=True)
+    state = make_state(placement(columns=4, rows=2))
+    client.render([view(state, width=80)])
+    client.render([view(state, width=3)])  # Now cropped.
+    assert len(counted_encoder) == 2
+
+
+# ----------------------------------------------------------------------
+# Encoding in a worker thread. Lillecarl/pymux#575.
+
+
+def make_spawning_client(blocks=False):
+    "A client whose encoding waits in `spawned` until a test runs it."
+    spawned = []
+    repaints = []
+    client, written = make_client(sixel=not blocks, repaint=lambda: repaints.append(1))
+    if blocks:
+        client.handle_reply(csi(escape.DA, 62, 1, 6, private="?"))
+    client._spawn = spawned.append
+    return client, written, spawned, repaints
+
+
+async def test_a_frame_goes_on_while_the_image_encodes(counted_encoder):
+    client, written, spawned, repaints = make_spawning_client()
+    state = make_state(placement())
+
+    client.render([view(state)])
+    client.render([view(state)])
+    assert sixels(written) == []
+    assert len(spawned) == 1  # One worker, however many frames wait.
+    assert counted_encoder == []
+
+    await spawned.pop()
+    assert len(counted_encoder) == 1
+    assert repaints  # The finished image asks for a frame.
+
+    client.render([view(state)])
+    assert len(sixels(written)) == 1
+
+
+async def test_half_blocks_encode_in_the_worker_too():
+    client, written, spawned, _repaints = make_spawning_client(blocks=True)
+    state = make_state(placement())
+    client.render([view(state)])
+    assert UPPER_HALF not in "".join(written) and LOWER_HALF not in "".join(written)
+
+    await spawned.pop()
+    client.render([view(state)])
+    assert UPPER_HALF in "".join(written) or LOWER_HALF in "".join(written)
+
+
+async def test_an_image_gone_before_its_encoding_ends_is_not_kept():
+    client, _written, spawned, repaints = make_spawning_client()
+    state = make_state(placement())
+    client.render([view(state)])
+    client.render([])
+
+    await spawned.pop()
+    assert client._cell_cache == {}
+    assert repaints == []
+
+
+async def test_a_reset_drops_the_encoding_in_flight():
+    client, _written, spawned, repaints = make_spawning_client()
+    client.render([view(make_state(placement()))])
+    client.reset()
+    repaints.clear()
+
+    await spawned.pop()
+    assert client._cell_cache == {}
+    assert repaints == []
+
+
+def test_cache_forgets_image_that_is_gone(counted_encoder):
+    client, _written = make_client(sixel=True)
+    state = make_state(placement())
+    client.render([view(state)])
+    client.render([])  # The image is gone: the cache drops it.
+    client.render([view(state)])
+    assert len(counted_encoder) == 2

@@ -1,0 +1,413 @@
+# What pymux is and what it needs. `setup.py` used to say this, and a build
+# read it by running it. Nix reads this file instead, at evaluation time, so
+# the dependency list here is the one the package is built from and there is no
+# second copy in a `.nix` file to fall out of step. Lillecarl/pymux#319.
+[project]
+name = "pymux"
+version = "0.15"
+description = "Pure Python terminal multiplexer."
+readme = "README.rst"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+# asyncio context variables and the modern event loop.
+requires-python = ">=3.14"
+authors = [
+    { name = "Jonathan Slenders" },
+]
+dependencies = [
+    "prompt_toolkit>=3.0.0,<3.1.0",
+    "ptterm",
+    # The client library, in `libpymux/`, which is a project of its own
+    # inside this repository. pymux takes it for the room a server
+    # binds its socket in: the server and a caller have to agree about
+    # that, so it is written once, in the library both import.
+    "libpymux",
+    # pyte's per-cell loops in Rust, which `pymux/__init__.py` installs
+    # over the Python ones. Lillecarl/pymux#566.
+    "pyte_rs",
+    # And prompt_toolkit's, in `prompt_toolkit_rs/` beside this file.
+    "prompt_toolkit_rs",
+    # And pymux's own image loops, in `pymux_rs/`. Lillecarl/pymux#574.
+    "pymux_rs",
+    # The shell completes the command line through argcomplete: the
+    # generated scripts of `share/bash-completion` and friends make the
+    # shell ask `pymux`, and it answers from the parsers of the commands.
+    # Lillecarl/pymux#48.
+    "argcomplete>=3.0.0",
+    # `pymux profile` asks a running server where its time went. A person
+    # wants that on the server they already have, not on one they built
+    # with extras.
+    "pyinstrument>=4.0.0",
+    # `-S ssh://host/path` reaches a server on another machine, over a
+    # `direct-streamlocal@openssh.com` channel to its unix socket.
+    # Lillecarl/pymux#90.
+    "asyncssh>=2.14.0",
+    # `pymux-browser` carries Playwright's `--remote-debugging-pipe` to
+    # the browser's WebSocket on the client's machine. Only it imports
+    # this. Lillecarl/pymux#655.
+    "websockets>=13.0",
+    # Sound between the panes and the person's machine: Opus on the
+    # wire, encoded and decoded on both ends, and the client's speaker
+    # and microphone through PortAudio, on macOS and Linux alike.
+    # Lillecarl/pymux#657.
+    "opuslib>=3.0.0",
+    "sounddevice>=0.4.0",
+    # `set-option theme pygments:<name>` takes one of the forty-nine styles
+    # pygments carries, and anything a package installs beside them.
+    # Lillecarl/pymux#194.
+    "pygments>=2.15.0",
+    # The async of the server: task groups, a memory object stream, and
+    # `wait_readable` in place of a callback nobody owns. 4.7 is what
+    # `notify_closing` needs, and the posix pipe needs that to wake a
+    # reader parked on a socket that is closing. Lillecarl/pymux#87.
+    "anyio>=4.7.0",
+    # The jobs table: an in-memory sqlite database the server owns, so
+    # agents can ask arbitrary questions of what runs without learning
+    # a flag for each one. One read/write connection plus a small pool
+    # of read-only readers, managed here rather than by aiosqlite.
+    # Lillecarl/pymux#528.
+    "aiosqlite>=0.21.0",
+    # The template language a person writes. A status line holding `{{`
+    # or `{%` is rendered by jinja2, and everything else takes the tmux
+    # format path; `-F` stays tmux format, because libtmux reads it.
+    # Lillecarl/pymux#333.
+    "jinja2>=3.1.0",
+    # `@override` on every override: the type check asks for it.
+    # `typing` carries it from 3.12, so on this floor the shim is
+    # vestigial; it stays until somebody rewrites the imports that
+    # name it, which is its own change. Lillecarl/pymux#510.
+    "typing-extensions",
+]
+
+[project.optional-dependencies]
+# The four flavours of the pastel, found by pygments through the entry
+# points the package carries. Optional: pymux runs without it, and the
+# environment that installs pymux asks for it. Lillecarl/pymux#195.
+catppuccin = ["catppuccin>=2.0.0"]
+# `pymux web` serves a pane to a browser. Optional because it is an
+# adapter that runs beside a server rather than a part of one: a server
+# never imports this, and a caller with a front end of its own relays
+# `stream-pane` over the socket and needs nothing here.
+# Lillecarl/pymux#461.
+web = ["websockets>=13.0"]
+# A Wayland compositor for panes with no display, so wl-copy and wl-paste
+# work there (`wayland-server`). Rust and Linux only, and pymux runs the
+# same without it: `pymux/wayland.py` imports it or does nothing.
+# Lillecarl/pymux#383.
+wayland = ["pysmithay; sys_platform == 'linux'"]
+# What the suites need on top of what pymux needs. It is an extra and not a
+# `[dependency-groups]` entry because only an extra reaches a resolver: Nix
+# builds the test environment from this list.
+test = [
+    "pytest",
+    # `checks.pymux-unit` spreads its tests over the build's cores.
+    "pytest-xdist",
+    # anyio is a dependency of pymux itself now, and it carries the
+    # pytest plugin that runs a coroutine test. `anyio_mode` below is
+    # what turns that plugin on.
+    "hypothesis",
+    "wcwidth",
+    # The shared rig: the seats, the drivers, the budgets.
+    "pyterm-pytest",
+    # The wayland seat's keyboard holder runs under the python of the
+    # suite that starts it. Linux's alone: wayland is, and macOS runs the
+    # suites that need no seat.
+    "pywayland; sys_platform == 'linux'",
+    # TEMPORARY for the Lillecarl/pymux#258 scratch measurement. Remove
+    # with `tests/measure_wire_sizes.py` and the `wire` check.
+    "msgpack",
+]
+# What a person needs and no check does. `tests/drive_with_libtmux.py`
+# runs pymux behind a `tmux` shim and drives it with the client library of
+# tmux, so it judges how tmux-compatible the command line is. Not the wire:
+# libtmux runs the `tmux` executable, and pymux's own socket protocol is
+# never involved. Nothing in the sandbox runs it, so `test` would put this
+# in the closure of every pymux check for nothing.
+#
+# The driver does not pass today. Lillecarl/pymux#321.
+dev = ["libtmux"]
+
+[project.urls]
+Homepage = "https://github.com/prompt-toolkit/pymux"
+
+[project.scripts]
+pymux = "pymux.entry_points.run_pymux:run"
+pymux-browser = "pymux.browser_shim:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The backend cannot guess which of the directories here is the one to ship.
+# `tests` is not it, and neither is `libpymux`: that one is a project of its
+# own, with a `pyproject.toml` beside its modules, and it builds a
+# distribution that this one depends on.
+[tool.hatch.build.targets.wheel]
+packages = ["pymux"]
+
+# **The page has to be named, or it does not ship.**
+# Measured: with `packages` alone the wheel held every `.py` of
+# `pymux/web/` and none of `pymux/web/static/`, so `pymux web` served
+# nothing and said nothing about why. A test asserts the directory is
+# filled (`tests/test_the_web_server.py`), because a missing file in a
+# wheel is the kind of fault that only shows to whoever installed it.
+#
+# This covers what a person wrote: `index.html` and `page.css`. The
+# element is TypeScript, in `pymux/web/client/`, and a compiler writes
+# `pymux-pane.js`, `pymux-pane.d.ts` and `page.js` into the directory
+# below. hatchling alone therefore builds a wheel with no element in it;
+# `nix/element.nix` is what compiles, and `default.nix` installs the
+# result. Lillecarl/pymux#461.
+artifacts = ["pymux/web/static/*"]
+
+[tool.pytest.ini_options]
+# Run a coroutine test, with no mark on it.
+#
+# Without this, pytest fails an "async def test" with "async def
+# functions are not natively supported". `tests/session.py` answered that
+# with `@in_loop`, which runs the coroutine in a loop of its own; a new
+# async test needs neither now. Lillecarl/pymux#87.
+#
+# `testSources` in `default.nix` carries this file to the suite. A setting
+# the check cannot read is a setting that holds by hand and not where it
+# counts.
+anyio_mode = "auto"
+
+[tool.pyrefly]
+# Strict with boundaries: the default preset, plus the three strict
+# codes that find bugs or are mechanical. Annotation completeness
+# (`implicit-any-parameter` and friends) is Lillecarl/pymux#511 and
+# stays off until somebody annotates 750 sites.
+#
+# Third-party code is a boundary by construction: the check passes
+# only `pymux/`, so prompt-toolkit's bodies are never checked no
+# matter the preset. Nothing here reaches upstream.
+[tool.pyrefly.errors]
+missing-override-decorator = "error"
+missing-attribute = "error"
+implicit-any-attribute = "error"
+
+[tool.ruff]
+# Mirror of the `ruff.toml` beside the umbrella: the build sandbox
+# sees only this tree, so discovery from a file under it must end
+# here. Keep the two in step; the why lives up there.
+target-version = "py314"
+# Pinned: a ruff upgrade must never silently reflow the tree.
+line-length = 120
+
+[tool.ruff.lint]
+# Mirror of the umbrella `ruff.toml`, rule for rule and comment for
+# comment: the build sandbox sees only this tree, so discovery from
+# a file under it must end here. Change the rules in both places.
+# Every rule here autofixes cleanly through the editor pipeline, and
+# the gate below holds what the pipeline leaves behind. One family
+# per commit on the way in; nothing here arrived in bulk.
+#
+# UP037 unquotes an annotation once the future import makes it lazy.
+# I001 sorts the imports the pipeline already organizes. UP006,
+# UP007 and UP045 spell the modern syntax the floor already runs.
+# UP009, UP015, UP024 and UP033 are four trivial modernizations.
+# F401 drops the imports nothing reads. RUF100 drops the `noqa`
+# comments nothing needs. RUF023 sorts the slots. PIE790, PIE800
+# and PIE808 drop three kinds of dead weight.
+#
+# Strings: `%` stays where it is. New code prefers f-strings, and a
+# `%` a touch already rewrites may ride along, but there is no bulk
+# migration: UP031 has no autofix, and its thousand sites are a
+# manual, trap-laden rewrite (a tuple on the right of `%` formats
+# its elements, an f-string its repr). Measured on this machine the
+# difference is fourteen nanoseconds a format -- style, not speed,
+# decides. UP031 and UP032 stay off for the same reason.
+#
+# FA100 is absent: on this floor it fires only where a rewrite needs
+# the import, and its fix is unsafe, so the editor never applies it.
+# The presence of the import is held per package by its own gate.
+# TC001-TC003 are deferred: should a runtime reader ever need a
+# name, that name keeps a runtime import through the
+# `runtime-evaluated-*` exemptions, per symbol.
+#
+# UP035 moves the typing names to `collections.abc`.
+# RUF022 sorts `__all__`.
+# RET501, RET502, RET505 and RET506 flatten what follows return
+# and raise: no `else` after either, and no bare `return None`.
+# PT006 names parametrize cases with tuples, not strings.
+# RUF005 unpacks where concatenation builds.
+# SIM105 folds try-except-pass into `contextlib.suppress`.
+# SIM108 writes the short if-else as a ternary.
+# ISC004 parenthesizes the implicit concatenation.
+#
+# The small safe ones ride together, a hunk or two each: B009 and
+# B010 spell attribute access plainly, E713 writes `not in`, FURB105
+# drops the empty `print`, FURB110 writes the `or`, FURB167 names
+# the regex flag long, FURB188 cuts the prefix, ISC003 joins the
+# split string, PLR0402 writes the from-import, PLR2044 drops the
+# empty comment, PTH201 drops the current-directory spell, RSE102
+# drops the parens on a bare raise, UP032 writes f-strings for
+# `.format` (not `%`: UP031 stays off for the tuple trap), UP041
+# names `TimeoutError`, UP043 drops the default type args. RUF021
+# stays off: preview-only in this ruff, so its one pair of parens
+# rides without the rule.
+#
+# C408 writes the literal for the builtin call, E731 writes the
+# `def` for the lambda, B007 underscores the unused loop name (one
+# noqa where the index leaves the loop), RUF007 walks pairs with
+# `pairwise`, RUF015 takes the first with `next`, RUF036 moves
+# `None` to the end of the union.
+select = [
+    "B007",
+    "B009",
+    "B010",
+    "B035",
+    "C408",
+    "E713",
+    "E731",
+    "F401",
+    "FURB105",
+    "FURB110",
+    "FURB116",
+    "FURB122",
+    "FURB129",
+    "FURB132",
+    "FURB136",
+    "FURB157",
+    "FURB161",
+    "FURB162",
+    "FURB163",
+    "FURB164",
+    "FURB166",
+    "FURB167",
+    "FURB168",
+    "FURB169",
+    "FURB171",
+    "FURB177",
+    "FURB181",
+    "FURB187",
+    "FURB188",
+    "I001",
+    "ISC001",
+    "ISC002",
+    "ISC003",
+    "ISC004",
+    "PIE790",
+    "PIE794",
+    "PIE796",
+    "PIE800",
+    "PIE804",
+    "PIE807",
+    "PIE808",
+    "PLR0402",
+    "PLR2044",
+    "PT006",
+    "PTH201",
+    "RET501",
+    "RET502",
+    "RET505",
+    "RET506",
+    "RET507",
+    "RET508",
+    "RSE102",
+    "RUF002",
+    "RUF003",
+    "RUF005",
+    "RUF007",
+    "RUF008",
+    "RUF009",
+    "RUF010",
+    "RUF013",
+    "RUF015",
+    "RUF016",
+    "RUF017",
+    "RUF018",
+    "RUF019",
+    "RUF020",
+    "RUF022",
+    "RUF023",
+    "RUF024",
+    "RUF026",
+    "RUF028",
+    "RUF030",
+    "RUF032",
+    "RUF033",
+    "RUF034",
+    "RUF036",
+    "RUF037",
+    "RUF040",
+    "RUF041",
+    "RUF043",
+    "RUF046",
+    "RUF048",
+    "RUF049",
+    "RUF051",
+    "RUF053",
+    "RUF057",
+    "RUF058",
+    "RUF060",
+    "RUF061",
+    "RUF063",
+    "RUF064",
+    "RUF068",
+    "RUF100",
+    "RUF101",
+    "RUF102",
+    "RUF103",
+    "RUF104",
+    "RUF200",
+    "SIM105",
+    "SIM108",
+    "UP001",
+    "UP003",
+    "UP004",
+    "UP005",
+    "UP006",
+    "UP007",
+    "UP008",
+    "UP009",
+    "UP010",
+    "UP011",
+    "UP012",
+    "UP013",
+    "UP014",
+    "UP015",
+    "UP017",
+    "UP018",
+    "UP019",
+    "UP020",
+    "UP021",
+    "UP022",
+    "UP023",
+    "UP024",
+    "UP025",
+    "UP026",
+    "UP028",
+    "UP029",
+    "UP032",
+    "UP033",
+    "UP034",
+    "UP035",
+    "UP036",
+    "UP037",
+    "UP039",
+    "UP040",
+    "UP041",
+    "UP042",
+    "UP043",
+    "UP044",
+    "UP045",
+    "UP046",
+    "UP047",
+    "UP049",
+    "UP050",
+]
+
+[tool.ruff.lint.isort]
+# Mirror of the umbrella `ruff.toml` above: the build sandbox sees
+# only this tree, so discovery from a file under it must end here.
+# libpymux, prompt_toolkit_rs and pymux_rs are distributions of their own,
+# installed like any other dependency: third-party by installation,
+# wherever they are developed. pymux is the project under check:
+# first-party, always. Without the pins the grouping follows
+# PYTHONPATH -- with the dev shell's set `ruff check` merges
+# `libpymux` with `pymux`, without it (and in the sandbox, which sets
+# none) it splits them.
+known-first-party = ["pymux"]
+known-third-party = ["libpymux", "prompt_toolkit_rs", "pymux_rs"]

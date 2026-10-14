@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import argparse
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pymux.main import Pymux
+
+
+from libpymux.protocol import Field, Packet
+
+from pymux.commands import CommandException, CommandParser, add_command
+from pymux.forwarding import BadForward, Direction, parse_listen
+
+
+def unforward_port(pymux: Pymux, args: argparse.Namespace) -> None:
+    """
+    Stop forwarding a port.
+
+    The listening end names it, because that is what two forwards
+    cannot share: `unforward-port -L 8080`. The destination is not part
+    of the name.
+
+    The client stops wanting it as well as closing it, so a later
+    reconnect does not bring it back. Lillecarl/pymux#436.
+    """
+    if args.local and args.remote:
+        raise CommandException("Give -L or -R, not both.")
+
+    spec = args.local or args.remote
+    if not spec:
+        raise CommandException("Give a forward to stop: -L or -R [host:]port.")
+
+    direction = Direction.LOCAL if args.local else Direction.REMOTE
+
+    try:
+        listen_host, listen_port = parse_listen(spec)
+    except BadForward as error:
+        raise CommandException(str(error)) from None
+
+    # No question here, whatever `forward-mode` says. Taking a forward
+    # away only ever removes something, so the reason to confirm one
+    # does not apply. Lillecarl/pymux#440.
+    pymux.forward_through(
+        pymux.forwarding_client().client_state,
+        {
+            Field.CMD: Packet.FORWARD,
+            Field.REMOVE: True,
+            Field.DIRECTION: str(direction),
+            Field.LISTEN_HOST: listen_host,
+            Field.LISTEN_PORT: listen_port,
+        },
+    )
+
+
+def register(subparsers: argparse._SubParsersAction[CommandParser]):
+    parser = add_command(subparsers, unforward_port)
+    parser.add_argument(
+        "-L",
+        dest="local",
+        metavar="[host:]port",
+        help="A forward that listens on this machine.",
+    )
+    parser.add_argument(
+        "-R",
+        dest="remote",
+        metavar="[host:]port",
+        help="A forward that listens on the server's machine.",
+    )

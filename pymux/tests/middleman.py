@@ -1,0 +1,360 @@
+"""
+A full screen pymux pane, and the wire that comes out of it.
+
+This is the middle of the middle man. A borrowed suite writes bytes, a
+program in the pane puts them on the screen, ptterm parses them, pymux
+renders and emits, and what pymux emitted is what a judge reads.
+
+    the suite ── bytes ──▶ this ──▶ a program in a full screen pane
+                                         │
+                                    ptterm parses
+                                         │
+                                 pymux renders and emits
+                                         │
+             a judge ◀── the wire ───────┘
+
+Nothing here judges anything. `write()` returns the bytes pymux wrote
+to its client, and what to make of them belongs to the suite that asked.
+`vterm_middleman.py` gives them to libvterm one `PUSH` at a time;
+`drive_with_alacritty.py` gives a whole recording to an Alacritty
+`Term`. The pane is the same either way, which is the point of this
+file.
+
+## How a write is fenced
+
+The bytes reach the pane through a fifo, which a forwarder in the pane
+copies to its own output. Then this has to know when pymux has finished
+drawing what those bytes did.
+
+A fence goes down the fifo behind the payload: an OSC 99, a desktop
+notification, which ptterm hands to pymux and pymux writes to the
+terminal of every client. Seeing it on the wire proves the pane
+consumed the payload.
+
+**The fence names no notification.** pymux gives every notification an
+identifier of its own, so that the answer of the terminal finds the
+pane that asked. A payload with no "i=" has nothing to route, so pymux
+passes it on byte for byte, and the token the pane wrote is the token
+to wait for.
+
+**It was an OSC 52, and a clipboard write is not free of options.** A
+pane may write the clipboard only where `set-clipboard` says "on", so
+every harness that used this fence carried that line. The day the value
+pymux ships changed, five checks waited their whole timeout for a fence
+pymux was holding back. A notification passes under no option at all.
+Lillecarl/pymux#380.
+
+**It proves the frame arrived too.** pymux sends what a pane passes on
+behind the next frame, and the frame that drew the payload is that one
+or one before it. A write waited for silence after the fence until
+pymux did: a tenth of a second and more, on each of the hundreds of
+writes a suite makes. Lillecarl/pymux#579.
+
+The fence is taken back out before anything sees the wire. A judge
+would only ignore it, but a stream that holds our own scaffolding is a
+stream nobody can read.
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+import re
+import select
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from tests.drive_with_pty import Terminal, run_cli
+
+#: How long the wire has to stay quiet before `settle` stops reading,
+#: in seconds. `settle` reads the wire while `wait_for_size` waits, and
+#: proves nothing: a fence is what says a frame is finished.
+QUIET = 0.05
+
+#: How long `settle` waits for a first byte. A wait in which pymux
+#: draws nothing has to give up.
+FIRST_BYTE = 0.15
+
+#: How long to wait for the pane to reach the size the suite asks
+#: about, in seconds. A pane opens at the size pymux gives it and is
+#: resized when the client says how big it is.
+SIZE_TIMEOUT = 10.0
+
+#: The program in the pane. It copies the fifo to its own output and
+#: changes nothing.
+#:
+#: `stty -opost` is the part that matters. A pty turns "\n" into "\r\n"
+#: on the way out, and a suite writes both, so without it every line
+#: feed arrives as something else.
+FORWARDER = r"""
+import fcntl, os, signal, struct, sys, termios
+os.system("stty -opost -echo")
+
+# The size of the pane, written where the driver can read it, and
+# written again every time it changes. Every assertion names a row and a
+# column, so a pane that is not the size the suite thinks it is turns
+# every one of them into a different question.
+#
+# It changes at least once: a pane opens at the size pymux gives it and
+# is resized when the client says how big it is, which is after this
+# program has already started.
+#
+# **SIGWINCH waits while one report runs.** A signal in the middle of a
+# report ran a second one, which wrote the new size, and then the first
+# finished and wrote the old size over it; no later signal came, so the
+# file held the old size for good. Lillecarl/pymux#545. A signal held
+# here runs its report when the mask comes off, after this one.
+def report(*_):
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
+    try:
+        rows, columns = struct.unpack(
+            "HHHH", fcntl.ioctl(1, termios.TIOCGWINSZ, b"\0" * 8)
+        )[:2]
+        with open(sys.argv[2], "w") as out:
+            out.write("%d %d\n" % (rows, columns))
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGWINCH})
+
+signal.signal(signal.SIGWINCH, report)
+report()
+
+fd = os.open(sys.argv[1], os.O_RDONLY)
+while True:
+    data = os.read(fd, 65536)
+    if not data:
+        break
+    os.write(1, data)
+"""
+
+#: What pymux writes for the fence, and what to take back out of the
+#: wire before a judge sees it.
+#:
+#: Both terminators, because both can arrive. pymux ends every sequence
+#: it builds with ST, and a program driven with no pymux at all sends
+#: the fence back the way the pane wrote it.
+FENCE = re.compile(rb"\x1b\]99;[^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def fence_sequence(token: bytes) -> bytes:
+    "What a pane writes to say it has consumed everything before it."
+    return b"\x1b]99;;%s\x1b\\" % token
+
+
+class Pane:
+    """
+    One pymux, one full screen pane, and the wire out of it.
+
+    A full screen pane is every cell of the terminal: no status line and
+    no pane title. Without it the pane sits two rows short and every row
+    of every assertion is out by one.
+    """
+
+    def __init__(
+        self,
+        tmp: Path,
+        name: str,
+        rows: int,
+        columns: int,
+        trace: Callable[[str], None] | None = None,
+        colorterm: str = "",
+    ) -> None:
+        self.tmp = tmp
+        self.name = name
+        self.rows = rows
+        self.columns = columns
+        self.colorterm = colorterm
+        self._trace = trace or (lambda message: None)
+        self.terminal: Terminal | None = None
+        self.fifo = tmp / ("%s-payload.fifo" % name)
+        self.writer = -1
+        self.fence = 0
+        #: Where the program in the pane writes the size it was given.
+        self.size_file = tmp / ("%s-pane-size.txt" % name)
+
+    def start(self) -> None:
+        "Bring up pymux with one pane that copies the fifo to the screen."
+        os.mkfifo(self.fifo)
+
+        forwarder = self.tmp / ("%s-forwarder.py" % self.name)
+        forwarder.write_text(FORWARDER)
+
+        config = self.tmp / ("%s.conf" % self.name)
+        # `set-client-option`, because full screen belongs to the
+        # terminal a person is sitting at. The client reads this file
+        # for itself and announces the line when it attaches.
+        # Lillecarl/pymux#471.
+        config.write_text("set-client-option full-screen on\n")
+
+        size = self.size_file
+
+        self.terminal = Terminal(
+            self.tmp,
+            self.name,
+            colorterm=self.colorterm,
+            command="%s %s %s %s" % (sys.executable, forwarder, self.fifo, size),
+            rows=self.rows,
+            columns=self.columns,
+            config=config,
+        )
+
+        # Opening for writing is what lets the forwarder past its own
+        # open, so the pane is running from here on. It stays open for
+        # the whole session: closing it is what ends the forwarder.
+        self.writer = os.open(self.fifo, os.O_WRONLY)
+
+        self.size_file = size
+
+        self.terminal.wait_for_queries()
+        self.terminal.drain(0.5)
+        self.wait_for_size()
+
+    def wait_for_size(self) -> None:
+        """
+        Wait until the program in the pane says it is the size asked for.
+
+        A pane of the wrong size makes every assertion a different
+        question, and the answers still look like answers. So this waits
+        for the size the suite asks about, and stops rather than
+        reporting a screen nobody asked about.
+
+        The forwarder writes the size on every SIGWINCH, which is the
+        one thing that says the resize reached the far end. A client, a
+        server, a pane and a pty stand between the ioctl and the
+        program, and each of them acts when it is next scheduled.
+        """
+        found = ""
+        deadline = time.monotonic() + SIZE_TIMEOUT
+        while time.monotonic() < deadline:
+            found = self.size_file.read_text().split()
+            if [int(one) for one in found] == [self.rows, self.columns]:
+                return
+            self.settle()
+        raise AssertionError(
+            "the pane is %s and the suite asks about %d rows by %d columns"
+            % (" by ".join(found) or "not saying", self.rows, self.columns)
+        )
+
+    @property
+    def seen(self) -> bytes:
+        "Everything pymux has written to its client, fence taken out."
+        assert self.terminal is not None
+        return FENCE.sub(b"", self.terminal.seen)
+
+    def write(self, data: bytes, timeout: float = 15.0) -> bytes:
+        """
+        Put bytes on the screen of the pane, and return what pymux
+        wrote to its client because of them.
+
+        `timeout` is how long the fence may take. The default suits a
+        line of a test file; a recording of a third of a megabyte needs
+        far longer, because every byte of it is parsed and drawn before
+        the fence can come back.
+        """
+        assert self.terminal is not None
+        self.fence += 1
+        # Base64 and not the words themselves: the wait is a search of
+        # the wire, and a payload that draws "fence-3" on the screen
+        # would answer the fence of the write that carried it.
+        token = base64.b64encode(b"fence-%d" % self.fence)
+
+        mark = self.terminal.mark()
+        os.write(self.writer, data + fence_sequence(token))
+
+        self.terminal.wait_for(token, timeout=timeout)
+        return FENCE.sub(b"", self.terminal.since(mark))
+
+    def resize(self, rows: int, columns: int) -> bytes:
+        """
+        Give the terminal of the client a new size, and read the wire.
+
+        A resize has no fence of its own: the size travels the other
+        way, from the terminal of the client down to the program in the
+        pane. So `wait_for_size` waits for the program to report the
+        new size, and then a payload fence goes through the pane. The
+        pane has its new size by then, and pymux puts a pane's escape
+        behind the frame that drew it, so the fence comes back after a
+        frame of the new size. Waiting for the wire to go quiet instead
+        lost that frame under load: a loaded gate read an empty screen
+        after `69screen_reflow.test` grew the terminal.
+
+        A judge on the other end has to be resized as well, and by the
+        caller: this returns the frame, and what a judge does with a
+        frame of a different shape is the judge's business.
+        """
+        assert self.terminal is not None
+        self.rows, self.columns = rows, columns
+
+        mark = self.terminal.mark()
+        self.terminal.resize(rows, columns)
+        self.wait_for_size()
+        self.write(b"")
+        return FENCE.sub(b"", self.terminal.since(mark))
+
+    def trace_pane(self) -> None:
+        """
+        Write the screen of the pane itself into the trace.
+
+        The caller decides when to ask, because this runs `capture-pane`
+        in a second process and that is far too expensive to pay on
+        every write.
+
+        A difference is between three screens: the one the program drew,
+        the one pymux keeps for the pane, and the one a terminal builds
+        from what pymux emitted. Only the middle one is invisible from
+        outside, and without it a fault cannot be placed.
+        """
+        assert self.terminal is not None
+        done = run_cli(self.terminal.sock_path, ["capture-pane", "-p"])
+        for number, row in enumerate(done.stdout.decode().splitlines()):
+            if row.strip():
+                self._trace("pane %2d |%s|" % (number, row))
+
+    def settle(self) -> None:
+        """
+        Read until the wire has been quiet for a while.
+
+        Silence is a guess about when a frame ended, and a loaded
+        machine breaks it, so nothing judges what this reads: a fence
+        does that. This keeps the wire drained while `wait_for_size`
+        polls, because an integrated pymux whose terminal is not read
+        stops serving (Lillecarl/pymux#585).
+
+        **The two waits are different waits.** `FIRST_BYTE` is how long
+        a frame may take to start, and it is paid in full only when no
+        frame comes. `QUIET` is how long a gap inside a frame may be.
+        Selecting on `QUIET` before the first byte spends the shorter
+        of the two on the longer wait, and then the frame is lost:
+        `since(mark)` returns the bytes from before it and the judge
+        reads a screen the pane never finished drawing.
+
+        Measured, on an idle machine, with the `colored_reset`
+        recording of the Alacritty references: `settle: 0.053s, 0 bytes`
+        and a 551 byte wire, where the same test gives 9115 bytes when
+        the frame is waited for. Lillecarl/pymux#425.
+        """
+        assert self.terminal is not None
+        started = time.monotonic()
+        read = 0
+        patience = FIRST_BYTE
+        while True:
+            readable, _, _ = select.select([self.terminal.master_fd], [], [], patience)
+            if not readable:
+                break
+            piece = os.read(self.terminal.master_fd, 65536)
+            self.terminal.seen += piece
+            read += len(piece)
+            # The frame has started, so from here a gap is a gap.
+            patience = QUIET
+        self._trace("settle: %.3fs, %d bytes" % (time.monotonic() - started, read))
+
+    def close(self) -> None:
+        if self.writer >= 0:
+            os.close(self.writer)
+            self.writer = -1
+        if self.terminal is not None:
+            self.terminal.close()
+            self.terminal = None

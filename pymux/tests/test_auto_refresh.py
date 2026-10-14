@@ -1,0 +1,337 @@
+"""
+The auto refresh draws a frame only when the text it draws changed.
+
+The loop asks for a refresh every `status-interval` seconds. The clock
+in the status line is what it is for. A whole frame is 279,645 bytecode
+instructions and the text that time moves is 2,371 of them, so the
+refresh reads the text and asks for a frame only when it differs from
+what the last frame drew. A tick that finds it the same costs 2,461.
+Lillecarl/pymux#154.
+
+A session with `full-screen on` draws no status line and no pane
+titlebar, so its text is empty and never differs. Lillecarl/pymux#151.
+
+The tests call the refresh. What runs it is `Pymux._auto_refresh`, one
+task of the server's own task group, and it is on the loop rather than
+on a thread for the reason in Lillecarl/pymux#155.
+"""
+
+from __future__ import annotations
+
+import datetime
+import io
+import sys
+
+import pytest
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output.vt100 import Vt100_Output
+from session import Connection
+
+from pymux.format import format_pymux_string
+from pymux.main import Pymux
+from pymux.options import ALL_CLIENT_OPTIONS, ALL_OPTIONS
+
+ROWS, COLUMNS = 24, 80
+
+#: A status line with nothing in it that time moves, so that a test of
+#: the window list does not race the minute of the real clock.
+NO_CLOCK = "[#S]"
+
+
+@pytest.fixture
+async def session():
+    """
+    A server with one client and two windows.
+
+    The client counts the frames its own application is asked for. That
+    application never runs, so a frame is a request and no more.
+
+    Two windows, because that is what this used to make: the explicit
+    one below, and the one `startup` makes for a client that attaches.
+    Tests that hide one window from the view count on both.
+    """
+    pymux = Pymux()
+    # The clock a screen shows is pinned, so no test here races the
+    # minute it runs in. This is what test-mode is for; the clock
+    # tests read it through `displayed_now`, which says so.
+    pymux.test_mode = True
+    async with pymux.running():
+        await pymux.create_window("%s -c 'import time; time.sleep(30)'" % (sys.executable,))
+
+        output = Vt100_Output(stdout=io.StringIO(), get_size=lambda: Size(rows=ROWS, columns=COLUMNS))
+        with create_pipe_input() as pipe:
+            state = pymux.add_client(
+                output=output,
+                input=pipe,
+                color_depth=ColorDepth.DEPTH_8_BIT,
+                connection=Connection(),
+            )
+            # What attaching did: the bindings, and the window that is
+            # active because it came last. Under this client's
+            # application, so the new pane is focused where it looks.
+            with set_app(state.app):
+                await pymux.startup()
+
+            frames = []
+            state.app.invalidate = lambda: frames.append(1)
+
+            try:
+                yield pymux, state, frames
+            finally:
+                for window in list(pymux.arrangement.windows):
+                    for pane in list(window.panes):
+                        if not pane.process.is_terminated:
+                            pane.process.kill()
+
+
+def set_option(pymux, name, value, state=None):
+    """
+    A client option belongs to one terminal, so `full-screen` needs
+    the client to set it under. Lillecarl/pymux#471.
+    """
+    table = ALL_CLIENT_OPTIONS if name in ALL_CLIENT_OPTIONS else ALL_OPTIONS
+    if state is None:
+        table[name].set_value(pymux, value)
+        return
+    with set_app(state.app):
+        table[name].set_value(pymux, value)
+
+
+def text(state):
+    "What the refresh reads, read the way the refresh reads it."
+    with set_app(state.app):
+        return state.layout_manager.what_time_moves()
+
+
+def in_view(pymux, state):
+    """
+    The window this client looks at.
+
+    Not `windows[0]`: `add_client` runs `startup()`, which makes a
+    window of its own and makes it active.
+    """
+    with set_app(state.app):
+        return pymux.arrangement.get_active_window()
+
+
+async def test_first_refresh_draws_what_no_frame_drew(session):
+    "Nothing has drawn the status line yet, so it has something to say."
+    pymux, state, frames = session
+
+    pymux.refresh_what_time_moves()
+
+    assert len(frames) == 1
+
+
+async def test_refresh_that_finds_same_text_asks_for_no_frame(session):
+    "The clock says the same minute for fourteen of every fifteen ticks."
+    pymux, state, frames = session
+    set_option(pymux, "status-right", NO_CLOCK)
+    pymux.refresh_what_time_moves()
+    assert len(frames) == 1
+
+    pymux.refresh_what_time_moves()
+    pymux.refresh_what_time_moves()
+
+    assert len(frames) == 1
+
+
+async def test_refresh_asks_for_frame_when_text_changed(session):
+    "`#W` in the window list names a window, so a rename shows."
+    pymux, state, frames = session
+    set_option(pymux, "status-right", NO_CLOCK)
+    pymux.refresh_what_time_moves()
+    assert len(frames) == 1
+
+    pymux.arrangement.windows[0].chosen_name = "renamed"
+    pymux.refresh_what_time_moves()
+
+    assert len(frames) == 2
+
+
+async def test_full_screen_session_asks_for_no_frame_at_all(session):
+    "One pane over every cell. Nothing there moves with time."
+    pymux, state, frames = session
+    set_option(pymux, "full-screen", "on", state)
+
+    assert text(state) == ()
+    pymux.refresh_what_time_moves()
+    pymux.refresh_what_time_moves()
+
+    assert frames == []
+
+
+async def test_clock_inside_pane_asks_for_frames(session):
+    """
+    `clock-mode` draws a clock over the content of the pane, and
+    `ctrl-b t` turns it on. With the status line hidden, that clock is
+    the only thing on the screen that time moves.
+    """
+    pymux, state, frames = session
+    set_option(pymux, "full-screen", "on", state)
+    pymux.refresh_what_time_moves()
+    assert frames == []
+
+    # **The window this client looks at**, and not `windows[0]`.
+    # `add_client` runs `startup()`, which makes a window of its own
+    # and makes it active, so `windows[0]` is a window nobody is
+    # looking at. This test used to set the clock there and pass,
+    # because the refresh read every window. Lillecarl/pymux#251.
+    in_view(pymux, state).panes[0].clock_mode = True
+    pymux.refresh_what_time_moves()
+
+    assert len(frames) == 1
+    assert text(state) != ()
+
+
+async def test_text_holds_clock_and_window_list(session):
+    "What the refresh compares, spelled out."
+    pymux, state, frames = session
+
+    said = text(state)
+
+    assert any(":" in part for part in said), said  # The clock.
+    assert any("python" in part or "bash" in part for part in said), said
+
+
+# ----------------------------------------------------------------------
+# How wide the question is. Lillecarl/pymux#251.
+#
+# A pane's write asks the other clients this now, so reading every pane
+# of every window costs on every write and not once every four seconds.
+
+
+def out_of_view(pymux, state):
+    "A window this client is not looking at. There is always one."
+    shown = in_view(pymux, state)
+    others = [w for w in pymux.arrangement.windows if w is not shown]
+    assert others, "the fixture is meant to leave a window out of view"
+    return others[0]
+
+
+async def test_title_in_window_out_of_view_is_not_read(session):
+    """
+    The titlebars this client draws are its own window's. Another
+    window reaches its screen through `window-status-format`, which
+    `_get_status_tokens` already formats.
+    """
+    pymux, state, frames = session
+    other = out_of_view(pymux, state)
+
+    before = text(state)
+    other.panes[0].screen.titles.window = "a name nobody can see"
+
+    assert text(state) == before
+
+
+async def test_title_in_window_in_view_is_read(session):
+    "The control: the same title, in the window this client looks at."
+    pymux, state, frames = session
+    set_option(pymux, "pane-border-status", "on")
+
+    before = text(state)
+    in_view(pymux, state).panes[0].screen.titles.window = "a name in view"
+
+    assert text(state) != before
+
+
+async def test_window_list_still_carries_other_windows(session):
+    """
+    Narrowing the panes must not narrow the window list: a window that
+    is renamed still changes what every client draws.
+    """
+    pymux, state, frames = session
+    other = out_of_view(pymux, state)
+
+    before = text(state)
+    other.chosen_name = "renamed"
+
+    assert text(state) != before
+
+
+async def test_clock_in_window_out_of_view_asks_for_nothing(session):
+    "A clock that is not drawn is not a reason to draw."
+    pymux, state, frames = session
+    set_option(pymux, "full-screen", "on", state)
+    other = out_of_view(pymux, state)
+
+    pymux.refresh_what_time_moves()
+    frames.clear()
+
+    other.panes[0].clock_mode = True
+    pymux.refresh_what_time_moves()
+
+    assert frames == []
+
+
+# ----------------------------------------------------------------------
+# Test-mode pins the clock.
+#
+# The point is a screen that does not change while nobody types: with
+# the clock pinned, a picture of a pane cannot race the minute it was
+# taken in.
+
+
+async def test_clock_of_pane_shows_pinned_time(session):
+    pymux, state, frames = session
+    set_option(pymux, "full-screen", "on", state)
+    set_option(pymux, "test-mode", "on")
+    in_view(pymux, state).panes[0].clock_mode = True
+    pymux.refresh_what_time_moves()
+
+    said = text(state)
+    assert any("13:37" in part for part in said), said
+
+
+async def test_pinned_clock_asks_for_one_frame_and_then_no_more(session):
+    pymux, state, frames = session
+    set_option(pymux, "full-screen", "on", state)
+    set_option(pymux, "test-mode", "on")
+    in_view(pymux, state).panes[0].clock_mode = True
+
+    pymux.refresh_what_time_moves()
+    assert len(frames) == 1
+
+    frames.clear()
+    pymux.refresh_what_time_moves()
+    assert frames == []
+
+
+async def test_format_strings_show_pinned_date_and_pinned_time(session):
+    pymux, state, frames = session
+    set_option(pymux, "test-mode", "on")
+
+    said = format_pymux_string(pymux, "%H:%M on %d/%m in %Y")
+
+    assert said == "13:37 on 14/03 in %i" % datetime.date.today().year
+
+
+def test_clock_runs_on_while_test_mode_is_off():
+    """
+    The one test that wants the real clock.
+
+    `conftest.py` gives every server in this suite `test-mode` on, so
+    that a test which reads the time is the same test either side of a
+    second. This is what that default is a default of, so it says so
+    rather than taking it.
+    """
+    pymux = Pymux()
+    set_option(pymux, "test-mode", "off")
+    assert pymux.test_mode is False
+
+    now = pymux.displayed_now()
+    assert (now.hour, now.minute) == (datetime.datetime.now().hour, datetime.datetime.now().minute)
+
+
+def test_pinned_time_keeps_year_it_really_is():
+    pymux = Pymux()
+    set_option(pymux, "test-mode", "on")
+
+    now = pymux.displayed_now()
+
+    assert (now.hour, now.minute) == (13, 37)
+    assert (now.month, now.day) == (3, 14)
+    assert now.year == datetime.date.today().year

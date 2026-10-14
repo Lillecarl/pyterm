@@ -1,0 +1,593 @@
+"""
+What a keystroke costs pymux, in bytecode instructions.
+
+`checks.pymux-latency` says what a keystroke costs in milliseconds, and
+nothing judges it, because a millisecond belongs to the machine that
+read it. **This is the same path counted instead of timed**, so a
+number that goes up fails a build. Carl:
+
+> I know different instructions are differently expensive but
+> realistically "number go up = bad".
+
+## Three stages, and none of them was counted before
+
+`checks.ptterm-instructions` counts a parse and a widget's own render.
+`checks.pymux-frame` counts laying a window out and drawing it into a
+`Screen`. Between them they miss both ends of a keystroke:
+
+- **key**: a key press through the client's key processor, into the
+  binding, and out to the pane's pty. `Process.write_input` reaches
+  `os.write` with nothing scheduled in between, so this is the whole
+  path and not the start of one.
+- **parse**: the answer arriving, through `Stream.feed`, into the
+  screen. This one overlaps `ptterm-instructions`; it is here because
+  a keystroke's parse is one cell and a recording's is a megabyte,
+  and the two do not move together.
+- **render**: `Renderer.render`, which lays the window out, draws it,
+  **diffs it against the last frame** and writes the escape sequences.
+  Nothing counted the diff or the writing before this, and they are
+  the part a keystroke pays that a recording does not.
+
+## Two terminals, because a keystroke costs what the screen costs
+
+Every stage is measured twice: on a terminal of 80x24, and on one of
+342x74, which is a real session on a wide monitor. The render stage
+lays the window out and draws it cell by cell, so a budget at one size
+holds nothing at the other, and the wide one is where a person feels
+it. The bare budget names belong to the small terminal, so every
+number recorded before there were two still means what it meant.
+
+## Why it is deterministic, which is what makes it a gate
+
+**Nothing runs the event loop.** A loop exists because
+`KeyProcessor.process_keys` arms a flush timer, but it never turns,
+so the pane's program can never write to the screen and the frame
+cannot change under the measurement. Every byte on the screen got
+there from a call in this file.
+
+The clock is the other thing that moves by itself, so `status-right`
+is emptied: the default draws a time, and a frame drawn either side of
+a second is two different diffs.
+
+## What it says about the milliseconds
+
+The same work is timed as well, with the monitoring off, so the file
+reports both. Read them together:
+
+    instructions          what the work is, and a gate holds it
+    in-process time       what that work takes here, with no
+                          transport and no loop between the stages
+    checks.pymux-latency  what the whole keystroke takes, across
+                          three processes and an event loop
+
+**The gap between the last two is what an instruction count cannot
+see**: the socket, the loop's turns, and every moment nothing is
+running. If they are close, counting instructions is a fair proxy for
+latency and this gate protects it. If they are far apart, the
+difference is waiting, and Lillecarl/pymux#232 is the measurement for
+that.
+
+    nix build --file . checks.pymux-keystroke.run
+    less result/log
+    cp result/keystroke-budgets.txt pymux/tests/keystroke-budgets.txt
+"""
+
+from __future__ import annotations
+
+import io
+import os
+import re
+import sys
+import time
+from collections import Counter
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import anyio
+
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(1, str(Path(__file__).parent.parent))
+
+from instructions import count_instructions
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.key_binding.key_processor import KeyPress
+from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output.vt100 import Vt100_Output
+from recorded import how_to_record, moved, read_counts, write_list
+from session import Connection
+
+from pymux.main import Pymux
+
+#: The tool slot the walk below registers as. It is the one
+#: `instructions.py` uses, and the two never run at the same time.
+_TOOL = sys.monitoring.PROFILER_ID
+
+HERE = Path(__file__).parent
+
+#: The counts this check expects, one stage per line.
+BUDGETS = HERE / "keystroke-budgets.txt"
+
+#: How far a count may move before the check fails, as a percentage.
+DEFAULT_TOLERANCE = 5.0
+
+#: How many keystrokes the timing runs over. The instruction count
+#: needs one, because it is exact; a clock needs a few hundred.
+TIMED = int(os.environ.get("PYMUX_KEYSTROKE_TIMED") or 300)
+
+#: How many functions the log names for each stage. They are
+#: instrumentation and nothing judges them, so this is about what a
+#: person reads.
+WHERE = int(os.environ.get("PYMUX_KEYSTROKE_WHERE") or 12)
+
+#: A name to ask "who calls this" about, matched anywhere in the
+#: callee's qualified name. Empty asks nothing, and asking costs a
+#: second run of each stage. `who_calls` says why it is the only way
+#: to get the answer.
+#:
+#:     PYMUX_KEYSTROKE_CALLERS=Flag nix build --file . checks.pymux-keystroke.run
+#:     PYMUX_KEYSTROKE_CENSUS=1 nix build --file . checks.pymux-keystroke.run
+CALLERS = os.environ.get("PYMUX_KEYSTROKE_CALLERS", "")
+
+#: Whether to count the containers the per-key walk crosses.
+#:
+#: `_CombinedRegistry._key_bindings` calls `Layout.find_all_controls`
+#: on every key press, to ask whether the set of controls is still the
+#: one it cached against. That walk is the largest single item in the
+#: key stage, and what it costs is the size of the tree rather than
+#: anything a person did. Lillecarl/pymux#317.
+#:
+#: `tree` prints the shape as well as the counts, which is what says
+#: *where* a container sits rather than how many there are.
+CENSUS = os.environ.get("PYMUX_KEYSTROKE_CENSUS", "")
+
+#: The terminals every stage is measured on, and the name each one
+#: puts on its budget lines. The unnamed one owns the bare names, so
+#: every budget recorded before there were two of these still means
+#: what it meant.
+#:
+#: **A keystroke costs what the screen costs.** The render stage lays
+#: the window out and draws it cell by cell, so a budget at one size
+#: says nothing about another, and a wide terminal is where a person
+#: feels it. Measured with the sampling profiler, one pane, 100 frames:
+#: a frame of 80x24 takes 6.9 ms and a frame of 342x74 takes 22.2 ms,
+#: and four panes at 342x74 take 19.5 ms -- the same screen divided
+#: differently costs the same, because the cells are what is paid for.
+#: Lillecarl/pymux#434.
+SIZES = {
+    "": Size(rows=24, columns=80),
+    "wide": Size(rows=74, columns=342),
+}
+
+#: The order a keystroke happens in, which is the order everything
+#: here measures in. A press, the program's answer, and the frame that
+#: shows it.
+ORDER = ("key", "parse", "render")
+
+
+def on(stage, size_name):
+    "What one stage on one terminal is called, in the log and the budgets."
+    return "%s (%s)" % (stage, size_name) if size_name else stage
+
+
+def every_measurement():
+    "Every stage on every terminal, grouped by terminal."
+    return [on(stage, name) for name in SIZES for stage in ORDER]
+
+
+#: What the program in the pane answers with, and what a person typed.
+#: One cell either way, which is the steady state a keystroke is: a
+#: frame where one thing changed.
+ANSWER = "~"
+KEY = "a"
+
+
+@asynccontextmanager
+async def create_client(size):
+    """
+    One session, one pane and one client.
+
+    The pane runs the default shell, which writes nothing on its own,
+    so no turn of the loop changes what a stage draws or counts.
+    """
+    pymux = Pymux()
+    async with pymux.running():
+        try:
+            with create_pipe_input() as pipe:
+                output = Vt100_Output(stdout=io.StringIO(), get_size=lambda: size)
+                state = pymux.add_client(
+                    output=output,
+                    input=pipe,
+                    color_depth=ColorDepth.DEPTH_8_BIT,
+                    connection=Connection(),
+                )
+
+                with set_app(state.app):
+                    # What attaching brings: the bindings, and the pane
+                    # the keystroke lands in.
+                    await pymux.startup()
+                    # The clock moves by itself, and a frame drawn either
+                    # side of a second is two different diffs.
+                    #
+                    # **`test-mode` pins it rather than emptying it.** This
+                    # used to set `status-right` to nothing, which measured
+                    # a status line no person has: the clock is the widest
+                    # thing on the right of it and the diff of a frame is
+                    # what this counts.
+                    pymux.handle_command("set-option test-mode on")
+
+                yield pymux, state
+        finally:
+            pymux.stop()
+
+
+def stages(pymux, state):
+    """
+    The three pieces of a keystroke, each as a callable.
+
+    They are separate because they answer different questions. A parse
+    that grew and a diff that grew are not the same fault and do not
+    have the same fix.
+    """
+    pane = pymux.arrangement.get_active_window().active_pane
+    stream = pane.terminal.terminal_control.stream
+    processor = state.app.key_processor
+
+    def key():
+        processor.feed(KeyPress(KEY, KEY))
+        processor.process_keys()
+
+    def parse():
+        stream.feed(ANSWER)
+
+    def render():
+        state.app.renderer.render(state.app, state.app.layout)
+
+    return {"key": key, "parse": parse, "render": render}
+
+
+def settle(state, stages):
+    """
+    Run a whole keystroke before anything is counted.
+
+    **Every stage of this is once-only work that a keystroke does not
+    pay**, and each one was found by an arithmetic that did not add up.
+
+    The renderer holds the last frame and diffs against it, and holds
+    nothing at all to begin with, so the first render paints the whole
+    screen rather than one cell.
+
+    The first key press builds the merged key bindings for the whole
+    layout, and `_CombinedRegistry` then keeps them under the controls
+    it found. Counted without this, the press came to 266,429
+    instructions and 468 microseconds -- a rate of half a billion
+    instructions a second, where the render in the same run says 132
+    million. A number that fast is not a measurement, it is two
+    different pieces of work being compared.
+
+    A budget on the cold path would also be a budget that a person
+    pays once a session and never again, which is not what this file
+    is for.
+    """
+    with set_app(state.app):
+        for name in ORDER:
+            if name in stages:
+                stages[name]()
+
+
+def where_instructions_are(work, most=WHERE):
+    """
+    Which functions the instructions of one stage went to.
+
+    `count_instructions` gives a total, and a total says a stage grew
+    without saying where. This is the same walk keyed by the code
+    object, so a number a person does not like points at a function.
+    `measure_footprint.py` does the same thing for bytes.
+
+    It is instrumentation and nothing judges it: the budgets hold the
+    totals, because a total is what a change to any one of these
+    moves.
+    """
+    counted: Counter = Counter()
+
+    def one_instruction(code, offset):
+        counted[code] += 1
+
+    sys.monitoring.use_tool_id(_TOOL, "pymux-keystroke-where")
+    try:
+        sys.monitoring.register_callback(_TOOL, sys.monitoring.events.INSTRUCTION, one_instruction)
+        sys.monitoring.set_events(_TOOL, sys.monitoring.events.INSTRUCTION)
+        try:
+            work()
+        finally:
+            sys.monitoring.set_events(_TOOL, 0)
+            sys.monitoring.register_callback(_TOOL, sys.monitoring.events.INSTRUCTION, None)
+    finally:
+        sys.monitoring.free_tool_id(_TOOL)
+
+    return [(_where(code), count) for code, count in counted.most_common(most)]
+
+
+def who_calls(work, target: str, most=WHERE):
+    """
+    Which functions called anything whose name holds `target`, and how
+    often.
+
+    **`where_instructions_are` cannot answer this, and neither can a
+    sampler.** The instruction count is keyed by the code object that
+    *runs*, so it says `enum.Flag.__and__` costs 533 and never says who
+    asked. `checks.pymux-profile` samples a wall clock, and a function
+    this small never lands in a sample. Lillecarl/pymux#359.
+
+    It watches `PY_START`, which fires as the matching function begins,
+    and reads the caller off the stack.
+
+    **`CALL` is the wrong event, and the reason is worth keeping.**
+    `CALL` hands over the caller's code object directly, which looks
+    like the answer -- but `a & b` on a `Flag` is a `BINARY_OP` and not
+    a call instruction, so nothing fires and the operator the question
+    is about is invisible. Asked that way, the only callers this found
+    were `enum`'s own.
+
+    **A function that misses is switched off and stays off.**
+    `PY_START` fires for every Python function a keystroke enters, so
+    a miss returns `DISABLE`, which turns that code object off for the
+    rest of the run. The match is on the code object, so a function
+    that misses once misses always: nothing is lost.
+
+    It uses `COVERAGE_ID` rather than `PROFILER_ID`, which
+    `where_instructions_are` takes: `use_tool_id` raises when an id is
+    already held, and two instruments that cannot be nested is a
+    landmine for whoever nests them.
+    """
+    counted: Counter = Counter()
+
+    def one_start(code, offset):
+        if target not in code.co_qualname:
+            return sys.monitoring.DISABLE
+
+        # Frame 0 is this callback and frame 1 is the function that
+        # just started, so the caller is one further back.
+        caller = sys._getframe(1).f_back
+        counted[(caller.f_code if caller else None, code.co_qualname)] += 1
+        return None
+
+    tool = sys.monitoring.COVERAGE_ID
+    started = sys.monitoring.events.PY_START
+    sys.monitoring.use_tool_id(tool, "pymux-keystroke-callers")
+    try:
+        sys.monitoring.register_callback(tool, started, one_start)
+        sys.monitoring.set_events(tool, started)
+        try:
+            work()
+        finally:
+            sys.monitoring.set_events(tool, 0)
+            sys.monitoring.register_callback(tool, started, None)
+    finally:
+        sys.monitoring.free_tool_id(tool)
+
+    return [
+        ("%s -> %s" % ("?" if code is None else _where(code), name), count)
+        for (code, name), count in counted.most_common(most)
+    ]
+
+
+def _where(code) -> str:
+    """
+    A function, as a reader can use it.
+
+    A path in the store is a hundred characters of hash before the part
+    that says which file, so only the package and what is under it
+    stays.
+    """
+    parts = Path(code.co_filename).parts
+    parts = parts[parts.index("site-packages") + 1 :] if "site-packages" in parts else parts[-2:]
+    return "%s:%d %s" % ("/".join(parts), code.co_firstlineno, code.co_qualname)
+
+
+def counted(state, stages):
+    "The instructions each stage takes. Exact, and the same every run."
+    found = {}
+    with set_app(state.app):
+        for name, work in stages.items():
+            found[name] = count_instructions(work)
+    return found
+
+
+def timed(state, stages, rounds):
+    """
+    The same stages on a clock, with the monitoring off.
+
+    **Not under `count_instructions`.** `sys.monitoring` calls back
+    into Python on every instruction and turns the interpreter's
+    specialisation off, so work measured while it counts takes many
+    times longer than the same work alone.
+
+    **A whole cycle each round, in the order a keystroke happens in.**
+    This ran each stage three hundred times in a row at first, and the
+    key came out ten times cheaper than the instruction count said it
+    was. The reason is the answer to Lillecarl/pymux#233:
+    `_CombinedRegistry` caches the merged key bindings under the
+    controls of the layout, and a render rebuilds those, so the press
+    after a render pays for the merge and the press after a press does
+    not. Three hundred presses in a row measure the second kind, and a
+    person only ever makes the first.
+    """
+    order = [name for name in ORDER if name in stages]
+    totals = {name: 0.0 for name in order}
+
+    with set_app(state.app):
+        # A warm round, so that nothing is imported or branched for
+        # the first time inside the clock.
+        for name in order:
+            stages[name]()
+
+        for _ in range(rounds):
+            for name in order:
+                started = time.perf_counter()
+                stages[name]()
+                totals[name] += time.perf_counter() - started
+
+    return {name: totals[name] / rounds * 1e6 for name in order}
+
+
+def write_budgets(counts):
+    out = os.environ.get("PYMUX_KEYSTROKE_OUT", "")
+    if not out:
+        return
+    header = (
+        "\n".join(
+            [
+                "# What one keystroke costs pymux, in bytecode instructions.",
+                "# `tests/measure_keystroke.py` says what each stage covers",
+                "# and why the number is the same on every machine.",
+                "#",
+                *how_to_record("pymux-keystroke", "keystroke-budgets.txt", "pymux/tests/keystroke-budgets.txt"),
+            ]
+        )
+        + "\n"
+    )
+    write_list(Path(out) / "keystroke-budgets.txt", header, counts.items())
+
+
+def the_tree_a_key_press_walks(layout):
+    """
+    Every container `find_all_controls` crosses, by class, and how many
+    of them answer with no children.
+
+    The walk is the same one `Layout.find_all_controls` does. It is
+    repeated here rather than called, because the question is what the
+    walk crosses and not what it returns: a container that holds no
+    window costs the walk exactly as much as one that does.
+    Lillecarl/pymux#317.
+    """
+    counted = Counter()
+    childless = Counter()
+    shape = []
+    todo = [(layout.container, 0)]
+    crossed = 0
+
+    while todo:
+        node, depth = todo.pop()
+        crossed += 1
+        counted[type(node).__name__] += 1
+        shape.append((depth, type(node).__name__))
+        children = node.get_children()
+        if children:
+            todo.extend((child, depth + 1) for child in reversed(children))
+        else:
+            childless[type(node).__name__] += 1
+
+    return crossed, counted, childless, shape
+
+
+async def main() -> int:
+    include = os.environ.get("PYMUX_KEYSTROKE_INCLUDE", "")
+    tolerance = float(os.environ.get("PYMUX_KEYSTROKE_TOLERANCE") or DEFAULT_TOLERANCE)
+
+    counts, microseconds, where, callers = {}, {}, {}, {}
+    census = None
+
+    # One client per terminal. A client's size is fixed when it
+    # attaches, and a resize is a different measurement from a
+    # keystroke, so each size gets a session of its own.
+    for size_name, size in SIZES.items():
+        async with create_client(size) as (pymux, state):
+            picked = stages(pymux, state)
+            if include:
+                picked = {n: w for n, w in picked.items() if re.search(include, n)}
+            if not picked:
+                print("Nothing matched %r." % (include,))
+                return 1
+
+            settle(state, picked)
+            for stage, count in counted(state, picked).items():
+                counts[on(stage, size_name)] = count
+            for stage, each in timed(state, picked, TIMED).items():
+                microseconds[on(stage, size_name)] = each
+
+            if WHERE:
+                with set_app(state.app):
+                    for stage, work in picked.items():
+                        where[on(stage, size_name)] = where_instructions_are(work)
+
+            if CALLERS:
+                with set_app(state.app):
+                    for stage, work in picked.items():
+                        callers[on(stage, size_name)] = who_calls(work, CALLERS)
+
+            # The tree is the same shape on every terminal, so it is
+            # asked once.
+            if CENSUS and census is None:
+                with set_app(state.app):
+                    census = the_tree_a_key_press_walks(state.app.layout)
+
+    print("\n--- what one keystroke costs ---")
+    print("%-18s %14s %12s" % ("", "instructions", "in-process"))
+    for name in every_measurement():
+        if name in counts:
+            print("%-18s %14d %10.1f us" % (name, counts[name], microseconds[name]))
+
+    print("%-18s %14d %10.1f us" % ("all of it", sum(counts.values()), sum(microseconds.values())))
+
+    for name in every_measurement():
+        if name in where:
+            print("\n--- where the instructions of %s are ---" % (name,))
+            for place, count in where[name]:
+                print("  %8d  %s" % (count, place))
+
+    for name in every_measurement():
+        if name in callers:
+            print("\n--- who calls %r during %s ---" % (CALLERS, name))
+            if not callers[name]:
+                print("  nothing")
+            for place, count in callers[name]:
+                print("  %8d  %s" % (count, place))
+
+    if census is not None:
+        crossed, counted_by_class, childless, shape = census
+        print("\n--- the tree every key press walks ---")
+        print("  %d containers, and %d of them hold nothing" % (crossed, sum(childless.values())))
+        print()
+        print("  %8s %8s  %s" % ("crossed", "leaves", "class"))
+        for name, count in counted_by_class.most_common():
+            print("  %8d %8d  %s" % (count, childless[name], name))
+        if CENSUS == "tree":
+            print("\n--- and what it is the shape of ---")
+            for depth, name in shape:
+                print("  %s%s" % ("  " * depth, name))
+
+    print(
+        "\n**The in-process time is not the latency.** It holds no socket,"
+        "\nno client process and no turn of the event loop. What"
+        "\n`checks.pymux-latency` measures across three processes minus this"
+        "\nis what an instruction count cannot see. Lillecarl/pymux#232."
+    )
+
+    write_budgets(counts)
+
+    budgets = read_counts(BUDGETS)
+    over = []
+    for name, count in sorted(counts.items()):
+        budget = budgets.get(name)
+        if budget is None:
+            over.append("%s has no budget, and this run took %d" % (name, count))
+            continue
+        distance = abs(moved(count, budget))
+        if distance > tolerance:
+            over.append("%s takes %d, and its budget is %d: %.1f%% away" % (name, count, budget, distance))
+
+    if over:
+        print("\n--- past the budget ---")
+        for line in over:
+            print(line)
+        print("\n`tests/measure_keystroke.py` says how to record a new budget.")
+        return 1
+
+    print("\nEvery stage is within %.1f%% of its budget." % (tolerance,))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(anyio.run(main))

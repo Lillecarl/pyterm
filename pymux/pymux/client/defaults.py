@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+__all__ = [
+    "create_client",
+    "is_ssh_url",
+    "list_clients",
+]
+
+#: What `-S` starts with when it names a machine rather than a path.
+SCHEME = "ssh://"
+
+
+def is_ssh_url(name: str | None) -> bool:
+    "Whether this `-S` names a machine."
+    return bool(name) and str(name).startswith(SCHEME)
+
+
+def create_client(socket_name):
+    # A machine, and not a path on this one. The import is here so that
+    # a server never loads asyncssh: only a client that was given an
+    # `ssh://` address needs it. Lillecarl/pymux#90.
+    if is_ssh_url(socket_name):
+        from .ssh import SshClient
+
+        return SshClient(socket_name)
+
+    from .posix import PosixClient
+
+    return PosixClient(socket_name)
+
+
+def list_clients():
+    from .posix import list_clients
+
+    return list_clients()

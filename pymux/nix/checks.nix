@@ -1,0 +1,1520 @@
+# The suites that judge pymux.
+#
+# It declares its own inputs, so `default.nix` holds the package and does not
+# carry the X server, the two terminal emulators, the compositor and the
+# screenshot tools that only a test needs.
+#
+# `testSources` comes from `default.nix`. A pymux suite runs against the
+# source there, where pyte and ptterm run theirs against the installed
+# package.
+#
+# The entry of terminfo that a pane is told about needs no input either. It
+# rides inside `pyte`, which is in `testEnv` already.
+#
+# `nix/suite.nix` says why a check is two derivations.
+{
+  # The python every suite runs on: a virtualenv of pymux, everything pymux
+  # depends on, and its `test` extra. `default.nix` builds it from
+  # `pyproject.toml`, so what a suite may import is what the package
+  # declares, and there is no second dependency list here to fall out of
+  # step with the first. Lillecarl/pymux#319.
+  testEnv,
+  # testEnv with the `wayland` extra, for the one suite that needs it.
+  waylandTestEnv,
+  # ptterm as nixpkgs built it, and not the copy inside `testEnv`. The
+  # suites borrow tools from its passthru, and a package lifted into the
+  # builders set keeps its files and not its passthru.
+  ptterm,
+  # The base16 collection, converted: the themes gallery photographs
+  # a base16 theme, and the pane answers with its palette.
+  base16-schemes-json,
+  # The reader of the clipboard fence: wl-paste on the compositor the
+  # seat started, xclip on the X server it started.
+  wl-clipboard,
+  xclip,
+  waylandProtocols,
+  callPackage,
+  xorg-server,
+  xterm,
+  xdotool,
+  # sway-unwrapped, not sway: the wrapper of the second falls back to
+  # dbus-run-session when it finds no session bus, and the sandbox has
+  # neither a bus nor the daemon's configuration. The seat runs no
+  # session anyway.
+  sway-unwrapped,
+  swaybg,
+  foot,
+  kitty,
+  mesa,
+  vttest,
+  # What the scenario check drives, and the model API claude-code talks to.
+  yazi,
+  # The Wayland programs the window pane pictures show.
+  weston,
+  mpv,
+  wev,
+  file,
+  claude-code,
+  aimock,
+  grim,
+  imagemagick,
+  makeFontsConf,
+  runtimeShell,
+  dejavu_fonts,
+  # The CJK glyphs DejaVu does not have, so a wide character draws as
+  # itself and not as a box. Lillecarl/pymux#548.
+  wqy_microhei,
+  perl,
+  # The PipeWire that `checks.pymux-audio` plays through and records
+  # from. Null on a system without it. Lillecarl/pymux#657.
+  pipewire ? null,
+  wireplumber ? null,
+  # paplay and parecord: most programs reach a speaker through Pulse.
+  pulseaudio,
+  # The programs that animate. A pane nobody looks at should cost the
+  # parsing of its bytes and nothing else, and only a real terminal
+  # program writes the way that measures it: a screenful at a steady
+  # rate, forever. A writer in a `python -c` loop does not reproduce
+  # the fault these caught. Lillecarl/pymux#253.
+  # A real sshd, for the one suite that does not want a stand-in. The
+  # `ssh://` client is tested against asyncssh on both sides
+  # everywhere else, which cannot say whether openssh agrees.
+  # Lillecarl/pymux#436.
+  openssh,
+  # What lets sshd accept the sandbox's user: a passwd database in
+  # front of the one whose shell is `/noshell`.
+  nss_wrapper,
+  cmatrix,
+  tty-clock,
+  nyancat,
+  pipes,
+  # The compiler, reading the declarations that ship with
+  # `<pymux-pane>` as a consumer's compiler reads them, and the runtime
+  # that runs what the element decides about a keydown. `default.nix`
+  # takes the compiler as well, to build the element. Neither is in
+  # anything pymux installs, because a browser brings its own.
+  nodejs,
+  typescript,
+  testSources,
+  # The static checker of the `types` check. It reads the sources and
+  # the interpreter's site-packages and runs nothing itself.
+  pyrefly,
+  # The linter and formatter that the `ruff` check runs.
+  ruff,
+}:
+let
+  inherit (callPackage ./suite.nix { }) suite run;
+
+  # The conformance suite belongs to ptterm: it judges an emulator, and the
+  # pane is where pymux puts one. ptterm carries the package and runs the
+  # same suite on a pty of its own, so the two lists can be compared.
+  inherit (ptterm) esctest2;
+
+  # The test files of libvterm, and libvterm's own program that answers
+  # them. ptterm carries both for the same reason it carries the
+  # conformance suite: they judge an emulator, and a pane is where pymux
+  # puts one. Here the harness is the judge and pymux is in the middle.
+  inherit (ptterm) vtermSuite;
+
+  # The reference tests of Alacritty, and the judge that reads one. The
+  # same reasoning again: Alacritty judges an emulator, ptterm carries it
+  # for the panel, and a pane is where pymux puts an emulator. `judges`
+  # holds the Rust crate that both the panel and that judge are built
+  # from.
+  inherit (ptterm) alacrittySuite judges;
+
+  # The walker that drives vttest. vttest is interactive: it draws a screen
+  # and waits for a key, so nothing outside it can tell a screen that is
+  # finished from one that is still arriving. The walker can, because it
+  # owns the pty vttest runs on. It belongs to ptterm, which is what it
+  # models, and here it is the program that gets photographed.
+  inherit (ptterm) vttestWalker;
+
+  # Knobs that reach the evaluation through the environment. They work
+  # because a build from a file evaluates impurely; a flake would see none of
+  # them.
+
+  # How long one test may take before it is treated as stuck.
+  # `tests/conftest.py` then writes every thread's stack and ends the run,
+  # so the log and the status are still written.
+  #
+  # **A hang used to cost a whole build and say nothing.** The build
+  # timeout kills the sandbox, so the log of the run is never written
+  # and nobody learns which test stopped. Measured while moving the
+  # server to anyio: 28 minutes of a wedged run told nothing, and the
+  # same hang under this told everything in 45 seconds.
+  # Lillecarl/pymux#87. pytest's own `faulthandler_timeout` dumps and
+  # does not exit, which is why the conftest arms it. Lillecarl/pymux#482.
+  #
+  # The slowest test of this suite takes under ten seconds.
+  # `PYMUX_HANG_SECONDS` changes it for one run.
+  hangIsSeconds =
+    let
+      value = builtins.getEnv "PYMUX_HANG_SECONDS";
+    in
+    if value == "" then 120 else builtins.fromJSON value;
+
+  # What pytest runs, for instance
+  # `PYMUX_TESTS=tests/test_sixel_encoder.py nix build --file . checks.pymux-unit`.
+  selection =
+    let
+      value = builtins.getEnv "PYMUX_TESTS";
+    in
+    if value == "" then "tests" else value;
+
+  # How many of the slowest test phases the unit suite names. `0` names
+  # every one, for instance
+  # `PYMUX_DURATIONS=0 nix build --file . checks.pymux-unit.run`.
+  durations =
+    let
+      value = builtins.getEnv "PYMUX_DURATIONS";
+    in
+    if value == "" then "60" else value;
+
+  # How many of the costliest unit tests by CPU the run names, and the
+  # files they are in. Empty names none, for instance
+  # `PYMUX_CPU=40 nix build --file . checks.pymux-unit.run`.
+  cpuNames = builtins.getEnv "PYMUX_CPU";
+
+  # Which of the end to end checks run, comma separated and without the
+  # `check_` in front, for instance
+  # `PYMUX_PTY_CHECKS=pane_that_changes_nothing nix build --file . checks.pymux-pty`.
+  # A whole run starts seventeen servers, and hunting a check that is
+  # red by luck means running that one check many times.
+  ptyChecks = builtins.getEnv "PYMUX_PTY_CHECKS";
+
+  # A pytest `-k` expression for the openssh suite, for instance
+  # `PYMUX_OPENSSH_TESTS=narrows nix build --file . checks.pymux-openssh`.
+  # Several builds at once with expressions that pick the same test,
+  # `narrows or a1` and `narrows or a2`, are how a race that needs load
+  # is run under it. Lillecarl/pymux#549.
+  openSshTests = builtins.getEnv "PYMUX_OPENSSH_TESTS";
+
+  # Which conformance tests run. It is a regular expression that the suite
+  # matches against "Class.method", for instance
+  # `PYMUX_ESCTEST_INCLUDE=BSTests nix build --file . checks.pymux-esctest`.
+  # Which of libvterm's test files run, for instance
+  # `PYMUX_VTERM_INCLUDE=unicode nix build --file . checks.pymux-vterm`.
+  vtermInclude =
+    let
+      value = builtins.getEnv "PYMUX_VTERM_INCLUDE";
+    in
+    if value == "" then ".*" else value;
+
+  # Write every line of the exchange between the three programs into the
+  # log, for instance
+  # `PYMUX_VTERM_TRACE=1 nix build --file . checks.pymux-vterm.run`.
+  vtermTrace = builtins.getEnv "PYMUX_VTERM_TRACE";
+
+  # How long one of libvterm's files may take. A hang says nothing
+  # until the wait ends, so chasing one means cutting the wait down:
+  # `PYMUX_VTERM_FILE_TIMEOUT=60 PYMUX_VTERM_TRACE=1 nix build --file .
+  # checks.pymux-vterm.run`.
+  vtermFileTimeout = builtins.getEnv "PYMUX_VTERM_FILE_TIMEOUT";
+
+  # Which of Alacritty's reference tests run, for instance
+  # `PYMUX_ALACRITTY_INCLUDE=vttest nix build --file . checks.pymux-alacritty`.
+  alacrittyInclude =
+    let
+      value = builtins.getEnv "PYMUX_ALACRITTY_INCLUDE";
+    in
+    if value == "" then ".*" else value;
+
+  # Write what the pane and the judge saw into the log, for instance
+  # `PYMUX_ALACRITTY_TRACE=1 nix build --file . checks.pymux-alacritty.run`.
+  alacrittyTrace = builtins.getEnv "PYMUX_ALACRITTY_TRACE";
+
+  # Keep the bytes pymux emitted for each test, for instance
+  # `PYMUX_ALACRITTY_WIRE=1 nix build --file . checks.pymux-alacritty.run`.
+  # They land in `result/wire/<name>.bin`.
+  alacrittyWire = builtins.getEnv "PYMUX_ALACRITTY_WIRE";
+
+  esctestInclude =
+    let
+      value = builtins.getEnv "PYMUX_ESCTEST_INCLUDE";
+    in
+    if value == "" then ".*" else value;
+
+  # Which picture fixtures run. It is a piece of a name, for instance
+  # `PYMUX_PICTURES=underlines nix build --file . checks.pymux-pictures`.
+  pictureSelection = builtins.getEnv "PYMUX_PICTURES";
+
+  # Which image scenarios run. It is a piece of a name, for instance
+  # `PYMUX_IMAGE_EXERCISE=move nix build --file . checks.pymux-image-exercise`.
+  exerciseSelection = builtins.getEnv "PYMUX_IMAGE_EXERCISE";
+
+  # Which shapes the frame measurement takes, and how far a count may
+  # move from its budget, for instance
+  # `PYMUX_FRAME_INCLUDE=strip nix build --file . checks.pymux-frame`.
+  frameInclude = builtins.getEnv "PYMUX_FRAME_INCLUDE";
+  frameTolerance = builtins.getEnv "PYMUX_FRAME_TOLERANCE";
+
+  # How big a window the profiler draws, and how many frames of it, for
+  # instance
+  # `PYMUX_PROFILE_PANES=16 nix build --file . checks.pymux-profile.run`.
+  profilePanes = builtins.getEnv "PYMUX_PROFILE_PANES";
+  profileFrames = builtins.getEnv "PYMUX_PROFILE_FRAMES";
+  profileRows = builtins.getEnv "PYMUX_PROFILE_ROWS";
+  profileColumns = builtins.getEnv "PYMUX_PROFILE_COLUMNS";
+  profilePhases = builtins.getEnv "PYMUX_PROFILE_PHASES";
+  # The real program the animated phase runs, and for how long, for
+  # instance
+  # `PYMUX_PROFILE_ANIMATED="cmatrix -u 2" PYMUX_PROFILE_ANIMATED_SECONDS=5
+  #  nix build --file . checks.pymux-profile.run`.
+  profileAnimated = builtins.getEnv "PYMUX_PROFILE_ANIMATED";
+  profileAnimatedSeconds = builtins.getEnv "PYMUX_PROFILE_ANIMATED_SECONDS";
+  # How the scroll phase moves (`redraw` or `scroll`) and whether what
+  # it scrolls is styled, for instance
+  # `PYMUX_PROFILE_SCROLL_MODE=scroll PYMUX_PROFILE_SCROLL_STYLED=0
+  #  nix build --file . checks.pymux-profile.run`.
+  profileScrollMode = builtins.getEnv "PYMUX_PROFILE_SCROLL_MODE";
+  profileScrollStyled = builtins.getEnv "PYMUX_PROFILE_SCROLL_STYLED";
+  profileScrollStart = builtins.getEnv "PYMUX_PROFILE_SCROLL_START";
+  profileScrollAtEnd = builtins.getEnv "PYMUX_PROFILE_SCROLL_AT_END";
+  # What the emit phase writes (`wide`, `broken`, `alt-wide` or
+  # `alt-broken`), how many lines each burst holds, and whether they
+  # are styled, for instance
+  # `PYMUX_PROFILE_EMIT_MODE=wide PYMUX_PROFILE_EMIT_LINES=89
+  #  nix build --file . checks.pymux-profile.run`.
+  profileEmitMode = builtins.getEnv "PYMUX_PROFILE_EMIT_MODE";
+  profileEmitLines = builtins.getEnv "PYMUX_PROFILE_EMIT_LINES";
+  profileEmitStyled = builtins.getEnv "PYMUX_PROFILE_EMIT_STYLED";
+  # Whether the profiler shows the frames the default view hides,
+  # which is where a hot path hides when it is made of many small
+  # functions, for instance `PYMUX_PROFILE_SHOW_ALL=1
+  # nix build --file . checks.pymux-profile.run`.
+  profileShowAll = builtins.getEnv "PYMUX_PROFILE_SHOW_ALL";
+  # Whether each phase leaves what it wrote to the terminal beside its
+  # profile, as `<phase>.wire`, for instance `PYMUX_PROFILE_WIRE=1
+  # nix build --file . checks.pymux-profile.run`.
+  profileWire = builtins.getEnv "PYMUX_PROFILE_WIRE";
+
+  # Which animating programs the busy check runs, for how long each,
+  # and the most of one core a background pane may take. One of them
+  # is
+  # `PYMUX_BUSY_PROGRAMS=cmatrix nix build --file . checks.pymux-busy.run`.
+  busyPrograms = builtins.getEnv "PYMUX_BUSY_PROGRAMS";
+  busySeconds = builtins.getEnv "PYMUX_BUSY_SECONDS";
+  busyCeiling = builtins.getEnv "PYMUX_BUSY_CEILING";
+  busyCaps = builtins.getEnv "PYMUX_BUSY_CAPS";
+
+  # How much work the leak check does, and which recordings it feeds.
+  # A leak shows at any volume, so the gate feeds a little: two rounds
+  # of eight panes at 128 kB each. A few hundred megabytes is
+  # `PYMUX_LEAKS_BYTES=1000000 PYMUX_LEAKS_ROUNDS=20 nix build --file . checks.pymux-leaks`.
+  leaksRounds = builtins.getEnv "PYMUX_LEAKS_ROUNDS";
+  leaksPanes = builtins.getEnv "PYMUX_LEAKS_PANES";
+  leaksInclude = builtins.getEnv "PYMUX_LEAKS_INCLUDE";
+  leaksTolerance = builtins.getEnv "PYMUX_LEAKS_TOLERANCE";
+  leaksBytes = builtins.getEnv "PYMUX_LEAKS_BYTES";
+  leaksTrace = builtins.getEnv "PYMUX_LEAKS_TRACE";
+  leaksRoute = builtins.getEnv "PYMUX_LEAKS_ROUTE";
+  leaksProfile = builtins.getEnv "PYMUX_LEAKS_PROFILE";
+
+  # How many keystrokes the latency measurement takes, how far apart,
+  # and over which route.
+  # `PYMUX_LATENCY_SAMPLES=500 nix build --file . checks.pymux-latency.run`.
+  # What one keystroke costs in bytecode, and how far a stage may move
+  # before the gate fails.
+  # `PYMUX_KEYSTROKE_INCLUDE=render nix build --file . checks.pymux-keystroke`.
+  keystrokeInclude = builtins.getEnv "PYMUX_KEYSTROKE_INCLUDE";
+  keystrokeTolerance = builtins.getEnv "PYMUX_KEYSTROKE_TOLERANCE";
+  keystrokeTimed = builtins.getEnv "PYMUX_KEYSTROKE_TIMED";
+  # A name to ask "who calls this" about. `tests/measure_keystroke.py`
+  # says why an instruction count cannot answer it.
+  keystrokeCallers = builtins.getEnv "PYMUX_KEYSTROKE_CALLERS";
+  # How many functions each stage names, and whether to count the
+  # containers the per-key walk crosses. Lillecarl/pymux#317.
+  keystrokeWhere = builtins.getEnv "PYMUX_KEYSTROKE_WHERE";
+  keystrokeCensus = builtins.getEnv "PYMUX_KEYSTROKE_CENSUS";
+
+  latencySamples = builtins.getEnv "PYMUX_LATENCY_SAMPLES";
+  latencyPace = builtins.getEnv "PYMUX_LATENCY_PACE";
+  latencyRoute = builtins.getEnv "PYMUX_ROUTE";
+
+  # The terminal a round trip is measured on. A round trip carries a
+  # frame, and a frame costs what the screen costs.
+  # `PYMUX_LATENCY_ROWS=74 PYMUX_LATENCY_COLUMNS=342 nix build --file . checks.pymux-latency.run`.
+  # Lillecarl/pymux#434.
+  latencyRows = builtins.getEnv "PYMUX_LATENCY_ROWS";
+  latencyColumns = builtins.getEnv "PYMUX_LATENCY_COLUMNS";
+
+  # How many keystrokes the turn count takes, how far apart, and how
+  # many of them name the callback of every turn.
+  # `PYMUX_TURNS_SAMPLES=1000 nix build --file . checks.pymux-turns.run`.
+  turnsSamples = builtins.getEnv "PYMUX_TURNS_SAMPLES";
+  turnsPace = builtins.getEnv "PYMUX_TURNS_PACE";
+  turnsTrace = builtins.getEnv "PYMUX_TURNS_TRACE";
+
+  # Which item of vttest's main menu gets photographed, and in which
+  # terminals, for instance
+  # `PYMUX_VTTEST_INCLUDE='^9 ' nix build --file . checks.pymux-vttest-pictures.run`.
+  # The whole of vttest is five hundred screens and each one is
+  # photographed twice, so the default is one item and one terminal.
+  vttestInclude =
+    let
+      value = builtins.getEnv "PYMUX_VTTEST_INCLUDE";
+    in
+    if value == "" then "^4 " else value;
+
+  # Which pictures of pymux's own chrome to take, and in which
+  # terminals, for instance
+  # `PYMUX_CHROME=palette nix build --file . checks.pymux-chrome-pictures`.
+  # Every fixture in every terminal by default: there are six of them
+  # and each one is a single picture, where the comparison check takes
+  # two of everything.
+  chromeSelection = builtins.getEnv "PYMUX_CHROME";
+  chromeTerminals = builtins.getEnv "PYMUX_CHROME_TERMINALS";
+
+  # The same two, by exact name and comma separated. They beat the
+  # substrings: three fixtures that share no substring are what a probe
+  # of the judge asks for. Lillecarl/pymux#365.
+  chromeList = builtins.getEnv "PYMUX_CHROME_LIST";
+  chromeTerminalsList = builtins.getEnv "PYMUX_CHROME_TERMINALS_LIST";
+
+  # `render-mode` for every chrome fixture. "both" takes each fixture
+  # optimized and reference and fails it unless the two pictures are
+  # the same pixels, for instance
+  # `PYMUX_CHROME_RENDER_MODE=both nix build --file . checks.pymux-chrome-pictures`.
+  chromeRenderMode = builtins.getEnv "PYMUX_CHROME_RENDER_MODE";
+
+  # The window pane pictures to take, by fixture name. Every one when
+  # nothing is said.
+  windowPanes =
+    let
+      value = builtins.getEnv "PYMUX_WINDOW_PANES";
+    in
+    if value == "" then
+      "window-pane,window-pane-flower,window-pane-mpv,window-pane-wev,window-pane-wl"
+    else
+      value;
+
+  # The terminals the upgrade pictures are taken in, as a piece of a
+  # name; foot when nothing is said.
+  upgradeTerminals =
+    let
+      value = builtins.getEnv "PYMUX_UPGRADE_TERMINALS";
+    in
+    if value == "" then "foot" else value;
+
+  # The same for the pictures of every theme, which
+  # `tests/photograph_themes.py` takes: one demo application in a
+  # pane, under every theme the option takes.
+  themesSelection = builtins.getEnv "PYMUX_THEMES";
+  themesTerminals = builtins.getEnv "PYMUX_THEMES_TERMINALS";
+
+  # xterm is the one, and `tests/photograph_vttest.py` says why: it is the
+  # only one of the three that draws the DEC line attributes at all.
+  vttestTerminals =
+    let
+      value = builtins.getEnv "PYMUX_VTTEST_TERMINALS";
+    in
+    if value == "" then "xterm" else value;
+
+  # Which scenarios run, and in which terminals: a piece of a name, for
+  # instance `PYMUX_SCENARIOS=yazi nix build --file . checks.pymux-scenarios`.
+  scenarioSelection = builtins.getEnv "PYMUX_SCENARIOS";
+  scenarioTerminals = builtins.getEnv "PYMUX_SCENARIO_TERMINALS";
+
+  # A terminal emulator draws with the fonts that fontconfig finds, and the
+  # build sandbox has no /etc/fonts at all. Without this every terminal dies
+  # at startup, or draws with whatever it falls back to, which is not the
+  # same twice.
+  #
+  # DejaVu first, so every glyph it has stays its own; the CJK font
+  # answers only for what DejaVu lacks. A box judged where a wide
+  # character lands and never which one it was.
+  fontsConf = makeFontsConf {
+    fontDirectories = [
+      dejavu_fonts
+      wqy_microhei
+    ];
+  };
+
+  # What every seat needs: a display server, a terminal emulator and the
+  # tools that find a window and photograph it. Two checks take pictures,
+  # and both need all of it.
+  seatInputs = [
+    # The X seat: a server, a terminal that speaks nothing else, and the
+    # tools that find a window and take its picture.
+    xorg-server
+    xterm
+    xdotool
+    # The Wayland seat: a compositor arranged to be a kiosk by its
+    # configuration, a terminal that speaks nothing else, and the tool
+    # that takes a picture of that output. sway replaced cage because
+    # it offers the clipboard protocol the fence reader reads through,
+    # which cage never did.
+    sway-unwrapped
+    swaybg
+    foot
+    # kitty is the terminal the faults get reported from, so it is the one
+    # to measure. It draws with OpenGL, which llvmpipe serves without a
+    # graphics card.
+    kitty
+    grim
+    imagemagick
+    # The fence a picture waits for is an OSC 52 in the clipboard of
+    # the terminal, and the seat reads it back: wl-paste on the
+    # compositor it started, xclip on the X server it started.
+    wl-clipboard
+    xclip
+  ];
+
+  # kitty draws with OpenGL and a build sandbox has no graphics card, so
+  # llvmpipe draws instead. It has to be told where the driver and the EGL
+  # description are: nothing here reads /run/opengl-driver.
+  seatSetup = ''
+    # A pane's shell comes from $SHELL, and the sandbox user's own one
+    # is /noshell: every pane that runs a program typed into a shell
+    # dies at exec and the keys typed after it are lost. The shell the
+    # derivation built with is the one every pane gets.
+    export SHELL=${runtimeShell}
+    # Where the wayland seat's keyboard holder finds its generated
+    # bindings.
+    export PYTERM_WAYLAND_PROTOCOLS=${waylandProtocols}
+    export FONTCONFIG_FILE=${fontsConf}
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export LIBGL_DRIVERS_PATH=${mesa}/lib/dri
+    export __EGL_VENDOR_LIBRARY_DIRS=${mesa}/share/glvnd/egl_vendor.d
+    export LD_LIBRARY_PATH=${mesa}/lib
+  '';
+
+  # Nothing of a run reaches the machine: the sockets, the temporary
+  # directories and the processes all live and die inside the build sandbox.
+  prepare = ''
+    cp -r ${testSources}/pymux ${testSources}/tests .
+    # pytest reads its settings from the root it runs in. `anyio_mode` is
+    # in this file, and without it a coroutine test fails here while
+    # passing in a checkout. Lillecarl/pymux#87.
+    cp ${testSources}/pyproject.toml .
+    chmod -R +w .
+    # macOS takes 104 bytes for a socket's path, and its build sandbox
+    # puts TMPDIR far enough down that a test's socket passes it. /tmp is
+    # short and writable there. Linux takes 108, and its TMPDIR is /build.
+    if [ "$(uname)" = Darwin ]; then
+      TMPDIR="$(mktemp -d /tmp/pymux.XXXXXX)"
+      export TMPDIR
+      # And pytest's own `pytest-of-<user>/pytest-0` below it goes too.
+      export PYTEST_ADDOPTS="--basetemp=$TMPDIR/t"
+    fi
+    export HOME="$TMPDIR"
+    export LANG=C.UTF-8
+  '';
+
+  # `inputs` adds to what a run may call, and `testEnv` is in every one of
+  # them. `env` names the variables that a run reads, and a change to one of
+  # them rebuilds the check, which is what makes the knobs above work.
+  runInSandbox =
+    {
+      name,
+      inputs ? [ ],
+      env ? { },
+      setup ? "",
+    }:
+    command:
+    suite {
+      inherit name env;
+      inputs = [ testEnv ] ++ inputs;
+      setup = prepare + setup;
+    } command;
+
+  # The theme gallery in pieces: one derivation per terminal and per
+  # batch of themes. The pairs come out of the matrix below, the site
+  # gathers the runs, and a rerun rebuilds only the combos that
+  # failed. Lillecarl/pymux#284.
+  makeThemePictures =
+    {
+      name,
+      themesList,
+      terminalsList,
+    }:
+    runInSandbox
+      {
+        name = "pymux-theme-pictures-${name}";
+        inputs = seatInputs;
+        env = {
+          PYMUX_THEMES_LIST = themesList;
+          PYMUX_THEMES_TERMINALS_LIST = terminalsList;
+        };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_THEMES_OUT="$out"
+          export PYMUX_BASE16_SCHEMES="${base16-schemes-json}/base16-schemes.json"
+          python tests/photograph_themes.py
+        ''
+      );
+
+  # The pairs that the gallery in pieces builds. Importing the
+  # fixture list at eval time needs a build, because the list lives
+  # in the python modules and nix does not read python; the answer is
+  # one derivation that prints JSON, and `fromJSON` on the file of
+  # it. The derivation reruns only when the modules that name the
+  # fixtures and the terminals change.
+  themePictureMatrix =
+    runInSandbox
+      {
+        name = "pymux-theme-picture-matrix";
+        env = {
+          PYMUX_BASE16_SCHEMES = "${base16-schemes-json}/base16-schemes.json";
+        };
+      }
+      ''
+        export PYMUX_MATRIX_OUT="$out"
+        python tests/theme_batches.py
+      '';
+
+  # The pictures of one terminal, judged by nothing: `pictures` judges
+  # them all at once. A run, not a check, because the judge reads
+  # `status` itself and names the run that failed.
+  pictureShots = builtins.listToAttrs (
+    map
+      (terminal: {
+        name = terminal;
+        value =
+          run
+            {
+              name = "pymux-pictures-${terminal}";
+              inputs = [ testEnv ] ++ seatInputs;
+              env = { inherit pictureSelection; };
+              setup = prepare;
+            }
+            (
+              seatSetup
+              + ''
+                export PYMUX_PICTURES="$pictureSelection"
+                export PYMUX_PICTURES_TERMINALS=${terminal}
+                export PYMUX_PICTURES_SHOOT_ONLY=1
+                export PYMUX_PICTURES_OUT="$out"
+                python tests/take_picture.py
+              ''
+            );
+      })
+      [
+        "xterm"
+        "foot"
+        "kitty"
+      ]
+  );
+in
+{
+  # The unit tests of pymux.
+  #
+  # The base16 collection is named here because a test searches it: the
+  # theme a terminal is nearest to is chosen out of every theme pymux
+  # offers, and a run with no collection would judge that search
+  # against fifty-five themes rather than four hundred.
+  # Lillecarl/pymux#346.
+  unit =
+    runInSandbox
+      {
+        name = "pymux-unit";
+        env = {
+          inherit selection durations;
+          PYMUX_CPU = cpuNames;
+          PYMUX_PROFILE_COLLECTION = builtins.getEnv "PYMUX_PROFILE_COLLECTION";
+          PYMUX_HANG_SECONDS = toString hangIsSeconds;
+          PYMUX_BASE16_SCHEMES = "${base16-schemes-json}/base16-schemes.json";
+        };
+      }
+      # `--durations` names what the suite spends its time on, and
+      # `-n` spreads it over the cores the build was given: most of a
+      # test is waiting on a server, so the cores are free for the
+      # next one. Lillecarl/pymux#579.
+      # A build given every core says 0, which to xdist means none.
+      #
+      # `worksteal`, because most tests here take milliseconds. Under
+      # the default `load` a worker waits on the controller for each
+      # next test, and the waits were most of the run: 121 s against
+      # 56 s, with 417 s of tests over sixteen workers.
+      #
+      # At most eight: each worker pays its own start and collection,
+      # and the gate runs every suite at once. Measured alone, wall and
+      # CPU seconds: eight workers 54 and 173, sixteen 46 and 219.
+      ''
+        cores="''${NIX_BUILD_CORES:-0}"
+        if [ "$cores" = 0 ] || [ "$cores" -gt 8 ]; then cores=8; fi
+        least=0.5
+        if [ "$durations" = 0 ]; then least=0; fi
+        # One collection first writes the rewritten test modules to
+        # __pycache__; otherwise each worker rewrites every assert again.
+        # Measured: 104 CPU s collecting on 16 workers, 54 after.
+        python -m pytest $selection -q -p no:cacheprovider -p no:xdist --collect-only > /dev/null || true
+        python -m pytest $selection -q -p no:cacheprovider -n "$cores" --dist worksteal \
+          --durations="$durations" --durations-min="$least"
+      '';
+
+  # The compositor a server holds for panes with no display, against real
+  # wl-copy and wl-paste. The one suite with the `wayland` extra, so its
+  # python is named: `testEnv` is first on the PATH. Lillecarl/pymux#383.
+  wayland =
+    runInSandbox
+      {
+        name = "pymux-wayland";
+        inputs = [ wl-clipboard ];
+      }
+      ''
+        ${waylandTestEnv}/bin/python -m pytest -q -p no:cacheprovider \
+          -o faulthandler_timeout=60 \
+          tests/test_wayland_server.py tests/test_wayland_absent.py tests/test_window_panes.py
+      '';
+
+  # Sound between panes and a client, through a real PipeWire and a
+  # WirePlumber the server starts. A suite of its own because it needs
+  # both on the PATH, and `unit` skips it without them.
+  # Lillecarl/pymux#657.
+  audio =
+    runInSandbox
+      {
+        name = "pymux-audio";
+        inputs = [
+          pipewire
+          wireplumber
+          pulseaudio
+        ];
+      }
+      ''
+        # What the microphone test recorded lands beside the log.
+        export PYMUX_AUDIO_OUT="$out"
+        python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=60 tests/test_audio.py
+      '';
+
+  # The types of pymux, held by a static checker rather than by a run.
+  #
+  # `entry_points/run_pymux.py` matches on `Mode` and ends every arm with
+  # `typing.assert_never`, so a member added and not handled is meant to
+  # fail the build. pytest never runs a checker, so that promise was a
+  # run-time raise until now. Lillecarl/pymux#486.
+  #
+  # `pyrefly` reads its site-packages from the interpreter it is pointed
+  # at, so it sees exactly the dependencies a suite runs on and not the
+  # dev shell's older copies.
+  types =
+    runInSandbox
+      {
+        name = "pymux-types";
+        inputs = [ pyrefly ];
+      }
+      ''
+        pyrefly check --preset default \
+          --python-interpreter-path "${waylandTestEnv}/bin/python" \
+          pymux
+      '';
+
+  # The style of pymux, held by the linter and the formatter rather
+  # than by a run.
+  #
+  # `ruff check` holds the selected rules and `ruff format --check`
+  # holds the layout at width 120, both read from the `pyproject.toml`
+  # beside them. Neither can see the one thing the lazy annotations
+  # rest on -- the presence of `from __future__ import annotations`
+  # in every file -- so a grep holds that: UP037 unquotes only where
+  # the import made the annotation lazy, and stays silent without it.
+  # `ruff.toml` beside the umbrella says what each rule is for.
+  ruff =
+    runInSandbox
+      {
+        name = "pymux-ruff";
+        inputs = [ ruff ];
+      }
+      ''
+        export RUFF_CACHE_DIR="$TMPDIR/ruff"
+        ruff check pymux tests
+        ruff format --check pymux tests
+        missing=$(grep -rL '^from __future__ import annotations' --include='*.py' pymux tests || true)
+        if [ -n "$missing" ]; then
+          echo "files without the future import:"
+          echo "$missing"
+          exit 1
+        fi
+      '';
+
+  # What it costs to lay a window out and draw the frame around its
+  # panes, in bytecode instructions.
+  #
+  # Every other check here asks whether pymux draws the right cells. A
+  # change that makes a frame ten times more expensive passes all of
+  # them, and nobody notices until pymux feels wrong under a hand.
+  #
+  # The unit is not a second. A second belongs to the machine that
+  # counted it, and this sandbox runs beside other jobs. An instruction
+  # count is the same on every machine and under any load, so a budget
+  # file can hold it.
+  #
+  # `PYTHONHASHSEED` is pinned because the order of a set decides a
+  # branch, and a branch decides a count.
+  frame =
+    runInSandbox
+      {
+        name = "pymux-frame-instructions";
+        env = { inherit frameInclude frameTolerance; };
+        setup = ''
+          export PYMUX_FRAME_INCLUDE="$frameInclude"
+          export PYMUX_FRAME_TOLERANCE="$frameTolerance"
+          export PYMUX_FRAME_OUT="$out"
+          export PYTHONHASHSEED=0
+        '';
+      }
+      ''
+        python tests/measure_frame.py
+      '';
+
+  # What pymux still holds after a pane, a window or a client has gone.
+  #
+  # A multiplexer is a program a person leaves running for weeks, so a
+  # pane's worth of objects kept on every `kill-pane` is a leak nobody
+  # sees until the machine swaps. Nothing else here asks the question.
+  #
+  # It needs no pty and no seat: the clients are in-process and the
+  # bytes go into the same `Stream.feed` a pty would call.
+  # `tests/what_leaks.py` says what a round does and how to read a red
+  # run.
+  #
+  # `PYTHONHASHSEED` is pinned because the order of a set decides which
+  # referrer a chain names first.
+  leaks =
+    runInSandbox
+      {
+        name = "pymux-leaks";
+        env = {
+          inherit
+            leaksRounds
+            leaksPanes
+            leaksInclude
+            leaksTolerance
+            leaksBytes
+            leaksTrace
+            leaksRoute
+            leaksProfile
+            ;
+        };
+        setup = ''
+          export PYMUX_LEAKS_RECORDINGS=${alacrittySuite}/share/alacritty-ref
+          export PYMUX_LEAKS_ROUNDS="$leaksRounds"
+          export PYMUX_LEAKS_PANES="$leaksPanes"
+          export PYMUX_LEAKS_INCLUDE="$leaksInclude"
+          export PYMUX_LEAKS_TOLERANCE="$leaksTolerance"
+          export PYMUX_LEAKS_BYTES="$leaksBytes"
+          export PYMUX_LEAKS_TRACE="$leaksTrace"
+          export PYMUX_LEAKS_ROUTE="$leaksRoute"
+          export PYMUX_LEAKS_PROFILE="$leaksProfile"
+          export PYTHONHASHSEED=0
+        '';
+      }
+      ''
+        python tests/what_leaks.py
+      '';
+
+  # What a pane that animates costs when nobody is looking at it.
+  #
+  # A window nobody looks at is not drawn, so its cost should be the
+  # parsing of its bytes and nothing else. cmatrix in a background
+  # window pegged a core and drew five frames in five seconds while it
+  # did, because `ptyhost` polled for an idle loop that never comes.
+  # Lillecarl/pymux#253.
+  #
+  # **The programs are real ones, and that is the point.** The first
+  # shape of this measured a writer in a `python -c` loop and saw 7%
+  # of a core either way, which would have called the bug fixed. What
+  # reproduces it is a program that writes a screenful at a steady
+  # rate, and something animating in the window that *is* watched.
+  # `tests/what_busy_pane_costs.py` says why both halves matter.
+  #
+  # It needs a pty: the programs run on one, and cmatrix reads
+  # terminfo.
+  #
+  # The unit is a fraction of one core, which is a second, which
+  # belongs to the machine that counted it. So the ceiling is loose on
+  # purpose -- the fault is eight-fold. It is not a budget to tune.
+  busy =
+    runInSandbox
+      {
+        name = "pymux-busy";
+        inputs = [
+          cmatrix
+          tty-clock
+          nyancat
+          pipes
+        ];
+        env = {
+          inherit
+            busyPrograms
+            busySeconds
+            busyCeiling
+            busyCaps
+            ;
+        };
+        setup = ''
+          export PYMUX_BUSY_PROGRAMS="$busyPrograms"
+          export PYMUX_BUSY_SECONDS="$busySeconds"
+          export PYMUX_BUSY_CEILING="$busyCeiling"
+          export PYMUX_BUSY_CAPS="$busyCaps"
+        '';
+      }
+      ''
+        python tests/what_busy_pane_costs.py
+      '';
+
+  # Where the time of a frame goes. Not a gate, and it judges nothing:
+  # a sampling profiler reports wall clock, and this sandbox runs
+  # beside other jobs. `tests/profile_frame.py` says what it runs and
+  # how to read it. It needs a pty, because it runs real panes.
+  profile =
+    runInSandbox
+      {
+        name = "pymux-profile";
+        # The animated phase runs a real program in the pane. Which one
+        # is `PYMUX_PROFILE_ANIMATED`, and cmatrix is the one to reach
+        # for first: it is the worst case the busy check measures.
+        inputs = [ cmatrix ];
+        env = {
+          inherit
+            profilePanes
+            profileFrames
+            profileRows
+            profileColumns
+            profilePhases
+            profileAnimated
+            profileAnimatedSeconds
+            profileScrollMode
+            profileScrollStyled
+            profileScrollStart
+            profileScrollAtEnd
+            profileEmitMode
+            profileEmitLines
+            profileEmitStyled
+            profileShowAll
+            profileWire
+            ;
+        };
+        setup = ''
+          export PYMUX_PROFILE_PANES="$profilePanes"
+          export PYMUX_PROFILE_FRAMES="$profileFrames"
+          export PYMUX_PROFILE_ROWS="$profileRows"
+          export PYMUX_PROFILE_COLUMNS="$profileColumns"
+          export PYMUX_PROFILE_PHASES="$profilePhases"
+          export PYMUX_PROFILE_ANIMATED="$profileAnimated"
+          export PYMUX_PROFILE_ANIMATED_SECONDS="$profileAnimatedSeconds"
+          export PYMUX_PROFILE_SCROLL_MODE="$profileScrollMode"
+          export PYMUX_PROFILE_SCROLL_STYLED="$profileScrollStyled"
+          export PYMUX_PROFILE_SCROLL_START="$profileScrollStart"
+          export PYMUX_PROFILE_SCROLL_AT_END="$profileScrollAtEnd"
+          export PYMUX_PROFILE_EMIT_MODE="$profileEmitMode"
+          export PYMUX_PROFILE_EMIT_LINES="$profileEmitLines"
+          export PYMUX_PROFILE_EMIT_STYLED="$profileEmitStyled"
+          export PYMUX_PROFILE_SHOW_ALL="$profileShowAll"
+          export PYMUX_PROFILE_WIRE="$profileWire"
+          export PYMUX_PROFILE_OUT="$out"
+        '';
+      }
+      ''
+        python tests/profile_frame.py
+      '';
+
+  # That the profiler still runs, and nothing about what it measured.
+  #
+  # **This is a gate and `profile` is not.** A sampling profiler reads
+  # a wall clock, so it has no answer a build may fail on -- and that
+  # left nothing running it. It rotted: a server built outside an event
+  # loop stopped working when pymux moved to anyio, and the crash sat
+  # there unseen, because the one tool that would have caught it was
+  # the tool that broke. Lillecarl/pymux#360.
+  #
+  # Two panes, one frame, one phase, and no animated program, so it
+  # costs a second and proves the only thing it can prove.
+  profileStarts =
+    runInSandbox
+      {
+        name = "pymux-profile-starts";
+        setup = ''
+          export PYMUX_PROFILE_PANES=2
+          export PYMUX_PROFILE_FRAMES=1
+          export PYMUX_PROFILE_PHASES=idle
+          export PYMUX_PROFILE_ANIMATED=
+          export PYMUX_PROFILE_OUT="$out"
+        '';
+      }
+      ''
+        python tests/profile_frame.py
+      '';
+
+  # The same keystroke counted rather than timed, which is what makes
+  # it a gate: bytecode is exact and the same on every machine, so a
+  # path that grew fails a build. It covers the two ends that nothing
+  # else counts -- the key going out to the pty, and the renderer's
+  # diff coming back. `tests/measure_keystroke.py` says why nothing
+  # here runs the event loop.
+  #
+  # `PYTHONHASHSEED` is pinned for the reason the other counters pin
+  # it: the order of a set decides a branch.
+  keystroke =
+    runInSandbox
+      {
+        name = "pymux-keystroke";
+        env = {
+          inherit
+            keystrokeInclude
+            keystrokeTolerance
+            keystrokeTimed
+            keystrokeCallers
+            keystrokeWhere
+            keystrokeCensus
+            ;
+        };
+        setup = ''
+          export PYMUX_KEYSTROKE_INCLUDE="$keystrokeInclude"
+          export PYMUX_KEYSTROKE_TOLERANCE="$keystrokeTolerance"
+          export PYMUX_KEYSTROKE_TIMED="$keystrokeTimed"
+          export PYMUX_KEYSTROKE_CALLERS="$keystrokeCallers"
+          export PYMUX_KEYSTROKE_WHERE="$keystrokeWhere"
+          export PYMUX_KEYSTROKE_CENSUS="$keystrokeCensus"
+          export PYMUX_KEYSTROKE_OUT="$out"
+          export PYTHONHASHSEED=0
+        '';
+      }
+      ''
+        python tests/measure_keystroke.py
+      '';
+
+  # How many turns of the event loop one keystroke costs.
+  #
+  # The keystroke budgets count work and cannot see waiting; the latency
+  # numbers see the waiting and belong to the machine that read them. A
+  # turn of the loop is the number in between: it goes up when pymux
+  # hands control back, and the code decides it rather than the machine.
+  # `tests/count_turns.py` says where the two cuts are.
+  #
+  # It holds the shortest keystroke of the run and judges nothing else.
+  # The program in the pane is another process, so under load its answer
+  # can miss a poll and pay for a second redraw; that adds turns and
+  # never takes one away. Lillecarl/pymux#232.
+  turns =
+    runInSandbox
+      {
+        name = "pymux-turns";
+        env = { inherit turnsSamples turnsPace turnsTrace; };
+        setup = ''
+          export PYMUX_TURNS_SAMPLES="$turnsSamples"
+          export PYMUX_TURNS_PACE="$turnsPace"
+          export PYMUX_TURNS_TRACE="$turnsTrace"
+        '';
+      }
+      ''
+        python tests/count_turns.py
+      '';
+
+  # What pymux costs a keystroke, in milliseconds, against the same
+  # program on a bare pty. Not a gate, and it judges nothing, for the
+  # reason the profile above does not: a wall clock belongs to the
+  # machine that read it. `tests/measure_latency.py` says what the
+  # three numbers are and why the tail is the one to read. It needs a
+  # pty on both sides.
+  latency =
+    runInSandbox
+      {
+        name = "pymux-latency";
+        env = {
+          inherit
+            latencySamples
+            latencyPace
+            latencyRoute
+            latencyRows
+            latencyColumns
+            ;
+        };
+        setup = ''
+          export PYMUX_LATENCY_SAMPLES="$latencySamples"
+          export PYMUX_LATENCY_PACE="$latencyPace"
+          export PYMUX_LATENCY_ROWS="$latencyRows"
+          export PYMUX_LATENCY_COLUMNS="$latencyColumns"
+          # Only when it was asked for. `drive_with_pty.py` defaults to
+          # the socket route, and an empty value defeats the default
+          # rather than choosing it.
+          if [ -n "$latencyRoute" ]; then
+            export PYMUX_ROUTE="$latencyRoute"
+          fi
+        '';
+      }
+      ''
+        python tests/measure_latency.py
+      '';
+
+  # The `ssh://` client against a real openssh sshd: the unix socket
+  # channel every attach rests on, and the two forward directions.
+  #
+  # A suite of its own rather than part of `unit`, because it starts a
+  # daemon. `PYMUX_SSHD` is an absolute path on purpose -- sshd refuses
+  # to start when it was found on PATH, and the message says so only
+  # once you capture its stderr. Lillecarl/pymux#436.
+  openssh-interop =
+    runInSandbox
+      {
+        name = "pymux-openssh";
+        # openssh itself for `ssh-keygen`, which makes the host key and
+        # the one authorised key the daemon trusts.
+        inputs = [ openssh ];
+        env = {
+          PYMUX_HANG_SECONDS = toString hangIsSeconds;
+          PYMUX_SSHD = "${openssh}/bin/sshd";
+          # sshd refuses a user whose shell is not a real file, and the
+          # sandbox gives every uid `/noshell`. There is no option to
+          # turn that check off, so the suite puts a passwd database in
+          # front of it.
+          PYMUX_NSS_WRAPPER = "${nss_wrapper}/lib/libnss_wrapper.so";
+          PYMUX_LOGIN_SHELL = runtimeShell;
+          PYMUX_OPENSSH_TESTS = openSshTests;
+        };
+      }
+      ''
+        python -m pytest tests/test_openssh_interop.py -q -p no:cacheprovider \
+          ''${PYMUX_OPENSSH_TESTS:+-k "$PYMUX_OPENSSH_TESTS"}
+      '';
+
+  # `<pymux-pane>`: that it runs, and that the declarations it publishes
+  # are usable.
+  #
+  # The element is TypeScript and the package build compiles it, so a
+  # file that does not parse and a type that does not hold fail
+  # `nix build --file . pymux` before anything reaches here. What is left
+  # is the one question our own compiler run cannot ask: whether the
+  # `.d.ts` it emitted describes something a consumer can use.
+  # `tests/uses_the_element.ts` reaches for every member a consumer
+  # reaches for. Proven to fail: renaming one member there turns this
+  # check red.
+  #
+  # **Against the shipped declarations and not the source beside them.**
+  # `pymux/web/client/` holds the TypeScript and `pymux/web/static/` holds
+  # what ships, and the two are apart for this: a `.ts` beside its own
+  # `.d.ts` wins the resolution, so this would read the source twice and
+  # say nothing about what was emitted.
+  #
+  # The flags are a consumer's and not ours -- ours are in
+  # `pymux/web/client/tsconfig.json`. Somebody else's compiler settings on
+  # our declarations is the whole of what this measures.
+  # Lillecarl/pymux#461.
+  #
+  # **And it runs the part of the element that can be run.** Importing
+  # the element itself needs a browser -- it subclasses `HTMLElement` and
+  # defines a custom element -- so `pymux/web/client/keys.ts` holds the
+  # decision that is a table of cases, and `node --test` reads the
+  # compiled `keys.js` out of `pymux/web/static/`. Two faults reached a
+  # person through that table, the second being Control typing
+  # `C-Control`. Lillecarl/pymux#468.
+  #
+  # A pattern and not a list of files, so a test added here runs without
+  # anything being told about it. It is quoted because node expands it
+  # itself: a bare `tests/` is read as one module to run and fails with
+  # "Cannot find module", which is what node 24 does with a positional
+  # that is not a glob.
+  element =
+    runInSandbox
+      {
+        name = "pymux-element";
+        inputs = [
+          nodejs
+          typescript
+        ];
+      }
+      ''
+        echo "running what the element decides about a keydown"
+        node --test "tests/*.test.mjs"
+
+        echo "reading the declarations of <pymux-pane> against a use of them"
+        tsc --noEmit --strict \
+          --target es2022 --lib es2022,dom --module esnext \
+          --moduleResolution bundler \
+          tests/uses_the_element.ts
+      '';
+
+  # TEMPORARY scratch measurement for Lillecarl/pymux#258. Not a
+  # gate, judges nothing: it prints what crosses the wire, in bytes.
+  # Remove it when the investigation lands or is abandoned.
+  wire =
+    runInSandbox
+      {
+        name = "pymux-wire";
+      }
+      ''
+        python tests/measure_wire_sizes.py
+      '';
+
+  # The end to end test. It opens a pty, starts a server and attaches a
+  # client, so it needs a sandbox that gives it /dev/ptmx.
+  pty =
+    runInSandbox
+      {
+        name = "pymux-pty-tests";
+        env = {
+          PYMUX_PTY_CHECKS = ptyChecks;
+        };
+      }
+      ''
+        python tests/drive_with_pty.py
+      '';
+
+  # The same test, over the other route. `pymux integrated` puts the
+  # server and the client in one process and carries the packets in
+  # queues, so no socket is between them.
+  #
+  # The two runs together say which side a fault is on. A check that
+  # fails here and passes above is the transport; one that fails in
+  # both is the server or the client.
+  integrated =
+    runInSandbox
+      {
+        name = "pymux-integrated-tests";
+        env = {
+          PYMUX_PTY_CHECKS = ptyChecks;
+        };
+      }
+      ''
+        export PYMUX_ROUTE=integrated
+        python tests/drive_with_pty.py
+      '';
+
+  # The picture of a real terminal, with pymux in it and without it.
+  #
+  # Every other check here stops at the cell. This one runs the same
+  # program twice in the same terminal emulator, on a display server of its
+  # own, and subtracts one screenshot from the other. It catches what pymux
+  # writes out again, which nothing else does.
+  #
+  # The result is a directory, so a run always leaves its pictures behind:
+  # `result/<terminal>/<fixture>/{bare,pymux,difference}.png`.
+  #
+  # Each terminal shoots in a run of its own, so the three take their
+  # pictures at once, and this one judges what they found. The run of
+  # one terminal is `checks.pymux-pictures.shots.<terminal>`.
+  pictures =
+    runInSandbox
+      {
+        name = "pymux-pictures";
+        env = {
+          inherit pictureSelection;
+          shots = toString (builtins.attrValues pictureShots);
+        };
+      }
+      ''
+        export PYMUX_PICTURES="$pictureSelection"
+        export PYMUX_PICTURES_SHOTS="$shots"
+        export PYMUX_PICTURES_OUT="$out"
+        python tests/take_picture.py
+      ''
+    // {
+      shots = pictureShots;
+    };
+
+  # An image through a move and two resizes, in kitty and through a
+  # pane, photographed at each step.
+  #
+  # `pictures` above draws once and holds still. A preview a program
+  # really shows moves and survives resizes, and graphics are
+  # write-once bytes rather than cells, so every step asks the pane to
+  # retain the image and write it out again. The window itself is
+  # resized through the compositor, so both sides take a real
+  # configure event; kitty authored the protocol, so what it draws
+  # bare is what the bytes mean.
+  #
+  # The result is a directory, so a run always leaves its pictures behind:
+  # `result/kitty/<side>/{drawn,moved,smaller,restored}.png`.
+  imageExercise =
+    runInSandbox
+      {
+        name = "pymux-image-exercise";
+        inputs = seatInputs;
+        env = { inherit exerciseSelection; };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_IMAGE_EXERCISE="$exerciseSelection"
+          export PYMUX_IMAGE_EXERCISE_OUT="$out"
+          python tests/exercise_images.py
+        ''
+      );
+
+  # The same picture, of vttest.
+  #
+  # `pictures` above photographs a handful of fixtures that a person
+  # wrote by hand. vttest holds five hundred screens, and they are the
+  # awkward ones: double sized rows, national character sets, the
+  # reports of a VT420.
+  #
+  # It is interactive, so a walker drives it and says when each
+  # screen is finished; `ptterm/tests/drive_with_vttest.py` is that
+  # walker and `tests/photograph_vttest.py` is the harness around it.
+  #
+  # It is not a gate. One item of the main menu, in one terminal, is
+  # what it does by default, because the whole of vttest twice over is
+  # twenty minutes for each terminal.
+  vttestPictures =
+    runInSandbox
+      {
+        name = "pymux-vttest-pictures";
+        inputs = seatInputs ++ [ vttest ];
+        env = { inherit vttestInclude vttestTerminals; };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_VTTEST=${vttest}/bin/vttest
+          export PYMUX_VTTEST_WALKER=${vttestWalker}/drive_with_vttest.py
+          export PYMUX_VTTEST_INCLUDE="$vttestInclude"
+          export PYMUX_VTTEST_TERMINALS="$vttestTerminals"
+          export PYMUX_VTTEST_OUT="$out"
+          python tests/photograph_vttest.py
+        ''
+      );
+
+  # Unmodified TUI applications, driven step by step and shown at once
+  # by a bare terminal and by pymux in one: yazi on a tree of its own,
+  # and claude-code against aimock. `tests/photograph_scenarios.py` is
+  # the harness. Not a gate. Lillecarl/pymux#593.
+  scenarios =
+    runInSandbox
+      {
+        name = "pymux-scenarios";
+        inputs = seatInputs ++ [
+          yazi
+          file
+          claude-code
+          aimock
+        ];
+        env = { inherit scenarioSelection scenarioTerminals; };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_SCENARIOS="$scenarioSelection"
+          export PYMUX_SCENARIO_TERMINALS="$scenarioTerminals"
+          export PYMUX_SCENARIOS_OUT="$out"
+          python tests/photograph_scenarios.py
+        ''
+      );
+
+  # A picture of what pymux draws around a pane.
+  #
+  # `pictures` above writes `set full-screen on` before every fixture,
+  # which is what takes pymux's own chrome off the screen. So nothing
+  # has ever photographed the status line, a pane title bar or the
+  # command palette, and nothing could: a headless compositor owns no
+  # input device, so nothing could press a key to open any of it.
+  # `tests/drive_in_terminal.py` is the way round, and
+  # `tests/photograph_chrome.py` is the harness around it.
+  # Lillecarl/pymux#161.
+  #
+  # Every view a server holds, photographed in a real terminal before
+  # and after `upgrade-server`, and judged: each pair has to be the same
+  # pixels. `tests/photograph_upgrade.py`. Lillecarl/pymux#408.
+  upgradePictures =
+    runInSandbox
+      {
+        name = "pymux-upgrade-pictures";
+        inputs = seatInputs;
+        env = {
+          inherit upgradeTerminals;
+        };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_UPGRADE_TERMINALS="$upgradeTerminals"
+          export PYMUX_UPGRADE_OUT="$out"
+          # The server starts from the source tree and the upgrade execs
+          # the installed package. Without one collection named for both,
+          # only the second has the base16 themes, and the client's
+          # nearest theme changes across the exec.
+          export PYMUX_BASE16_SCHEMES="${base16-schemes-json}/base16-schemes.json"
+          python tests/photograph_upgrade.py
+        ''
+      );
+
+  # It is not a gate, and it judges nothing. A picture of chrome has no
+  # bare side to subtract, because the chrome is the thing pymux adds.
+  # Judging it needs a recorded image, and recording one before
+  # anybody has looked would record whatever it draws today, faults
+  # and all. Reading the pictures is the work.
+  chromePictures =
+    runInSandbox
+      {
+        name = "pymux-chrome-pictures";
+        inputs = seatInputs;
+        env = {
+          inherit
+            chromeSelection
+            chromeTerminals
+            chromeList
+            chromeTerminalsList
+            chromeRenderMode
+            ;
+        };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_CHROME_RENDER_MODE="$chromeRenderMode"
+          export PYMUX_CHROME="$chromeSelection"
+          export PYMUX_CHROME_TERMINALS="$chromeTerminals"
+          export PYMUX_CHROME_LIST="$chromeList"
+          export PYMUX_CHROME_TERMINALS_LIST="$chromeTerminalsList"
+          export PYMUX_CHROME_OUT="$out"
+          python tests/photograph_chrome.py
+        ''
+      );
+
+  # A Wayland window in a pane, photographed in every terminal: kitty
+  # shows the window's pixels, the rest a notice. The one picture that
+  # needs the `wayland` extra, so its python goes first on the PATH.
+  # Not a gate. Lillecarl/pymux#620.
+  #
+  #     nix build --file . checks.pymux-window-pane-pictures.run
+  #
+  # `PYMUX_WINDOW_PANES` names the fixtures, comma separated: the
+  # programs `tests/photograph_chrome.py` shows in a window pane.
+  windowPanePictures =
+    runInSandbox
+      {
+        name = "pymux-window-pane-pictures";
+        inputs = seatInputs ++ [
+          weston
+          mpv
+          wev
+        ];
+        env = { inherit chromeTerminals windowPanes; };
+      }
+      (
+        seatSetup
+        + ''
+          export PATH=${waylandTestEnv}/bin:$PATH
+          export PYMUX_CHROME_LIST="$windowPanes"
+          export PYMUX_CHROME_TERMINALS="$chromeTerminals"
+          export PYMUX_CHROME_OUT="$out"
+          python tests/photograph_chrome.py
+        ''
+      );
+
+  # Every theme, with the demo application in the pane. This walks
+  # everything `set-client-option theme` takes, the pastel's four flavours
+  # among them, and leaves the gallery in `$out`. It judges nothing
+  # either. It is also the one place a theme is photographed: every
+  # fixture here carries the chrome harness's own setup, so each
+  # picture is the chrome coloured by its theme, and a theme that left
+  # the chrome hardcoded would show in every one of them. The chrome
+  # check used to photograph the two hand themes beside these; the
+  # second copy went, drift and all. Lillecarl/pymux#194,
+  # Lillecarl/pymux#195, Lillecarl/pymux#278.
+  themePictures =
+    runInSandbox
+      {
+        name = "pymux-theme-pictures";
+        inputs = seatInputs;
+        env = { inherit themesSelection themesTerminals; };
+      }
+      (
+        seatSetup
+        + ''
+          export PYMUX_THEMES="$themesSelection"
+          export PYMUX_THEMES_TERMINALS="$themesTerminals"
+          export PYMUX_THEMES_OUT="$out"
+          export PYMUX_BASE16_SCHEMES="${base16-schemes-json}/base16-schemes.json"
+          python tests/photograph_themes.py
+        ''
+      );
+  themePictureMatrix = themePictureMatrix;
+
+  themePictureCombos =
+    let
+      jobs = builtins.fromJSON (
+        builtins.readFile "${themePictureMatrix.run}/matrix.json"
+      );
+      combo = job: {
+        name = "${job.terminal}-${toString job.batch}";
+        value = makeThemePictures {
+          name = "${job.terminal}-${toString job.batch}";
+          themesList = builtins.concatStringsSep "," job.themes;
+          terminalsList = job.terminal;
+        };
+      };
+    in
+    builtins.listToAttrs (map combo jobs);
+
+  # The conformance suite, run in a pane. It is not a pass or fail of its
+  # own: most of it fails, and each failure names a real difference from
+  # xterm. The run is judged against the list in
+  # `tests/esctest-failures.txt`, and a difference either way is what
+  # fails the check.
+  esctest =
+    runInSandbox
+      {
+        name = "pymux-esctest";
+        inputs = [ esctest2 ];
+        env = { inherit esctestInclude; };
+      }
+      ''
+        export PYMUX_ESCTEST=${esctest2}/share/esctest2
+        export PYMUX_ESCTEST_INCLUDE="$esctestInclude"
+        export PYMUX_ESCTEST_OUT="$out"
+        python tests/drive_with_esctest.py
+      '';
+
+  # The test suite of libvterm, with pymux in the middle of it.
+  #
+  # `checks.ptterm-vterm` plugs ptterm in where libvterm stands and judges
+  # our model. This judges our wire: the bytes of a test file reach a
+  # program in a full screen pane, pymux renders, and a real libvterm reads
+  # what pymux emitted and answers the assertions.
+  #
+  # So the judge is libvterm's own `t/harness`, built as it stands, and
+  # nothing of ours decides anything. `tests/drive_with_vterm.py` says which
+  # files can run this way and why the rest cannot.
+  vterm =
+    runInSandbox
+      {
+        name = "pymux-vterm";
+        inputs = [
+          perl
+          vtermSuite.harness
+        ];
+        env = { inherit vtermInclude vtermTrace vtermFileTimeout; };
+      }
+      ''
+        export PYMUX_VTERM=${vtermSuite.tests}/share/libvterm-tests
+        export PYMUX_VTERM_HARNESS=${vtermSuite.harness}/bin/libvterm-harness
+        export PYMUX_VTERM_INCLUDE="$vtermInclude"
+        export PYMUX_VTERM_TRACE="$vtermTrace"
+        export PYMUX_VTERM_FILE_TIMEOUT="$vtermFileTimeout"
+        export PYMUX_VTERM_TMP="$TMPDIR"
+        export PYMUX_VTERM_OUT="$out"
+        python tests/drive_with_vterm.py
+      '';
+
+  # The reference tests of Alacritty, with pymux in the middle of them.
+  #
+  # Alacritty records a real program: the bytes it wrote and the grid they
+  # made. This puts those bytes on the screen of a full screen pane and
+  # gives what pymux emitted to a real `Term`, which compares the grid it
+  # builds against the recorded one.
+  #
+  # It is the second borrowed suite to go this way and the first that is
+  # not libvterm's, so `tests/middleman.py` is shared and only the judging
+  # differs. `tests/drive_with_alacritty.py` says which tests can run and
+  # why the rest cannot.
+  alacritty =
+    runInSandbox
+      {
+        name = "pymux-alacritty";
+        env = { inherit alacrittyInclude alacrittyTrace alacrittyWire; };
+      }
+      ''
+        export PYMUX_ALACRITTY=${alacrittySuite}/share/alacritty-ref
+        export PYMUX_ALACRITTY_JUDGE=${judges.rust}/bin/alacritty-ref
+        export PYMUX_ALACRITTY_INCLUDE="$alacrittyInclude"
+        export PYMUX_ALACRITTY_TRACE="$alacrittyTrace"
+        export PYMUX_ALACRITTY_WIRE="$alacrittyWire"
+        export PYMUX_ALACRITTY_TMP="$TMPDIR"
+        export PYMUX_ALACRITTY_OUT="$out"
+        python tests/drive_with_alacritty.py
+      '';
+}

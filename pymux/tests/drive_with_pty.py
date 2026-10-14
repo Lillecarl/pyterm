@@ -1,0 +1,3130 @@
+"""
+End-to-end tests for the terminal features over a real pty.
+
+These tests play the outer terminal. Each one attaches a pymux client
+on a pty, answers the detection queries the way a chosen terminal
+would, and checks what the server then sends.
+
+Three terminals are played:
+
+* A kitty-like terminal. It speaks the keyboard protocol, the graphics
+  protocol and 24 bit colour. The checks are that the client enables
+  the keyboard flags of the focused pane, that keys reach the pane in
+  the encoding the pane asked for, that the image of the pane is
+  re-transmitted and placed, and that the colours are 24 bit.
+* An xterm-like terminal. It draws sixel and takes 256 colours. The
+  check is that the sixel image of the pane is re-encoded for the cell
+  size that the terminal reports, and that it keeps its own pixels
+  while it does.
+* A terminal that answers no probe but sets `COLORTERM`. The check is
+  that the environment still raises the colour depth.
+* A plain terminal that answers nothing but the device attributes. The
+  check is that no image and no keyboard sequence is sent at all.
+
+Two routes carry the packets between the client and the server, and
+`PYMUX_ROUTE` picks the one to test:
+
+* `socket`, the default. A server daemon holds a unix socket and the
+  client connects to it. Two processes.
+* `integrated`. The server and the client are one process and the
+  packets go through queues. `pymux integrated` runs it.
+
+Both routes run the same protocol, so every check reads the same. A
+difference between the two runs is a difference of the transport, and
+says which side a fault is on.
+
+Run with:
+
+    nix build --file . checks.pymux-pty
+    nix build --file . checks.pymux-integrated
+"""
+
+from __future__ import annotations
+
+import contextlib
+import datetime
+import fcntl
+import os
+import re
+import select
+import shlex
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from pyte.environment import terminal_name
+from pyte.modes import PrivateMode
+from pyte.osc import Osc
+from pyte.screen import Screen
+from pyte.sequences import (
+    dcs,
+    osc,
+    set_mode,
+)
+from pyte.sixel import decode_sixel
+from pyte.streams import Stream
+
+from pymux.blocks import LOWER_HALF, UPPER_HALF
+from pymux.colors import TRUECOLOR_PROBE
+from pymux.graphics import CELL_SIZE_QUERY
+from pymux.graphics import QUERY_SEQUENCE as GRAPHICS_QUERY
+
+REPO_ROOT = Path(__file__).parent.parent
+
+#: Which route carries the packets between the client and the server:
+#: "socket" or "integrated". See the docstring of this file.
+ROUTE = os.environ.get("PYMUX_ROUTE", "socket")
+
+#: What `ctrl+b d` sends: the prefix key, then the letter.
+DETACH = b"\x02d"
+
+#: What ends a frame that hid the cursor to draw. Without synchronised
+#: output every frame does, so this is how a check waits for one to
+#: finish rather than for a length of time. Lillecarl/pymux#187.
+SHOW_CURSOR = set_mode(PrivateMode.SHOW_CURSOR).encode("ascii")
+
+# "\x1b[97;5u" — kitty ctrl+a — as the pane reads it.
+CTRL_A_KITTY = b"\x1b[97;5u"
+
+# The same key coming back up.
+CTRL_A_KITTY_RELEASE = b"\x1b[97;5:3u"
+
+# A key that came back up, as a terminal that speaks the protocol
+# sends it. Only a pane that asked for the event types of a key may
+# see one.
+KEY_RELEASE = b"\x1b[97;1:3u"
+# What the pane reads. An event type needs modifier 1 when no
+# modifier is active.
+KEY_RELEASE_READ = b"\x1b[97;1:3u"
+
+# The pane asks "CSI ? u" when it reads a "Q", and echoes the answer.
+# The answer holds the flags that the pane really gets, so it depends
+# on what the terminal of the client can report.
+ASK_THE_FLAGS = b"Q"
+
+
+def flags_answer(flags: int) -> bytes:
+    "The answer of the pane to the flags query, as the pane reads it back."
+    return ("\x1b[?%du" % flags).encode()
+
+
+def keys_read(data: bytes) -> bytes:
+    """
+    The bytes that the pane read, out of the blobs that it echoes.
+
+    The pane child echoes one blob for each `read1`, so where one blob
+    ends and the next begins is whatever the reads happened to be. Two
+    keys that arrive together land in one blob, and the same two keys
+    land in two when they do not.
+
+    A check about what a pane read may not depend on that. It did:
+    the whole check flipped from green to red on a comment in another
+    file, because the store path moved and the reads fell differently.
+    So the blobs are joined and the check reads the stream inside them.
+    """
+    return b"".join(bytes.fromhex(blob.decode("ascii")) for blob in re.findall(rb"<<([0-9a-f]*)>>", data))
+
+
+# The kitty image that the pane child transmits: 2x2 pixels, RGB. It
+# is placed over three columns and two rows.
+IMAGE_PAYLOAD = "AAECAwQFBgcICQoL"
+KITTY_IMAGE = "\x1b_Ga=T,f=24,s=2,v=2,i=7,c=3,r=2,C=1;" + IMAGE_PAYLOAD + "\x1b\\"
+
+# The sixel image that the pane child draws: 20 by 12 pixels, red.
+# Against the eight by seventeen cell this terminal reports that is
+# three columns and one row, and the image fits inside them.
+SIXEL_IMAGE = dcs('0;0;0q"1;1;20;12#4;2;100;0;0#4!20~-!20~')
+
+# Cell size that the sixel terminal reports, in pixels.
+CELL_WIDTH, CELL_HEIGHT = 8, 17
+
+# The OSC sequences that the pane child sends. Only the terminal of the
+# user can serve them, so pymux passes them on. The query does not go:
+# a pane may write the clipboard, not read it.
+OSC_CLIPBOARD = osc(Osc.CLIPBOARD, "c", "aGVsbG8=")
+OSC_CLIPBOARD_QUERY = osc(Osc.CLIPBOARD, "c", "?")
+# The pane asks to be told when the user clicks the notification.
+OSC_NOTIFICATION = osc(Osc.NOTIFICATION, "i=mine:a=report", "done")
+# What pymux sends on: the identifier names the pane, not the program.
+OSC_NOTIFICATION_RE = rb"\x1b\]99;i=(\d+):a=report;done\x1b\\"
+# And the answer that comes back to the pane carries the name of the
+# program again.
+OSC_NOTIFICATION_ANSWER = osc(Osc.NOTIFICATION, "i=mine")
+OSC_POINTER = osc(Osc.POINTER_SHAPE, "pointer")
+PANE_OSC = OSC_CLIPBOARD + OSC_CLIPBOARD_QUERY + OSC_NOTIFICATION + OSC_POINTER
+
+# A hyperlink belongs to the cells that carry it, so it does not travel
+# as a sequence. The pane draws it, the cells hold the target, and the
+# renderer opens the link again on the terminal of the user.
+HYPERLINK_TARGET = "https://example.com/pymux"
+PANE_HYPERLINK = "\x1b]8;;%s\x1b\\LINK\x1b]8;;\x1b\\plain" % HYPERLINK_TARGET
+
+# The shape of an underline and its colour belong to a cell as well.
+# The pane draws a curly red line; the terminal of the user has to get
+# the sub-parameter and the colour back.
+PANE_UNDERLINE = "\x1b[4:3;58:2::255:0:0mCURLY\x1b[0m"
+
+# The program that runs in the pane. It puts its tty in raw mode, asks
+# for the kitty keyboard protocol, draws one image, sends the OSC
+# sequences, and then echoes everything it reads as hex.
+PANE_CHILD = """
+import os, sys, tty
+tty.setraw(0)
+sys.stdout.write("\\x1b[>3u")
+sys.stdout.write(%r if sys.argv[1] == "kitty" else %r)
+sys.stdout.write(%r)
+sys.stdout.write("READY")
+sys.stdout.write("\\r\\nENV<%%s|%%s|%%s|%%s>" %% (
+    os.environ.get("TERM", ""),
+    os.environ.get("COLORTERM", ""),
+    os.environ.get("KITTY_WINDOW_ID", ""),
+    os.environ.get("TERM_PROGRAM", ""),
+))
+sys.stdout.write("\\r\\n" + %r)
+sys.stdout.write("\\r\\n" + %r)
+sys.stdout.flush()
+while True:
+    data = sys.stdin.buffer.read1(256)
+    if not data:
+        break
+    if b"Q" in data:
+        # Ask what the terminal really does with the keyboard. The
+        # answer arrives as input, so the echo below shows it. Asking
+        # on demand and not at the start keeps it after the detection
+        # of the client, which is what decides the answer.
+        sys.stdout.write("\\x1b[?u")
+        sys.stdout.flush()
+    if b"C" in data:
+        # Write the clipboard again, now that the option allows it.
+        # The one at the start was refused, and a pane cannot be told.
+        sys.stdout.write(%r)
+        sys.stdout.flush()
+    # A line of its own: a long echo must not wrap, or the check for
+    # it reads the wrapping as part of the text.
+    sys.stdout.write("\\r\\n<<%%s>>" %% data.hex())
+    sys.stdout.flush()
+""" % (
+    KITTY_IMAGE,
+    SIXEL_IMAGE,
+    PANE_OSC,
+    PANE_HYPERLINK,
+    PANE_UNDERLINE,
+    OSC_CLIPBOARD,
+)
+
+
+#: A program that draws nothing and waits. A pane running it asks for
+#: no pointer shape, which is what the check of the pointer needs.
+#:
+#: It waits on its stdin, which ends when the pane goes.
+QUIET_CHILD = """
+import sys
+sys.stdout.write("QUIET")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+
+
+#: The program of an overlay pane: it names itself, echoes what it
+#: reads and waits.
+OVERLAY_CHILD = """
+import sys, tty
+tty.setraw(0)
+sys.stdout.write("OVERLAYMARK")
+sys.stdout.flush()
+while True:
+    data = sys.stdin.buffer.read1(256)
+    if not data:
+        break
+    sys.stdout.write("\\r\\n[[%s]]" % data.decode("utf-8", "replace"))
+    sys.stdout.flush()
+"""
+
+
+#: A program that marks every corner of its pane and waits.
+#:
+#: DECALN fills every cell with an "E", so a cell that the pane never
+#: reached stays blank and a cell that the client never wrote out stays
+#: blank on the far side as well. The four markers say where the pane
+#: begins and ends.
+CORNER_CHILD = """
+import os, signal, sys, time, tty
+tty.setraw(0)
+out = sys.stdout
+
+# SIGWINCH waits while one draw runs: a draw interrupted after it read
+# the size would finish the old corners over the new ones.
+# Lillecarl/pymux#545.
+def draw(*_):
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
+    try:
+        size = os.get_terminal_size()
+        out.write("\\x1b#8")
+        out.write("\\x1b[1;1HTL")
+        out.write("\\x1b[1;%dHTR" % (size.columns - 1))
+        out.write("\\x1b[%d;1HBL" % size.lines)
+        out.write("\\x1b[%d;%dHBR" % (size.lines, size.columns - 1))
+        out.write("\\x1b[2;1HSIZE<%dx%d>" % (size.columns, size.lines))
+        out.flush()
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGWINCH})
+
+# A pane is made before a client attaches, so its first size is not the
+# size of the terminal that ends up in front of it. A full screen
+# program draws again when the size changes, and so does this one.
+signal.signal(signal.SIGWINCH, draw)
+draw()
+while True:
+    time.sleep(1)
+"""
+
+
+#: A program that asks for a bar that does not blink, and waits.
+#: A pane that says what its arguments were. One of them holds a space,
+#: so it says whether the quoting survived the trip.
+ARGUMENT_CHILD = """
+import sys
+sys.stdout.write("ARGV<%s>" % "|".join(sys.argv[1:]))
+sys.stdout.flush()
+sys.stdin.read()
+"""
+
+#: A pane that writes a non-breaking space between two letters.
+#:
+#: prompt_toolkit visualises one the way a text editor does: a plain
+#: space with `class:nbsp`, which is `underline ansiyellow`. A terminal
+#: has no business doing that, and Claude Code writes one after its
+#: prompt arrow, so every prompt came out of pymux underlined.
+NBSP_CHILD = """
+import sys
+sys.stdout.write("A\\u00a0B")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+
+CURSOR_CHILD = """
+import sys
+sys.stdout.write("\\x1b[6 qCURSORMARK")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+
+
+#: A program that writes a screenful at a time, forever. The wedge needs
+#: frames faster than a client reads them, and a pane that draws once
+#: proves nothing: the frames have to keep coming after the client
+#: stopped taking them. The count in every row makes each frame differ
+#: from the one before it, so the renderer redraws instead of sending
+#: nothing.
+FLOOD_CHILD = """
+import sys, time
+out = sys.stdout
+n = 0
+while True:
+    for i in range(20):
+        out.write("FLOOD %d row %d %s\\n" % (n, i, "x" * 60))
+    out.flush()
+    n += 1
+    time.sleep(0.02)
+"""
+
+
+class Failed(AssertionError):
+    pass
+
+
+def _clock(when):
+    "A moment, spelled the way the server log spells one."
+    return datetime.datetime.fromtimestamp(when).strftime("%H:%M:%S,%f")[:-3]
+
+
+def run_cli(sock_path, args):
+    "Run a pymux CLI command against the server (like libtmux does)."
+    return subprocess.run(
+        [sys.executable, "-m", "pymux", "-S", str(sock_path), *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def read_screen(seen, rows=24, columns=80):
+    """
+    The screen that a terminal draws from what the client wrote.
+
+    A check that asks where something landed reads this, not the byte
+    stream: the renderer writes a cell wherever it likes and moves the
+    cursor there first, so the order of the bytes says nothing about
+    the order of the cells.
+
+    Returns a list of rows, each a string of `columns` characters.
+    """
+    screen = Screen(rows, columns, write_process_input=lambda answer: None)
+    Stream(screen).feed(seen.decode("utf-8", "replace"))
+
+    buffer = screen.page.data_buffer
+    offset = screen.line_offset
+    lines = []
+    for y in range(offset, offset + rows):
+        row = buffer[y]
+        lines.append("".join((row[x].char or " ") for x in range(columns)))
+    return lines
+
+
+def _side_by_side(wanted, found):
+    "Every row that differs, with the one that was wanted above it."
+    lines = []
+    for number, (a, b) in enumerate(zip(wanted, found)):
+        if a == b:
+            continue
+        lines.append("row %2d wanted %s" % (number, a))
+        lines.append("row %2d found  %s" % (number, b))
+    return "\n".join(lines)
+
+
+def on_pty(argv, stderr_path, env=None, rows=24, columns=80):
+    """
+    Run any program on a pty of its own. Returns the master side, the
+    process and the stderr file.
+
+    `run_on_pty` is this with pymux's own argv and environment.
+    Anything that wants to put the *same* program on a bare pty, with
+    no pymux between it and the master, comes here instead: that is
+    what a measurement compares against. Lillecarl/pymux#140.
+    """
+    master_fd, slave_fd = os.openpty()
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+
+    stderr = open(stderr_path, "wb")
+    process = subprocess.Popen(
+        [str(one) for one in argv],
+        cwd=str(REPO_ROOT),
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=stderr,
+        env={**os.environ, **(env or {})},
+    )
+    os.close(slave_fd)
+    return master_fd, process, stderr
+
+
+def run_on_pty(args, stderr_path, colorterm="", rows=24, columns=80):
+    """
+    Run a pymux command on a pty of its own. Returns the master side,
+    the process and the stderr file.
+
+    The size of the pty decides the size of the pane. A pane takes one
+    row for its title and the session takes one for the status line, so
+    a pane is two rows shorter than this.
+    """
+    return on_pty(
+        [sys.executable, "-m", "pymux"] + [str(a) for a in args],
+        stderr_path,
+        env={
+            "TERM": "xterm-256color",
+            "LANG": "C.UTF-8",
+            # The tests decide what the environment says about
+            # colour; the shell that runs them must not.
+            "COLORTERM": colorterm,
+        },
+        rows=rows,
+        columns=columns,
+    )
+
+
+def attach_client(sock_path, stderr_path, colorterm="", rows=24, columns=80, configuration=()):
+    """
+    Attach a client to a server that is already running, over its
+    socket.
+
+    **The client reads the configuration file too**, which is not a
+    nicety: a client option lives on the terminal a person is sitting
+    at, so a `set-client-option` line reaches it only through the
+    client's own reading of the file. The server's reading of the same
+    line is a no-op, on purpose. Lillecarl/pymux#223,
+    Lillecarl/pymux#471.
+    """
+    return run_on_pty(
+        ["-S", sock_path, *[str(a) for a in configuration], "attach"],
+        stderr_path,
+        colorterm,
+        rows,
+        columns,
+    )
+
+
+class Attached:
+    "What every client on a pty can do: read it, write to it, watch it."
+
+    master_fd: int
+    seen: bytes
+    stderr_path = None
+    server_log = None
+
+    #: Every read, as `(the clock when it landed, where it starts in
+    #: `seen`)`. `read_once` fills it, and `arrivals_since` reads it.
+    arrivals: list
+
+    #: Where the last wait stopped. A wait starts from there, so a
+    #: check that asks the same question twice waits twice.
+    #:
+    #: Without it the second wait is met by the first answer, which
+    #: arrived minutes earlier, and everything after it runs too early.
+    #: That is how a press and a flags answer came to share one read.
+    #: `passed` counts in `seen`, and `passed_keys` in the stream of
+    #: bytes that the pane read, which is a different stream.
+    passed = 0
+    passed_keys = 0
+
+    def wait_for(self, pattern, timeout=15.0, since=None):
+        """
+        Wait for `pattern`, past everything an earlier wait already took.
+
+        `since` starts the search at a mark instead. Use it when the
+        thing waited for belongs to a moment the check chose, and not to
+        the step before it: a pane forwards its pointer shape once, when
+        it starts, and a check that reaches that step later still wants
+        the one from the start.
+
+        Do not use it to make a wait that fails pass. It can match bytes
+        that an earlier wait already stepped past, which is the bug this
+        mark is here to stop.
+        """
+        deadline = time.time() + timeout
+        while True:
+            start = self.passed if since is None else since
+            found = self.seen.find(pattern, start)
+            if found >= 0:
+                self.passed = max(self.passed, found + len(pattern))
+                return
+            if time.time() > deadline:
+                raise Failed("Timeout waiting for %r. Got: %r" % (pattern, self.seen[start:][:2000]))
+            self.read_once()
+
+    def wait_for_input(self, keys, timeout=15.0):
+        """
+        Wait until the pane has read `keys`, however its reads fell.
+
+        `keys_read` says why this is not `wait_for` with a blob.
+        """
+        deadline = time.time() + timeout
+        while True:
+            read = keys_read(self.seen)
+            found = read.find(keys, self.passed_keys)
+            if found >= 0:
+                self.passed_keys = found + len(keys)
+                return
+            if time.time() > deadline:
+                raise Failed(
+                    "Timeout waiting for the pane to read %r. It read: %r" % (keys, read[self.passed_keys :][:400])
+                )
+            self.read_once()
+
+    def read_once(self) -> None:
+        """
+        Take whatever is waiting, once, and remember when it came.
+
+        **Every read of this class goes through here.** A check that
+        fails on bytes it did not want has to say when they arrived:
+        the server log names what woke a client at the moment it did,
+        and without a time nobody can line the two up.
+        Lillecarl/pymux#180.
+        """
+        readable, _, _ = select.select([self.master_fd], [], [], 0.1)
+        if not readable:
+            return
+        data = os.read(self.master_fd, 65536)
+        if data:
+            self.arrivals.append((time.time(), len(self.seen)))
+            self.seen += data
+
+    def drain(self, seconds=1.0):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            self.read_once()
+
+    def write(self, data):
+        os.write(self.master_fd, data)
+
+    def resize(self, rows, columns):
+        """
+        Give the pty of the client a new size.
+
+        Setting the size on the master is what a terminal emulator does
+        when its window changes. Everything after that is pymux's own:
+        the client hears SIGWINCH, tells the server, the server resizes
+        the pane, and the pane signals the program in it.
+
+        The signal is sent here and not by the kernel. The kernel sends
+        SIGWINCH to the foreground process group of the pty, and this
+        pty has no session: `run_on_pty` gives the client the slave
+        as its three streams and never makes it a controlling terminal,
+        because nothing else in these checks needs one. So there is no
+        foreground group to signal, and this does what the kernel would
+        have done.
+        """
+        fcntl.ioctl(
+            self.master_fd,
+            termios.TIOCSWINSZ,
+            struct.pack("HHHH", rows, columns, 0, 0),
+        )
+        self.client.send_signal(signal.SIGWINCH)
+
+    def wait_for_queries(self):
+        """
+        Wait until the client asked everything, up to the fence.
+
+        Returns the length of what was read. The queries carry the
+        sequences of every protocol, so a check that something is never
+        sent has to look at what comes after them.
+        """
+        self.wait_for(GRAPHICS_QUERY.encode())
+        self.wait_for(b"\x1b[c")
+        return len(self.seen)
+
+    def mark(self):
+        "A point in the output, for `since`."
+        return len(self.seen)
+
+    def since(self, mark):
+        "Everything that arrived after `mark`."
+        return self.seen[mark:]
+
+    def arrivals_since(self, mark, start):
+        """
+        Each read past `mark`, as seconds after `start` and its bytes.
+
+        A frame is one read most of the time, so this is the list of
+        frames with the moment each one went out.
+        """
+        out = []
+        for index, (landed, offset) in enumerate(self.arrivals):
+            end = self.arrivals[index + 1][1] if index + 1 < len(self.arrivals) else len(self.seen)
+            if end <= mark:
+                continue
+            out.append((landed - start, self.seen[max(offset, mark) : end]))
+        return out
+
+    def log_mark(self):
+        "How much of the server log is written, for `log_since`."
+        if self.server_log is None or not self.server_log.exists():
+            return 0
+        return len(self.server_log.read_text(errors="replace").splitlines())
+
+    def log_since(self, mark, limit=120):
+        "What the server logged past `mark`, newest kept."
+        if self.server_log is None or not self.server_log.exists():
+            return []
+        lines = self.server_log.read_text(errors="replace").splitlines()
+        return lines[mark:][-limit:]
+
+    def report_window(self, mark, log_mark, start):
+        """
+        Say what arrived in a window, and what the server was doing.
+
+        A check that expects nothing and gets something can only say
+        which bytes it saw, and bytes alone do not say which of the
+        things that ask for a frame asked for this one. This lines the
+        two up: when each read landed, and what the server logged
+        around it. Lillecarl/pymux#180.
+        """
+        print("--- what arrived, and when (from %s) ---" % _clock(start))
+        for at, data in self.arrivals_since(mark, start):
+            # Both clocks. The relative one says how far into the
+            # window a read is, and the wall clock is the one the log
+            # lines carry, which is what lines the two up at all.
+            print("  %5.2fs %s %r" % (at, _clock(start + at), data))
+        lines = self.log_since(log_mark)
+        if lines:
+            print("--- what the server was doing ---")
+            print("\n".join(lines))
+
+    def report(self):
+        print(self.seen[-4000:].decode("utf-8", "replace"))
+        if self.stderr_path is not None and self.stderr_path.exists():
+            print("--- client stderr ---\n" + self.stderr_path.read_text(errors="replace"))
+        log = getattr(self, "server_log", None)
+        if log is not None and log.exists():
+            # Only what the server complained about: the whole log is
+            # every frame of every render.
+            lines = [
+                line
+                for line in log.read_text(errors="replace").splitlines()
+                if "ERROR" in line or "Traceback" in line or line.startswith("  ")
+            ]
+            if lines:
+                print("--- server errors ---\n" + "\n".join(lines[-60:]))
+            probes = [line for line in log.read_text(errors="replace").splitlines() if "PROBE" in line]
+            if probes:
+                print("--- probes ---\n" + "\n".join(probes[-25:]))
+
+
+class SecondClient(Attached):
+    """
+    Another client on the same server, playing another terminal.
+
+    `Terminal` starts a server and attaches the first client. This one
+    joins a server that is already there, so a check can put two
+    terminals of different abilities in front of one session.
+
+    This client always uses the socket, on both routes. A server has
+    one in-process client at most, so under `PYMUX_ROUTE=integrated`
+    the run is a mixed one: the first client reads a queue and this one
+    reads a socket. That is what a person does who attaches a second
+    terminal to a session they started with `pymux integrated`.
+    """
+
+    def __init__(self, tmp, sock_path, name, colorterm=""):
+        self.sock_path = sock_path
+        self.stderr_path = tmp / ("%s-stderr.log" % name)
+        self.master_fd, self.client, self.stderr = attach_client(sock_path, self.stderr_path, colorterm)
+        self.seen = b""
+        self.arrivals = []
+        self.passed = 0
+        self.passed_keys = 0
+
+    def close(self):
+        "Leave. The server stays: the first client owns it."
+        if self.client.poll() is None:
+            self.client.send_signal(signal.SIGTERM)
+        try:
+            self.client.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.client.kill()
+        self.stderr.close()
+        os.close(self.master_fd)
+
+
+class Terminal(Attached):
+    """
+    One pymux server with one client attached to a pty.
+
+    `command` names the program of the first pane. The default is the
+    pane child of this file, which `mode` then tells to draw a kitty
+    image or a sixel one. `rows` sizes the pty of the client, and with
+    it the pane.
+
+    `PYMUX_ROUTE` says how the client reaches the server. On the socket
+    route a daemon starts first and the client attaches to it. On the
+    integrated route one process holds both, and it binds the socket
+    too, so `run_cli` still reaches the server.
+    """
+
+    def __init__(
+        self,
+        tmp,
+        mode,
+        colorterm="",
+        command=None,
+        rows=24,
+        columns=80,
+        config=None,
+    ):
+        self.tmp = tmp
+        self.sock_path = tmp / ("%s.sock" % mode)
+        self.stderr_path = tmp / ("%s-stderr.log" % mode)
+        # On the socket route the server runs as a daemon, so nothing
+        # of it reaches this process. A check that fails is unreadable
+        # without this.
+        self.server_log = tmp / ("%s-server.log" % mode)
+
+        if command is None:
+            child_path = tmp / "pane_child.py"
+            child_path.write_text(PANE_CHILD)
+            command = "python3 %s %s" % (child_path, mode)
+
+        # A configuration file, read before the first window opens.
+        # Both routes take it the same way.
+        configuration = ["-f", config] if config is not None else []
+
+        if ROUTE == "integrated":
+            # One process. The command of the first pane follows the
+            # mode word. Nothing names the session, so it keeps the
+            # default name.
+            self.session_name = "0"
+            self.master_fd, self.client, self.stderr = run_on_pty(
+                [
+                    "-S",
+                    self.sock_path,
+                    "--log",
+                    self.server_log,
+                    *configuration,
+                    "integrated",
+                    *shlex.split(command),
+                ],
+                self.stderr_path,
+                colorterm,
+                rows=rows,
+                columns=columns,
+            )
+        else:
+            self.session_name = "test"
+            started = run_cli(
+                self.sock_path,
+                [
+                    "--log",
+                    str(self.server_log),
+                    *[str(a) for a in configuration],
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "test",
+                    command,
+                ],
+            )
+            assert started.returncode == 0, started.stderr
+
+            self.master_fd, self.client, self.stderr = attach_client(
+                self.sock_path,
+                self.stderr_path,
+                colorterm,
+                rows=rows,
+                columns=columns,
+                configuration=configuration,
+            )
+        self.seen = b""
+        self.arrivals = []
+        self.passed = 0
+        self.passed_keys = 0
+
+    def close(self):
+        run_cli(self.sock_path, ["kill-server"])
+        if self.client.poll() is None:
+            self.client.send_signal(signal.SIGTERM)
+        try:
+            self.client.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.client.kill()
+        self.stderr.close()
+        os.close(self.master_fd)
+        time.sleep(0.3)
+        run_cli(self.sock_path, ["kill-server"])
+
+
+# ----------------------------------------------------------------------
+
+
+def check_osc_sequences(terminal, tail):
+    """
+    The OSC sequences of the pane that reach the terminal, and the two
+    that do not.
+
+    **The clipboard write is one of the two.** `set-clipboard` ships as
+    tmux ships it, "external", where a copy the person makes goes out
+    and a program in a pane is refused: a program on the far side of an
+    ssh connection would otherwise write what that person pastes next.
+    `check_a_pane_reaches_the_clipboard_when_told_to` turns it on.
+    Lillecarl/pymux#378.
+    """
+    assert OSC_POINTER.encode() in tail, "the pointer shape did not arrive"
+    assert OSC_CLIPBOARD.encode() not in tail, "a pane wrote the clipboard of the user with the shipped option"
+    assert OSC_CLIPBOARD_QUERY.encode() not in tail, "the pane read the clipboard of the user"
+
+    found = re.search(OSC_NOTIFICATION_RE, tail)
+    assert found, "the notification did not arrive"
+    return found.group(1)
+
+
+def check_hyperlink(terminal):
+    """
+    The link that the pane drew reaches the terminal of the user.
+
+    It opens before the text it belongs to and closes after it, and the
+    target never travels as text.
+    """
+    opened = ("\x1b]8;;%s\x1b\\" % HYPERLINK_TARGET).encode()
+    assert opened in terminal.seen, "the hyperlink never opened"
+    after = terminal.seen[terminal.seen.index(opened) + len(opened) :]
+    assert b"L" in after[:40], "no text after the link opened"
+    assert b"\x1b]8;;\x1b\\" in after, "the hyperlink never closed"
+    # A repaint writes the cells again, so the target legitimately
+    # arrives more than once; what must never happen is the target
+    # outside the sequence that opens it. Lillecarl/pymux#346.
+    assert HYPERLINK_TARGET.encode() not in terminal.seen.replace(opened, b""), "the target travelled as text"
+    print("hyperlink: ok")
+
+
+def check_underline(terminal):
+    """
+    The shape of the line and its colour reach the terminal of the user.
+
+    Neither is a sequence that pymux passes on: both belong to a cell,
+    travel in the style of that cell, and the renderer writes them
+    again.
+    """
+    assert b"4:3" in terminal.seen, "the shape of the line never arrived"
+    assert b"58:2::255:0:0" in terminal.seen, "the colour of the line never arrived"
+    print("underline: ok")
+
+
+def check_kitty_terminal(tmp):
+    "A terminal that speaks every kitty protocol and 24 bit colour."
+    terminal = Terminal(tmp, "kitty")
+    try:
+        # 1. The client asks its terminal what it can do.
+        mark = terminal.wait_for_queries()
+        assert CELL_SIZE_QUERY.encode() in terminal.seen
+        assert TRUECOLOR_PROBE.encode() in terminal.seen
+
+        # Answer like a terminal that supports all of it. The keyboard
+        # query asks for every flag, and a real kitty takes them all.
+        # Everything but the device attributes goes at once; that
+        # reply is the fence of the detection, and it waits below for
+        # the pane, so that the flags the client first hears already
+        # hold what the pane pushed. Answering it first and parsing
+        # second asks for `=3;1u` where step 3 waits for `>3u`,
+        # decided by whichever of the pump and the handshake wins a
+        # turn of the loop.
+        terminal.write(b"\x1b[?31u")  # Keyboard flags.
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")  # Kitty graphics.
+        terminal.write(b"\x1b[6;20;10t")  # Cell size.
+        terminal.write(b"\x1bP1$r38:2::1:2:3m\x1b\\")  # The colour survived.
+
+        # 2. The pane child runs and its output is rendered. Its first
+        #    write pushes the flags below, so waiting for it here is
+        #    what the fence above waits for.
+        terminal.wait_for(b"READY")
+        terminal.write(b"\x1b[?62;1;6c")  # Device attributes: no sixel.
+
+        # 3. The pane pushed the disambiguate flag and the event types;
+        #    the client pushes both on the outer terminal. The first
+        #    enable is a push, the protocol's own way to hold the state
+        #    that was there -- a shell's, or a nested pymux's.
+        #    Lillecarl/pymux#403.
+        terminal.wait_for(b"\x1b[>3u")
+
+        #    Its environment describes the pane, not the terminal that
+        #    the client attached from: a pane takes 24 bit colour, and
+        #    it is no kitty window.
+        # A pane is told what it really is. The name is "pyte" when the
+        # entry of terminfo is there, and the name of xterm when it is
+        # not; the server and this check read the same rule.
+        terminal.wait_for(b"ENV<%s|truecolor||>" % terminal_name().encode("ascii"))
+        #    A hyperlink belongs to a cell, so the pane keeps it and the
+        #    renderer opens it again on the terminal of the user.
+        terminal.wait_for(b"plain")
+        check_hyperlink(terminal)
+        check_underline(terminal)
+
+        assert b"a=T" not in terminal.seen, "graphics command leaked as text"
+        assert IMAGE_PAYLOAD.encode() not in terminal.seen, "graphics payload leaked as text"
+
+        # 4. The server re-transmits the image and puts it on screen.
+        # From the mark and not from the step above: the transmission
+        # goes out on the first render that can carry it, which is
+        # before these waits when the detection answered early.
+        terminal.wait_for(b"\x1b_Ga=t,i=", since=mark)
+        terminal.wait_for(b"a=p,i=", since=mark)
+        transmit = re.search(rb"\x1b_Ga=t,i=(\d+),t=d,q=2,f=24,s=2,v=2,o=z", terminal.seen)
+        assert transmit, "no image transmission on the outer terminal"
+        image_id = transmit.group(1)
+        put = re.search(
+            rb"\x1b\[(\d+);(\d+)H\x1b_Ga=p,i=" + image_id + rb",p=1,c=3,r=2,C=1,q=2",
+            terminal.seen,
+        )
+        assert put, "no placement on the outer terminal"
+        # The pane starts on the second row: the titlebar takes the first.
+        assert (int(put.group(1)), int(put.group(2))) == (2, 1)
+
+        # 5. The colours are 24 bit, because the probe came back.
+        #
+        # This asks whether it ever happened and does not wait for the
+        # next one. A wait is for a thing this check made happen; the
+        # depth of the colour is a property of the whole session, and
+        # pymux drew its own status bar in 24 bit before step 1.
+        assert b"\x1b[0;38;2;" in terminal.seen, "the colours are not 24 bit"
+
+        # 6. Keys reach the pane in the encoding that the pane asked for.
+        terminal.write(b"\x1b[97;5u")
+        terminal.wait_for_input(CTRL_A_KITTY)
+        terminal.write(b"\x01")  # The legacy encoding is translated too.
+        terminal.wait_for_input(CTRL_A_KITTY)
+
+        #    A key that came back up reaches the pane as well. Only a
+        #    terminal that speaks the protocol sends one, and only a
+        #    pane that asked for the event types may read it.
+        terminal.write(KEY_RELEASE)
+        terminal.wait_for_input(KEY_RELEASE_READ)
+
+        # A press and its release must give the pane one text key.
+        terminal.drain(0.5)
+        read_mark = len(keys_read(terminal.seen))
+        terminal.write(b"a" + KEY_RELEASE)
+        terminal.wait_for_input(b"a" + KEY_RELEASE_READ)
+        terminal.drain(0.5)
+        assert keys_read(terminal.seen)[read_mark:] == b"a" + KEY_RELEASE_READ
+
+        #    And the pane hears the truth about its keyboard: this
+        #    terminal serves every flag, so the pane keeps both of the
+        #    flags that it pushed.
+        terminal.write(ASK_THE_FLAGS)
+        terminal.wait_for_input(flags_answer(3))
+
+        # Let the pane finish reading. One read of the pane returns
+        # whatever has arrived, so a write that comes too soon lands in
+        # the same read as this one and the check below looks for a
+        # block that never appears on its own.
+        terminal.drain(0.5)
+
+        # 7. The clipboard, the notification and the pointer shape of
+        #    the pane reach the terminal. The pane sends all three when
+        #    it starts, so the wait is from the mark that this check
+        #    reads them out of, and not from the step above.
+        terminal.wait_for(OSC_POINTER.encode(), since=mark)
+        identifier = check_osc_sequences(terminal, terminal.since(mark))
+
+        #    And the clipboard reaches it once the option says a pane
+        #    may. The pane writes it again on "C", because a pane is
+        #    never told that the first one was refused.
+        allowed = terminal.mark()
+        run_cli(terminal.sock_path, ["set-option", "-g", "set-clipboard", "on"])
+        terminal.write(b"C")
+        terminal.wait_for(OSC_CLIPBOARD.encode(), since=allowed)
+        run_cli(terminal.sock_path, ["set-option", "-g", "set-clipboard", "external"])
+
+        # 8. The user clicks the notification. The answer goes to the
+        #    pane that asked, under the name that the pane chose.
+        terminal.write(b"\x1b]99;i=" + identifier + b"\x1b\\")
+        terminal.wait_for(("<<%s>>" % OSC_NOTIFICATION_ANSWER.encode().hex()).encode())
+
+        # 9. A reply of the outer terminal does not reach the pane. The
+        #    pane echoes everything it reads between "<<" and ">>", so
+        #    a leak shows up there as the hex of what was written.
+        #
+        #    **The reply itself, and not "anything echoed".** These two
+        #    replies tell the server what this terminal draws with, so
+        #    the client's theme is matched again and every client
+        #    repaints -- and a repaint redraws the pane, "<<" blocks of
+        #    earlier steps included. Lillecarl/pymux#346.
+        terminal.drain(0.5)
+        quiet = terminal.mark()
+        background = b"\x1b]11;rgb:dead/beef/cafe\x1b\\"
+        foreground = b"\x1b]10;rgb:1234/5678/9abc\x07"
+        terminal.write(background)
+        terminal.write(foreground)
+        terminal.drain(1.0)
+        said = terminal.since(quiet)
+        for reply in (background, foreground):
+            assert reply.hex().encode() not in said, "a reply of the terminal reached the pane"
+            assert reply not in said, "a reply of the terminal reached the pane"
+
+        # 10. The server goes away: the client pops what it pushed, and
+        #     the encoding beneath it comes back -- not zero, what was
+        #     ours to change was only the value over the push.
+        run_cli(terminal.sock_path, ["kill-server"])
+        terminal.wait_for(b"\x1b[<1u")
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("kitty terminal: ok")
+
+
+def check_sixel_terminal(tmp):
+    "An xterm-like terminal: sixel, no kitty protocols, 256 colours."
+    terminal = Terminal(tmp, "sixel")
+    try:
+        mark = terminal.wait_for_queries()
+
+        # Answer only the cell size and the device attributes. The "4"
+        # says sixel; nothing answers the kitty or the colour query.
+        terminal.write(("\x1b[6;%i;%it" % (CELL_HEIGHT, CELL_WIDTH)).encode())
+        terminal.write(b"\x1b[?62;1;4;6c")
+
+        terminal.wait_for(b"READY")
+
+        # **The image reaches the screen with its own pixels.** The pane
+        # takes its cell size from this client, so it reserves
+        # `ceil(20/8)` by `ceil(12/17)` cells for the 20 by 12 image:
+        # three columns and one row, which is 24 by 17 pixels. The image
+        # fits inside that, so nothing resamples it and the sixel that
+        # goes out is 20 by 12. Lillecarl/pymux#369. It is the pane
+        # child's own sequence, header and all. Lillecarl/pymux#603.
+        terminal.wait_for(b"\x1bP0;0;0q")
+
+        # The sixel that the pane child drew must not reach the screen
+        # as text.
+        #
+        # **Only what came before the image counts.** An image that fits
+        # at its own pixels goes out as the pane child sent it, so the
+        # body that goes out is the body that came in, byte for byte.
+        # Asking whether the body is anywhere in what the terminal saw
+        # was a race that the answer to #369 decided: the assertion
+        # stood before the image was drawn and passed on timing alone.
+        before_the_image = terminal.seen.split(b"\x1bP0;0;0q")[0]
+        assert b"!20~" not in before_the_image, "sixel body leaked as text"
+        found = re.search(rb"\x1b\[(\d+);(\d+)H\x1bP([^\x1b]*)\x1b\\", terminal.seen)
+        assert found, "no sixel image on the outer terminal"
+        decoded = decode_sixel(found.group(3).decode("latin-1"))
+        assert decoded is not None, "the sixel image does not decode"
+        assert (decoded[0], decoded[1]) == (20, 12), "the image did not keep its own pixels: %r" % (decoded[:2],)
+        assert 3 * CELL_WIDTH >= 20 and 1 * CELL_HEIGHT >= 12, (
+            "the cells this test reasons about no longer hold the image"
+        )
+
+        # The colours stay at 256: nothing said more.
+        assert b"\x1b[0;38;5;" in terminal.seen, "no 256 colour output"
+        assert b";38;2;" not in terminal.seen, "24 bit colour without a probe"
+
+        # No kitty protocol was claimed, so nothing of it is sent.
+        assert b"\x1b_G" not in terminal.since(mark)
+        assert b"\x1b[=" not in terminal.since(mark)
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("sixel terminal: ok")
+
+
+def check_colorterm_terminal(tmp):
+    "A terminal that answers no probe but sets COLORTERM."
+    terminal = Terminal(tmp, "sixel", colorterm="truecolor")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")  # Nothing else is answered.
+        terminal.wait_for(b"READY")
+        # The environment is the fallback when the probe stays quiet.
+        terminal.wait_for(b"\x1b[0;38;2;")
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("COLORTERM terminal: ok")
+
+
+def check_plain_terminal(tmp):
+    "A terminal that answers only the device attributes."
+    terminal = Terminal(tmp, "sixel")
+    try:
+        mark = terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1;2c")  # A VT100: no sixel, nothing else.
+
+        terminal.wait_for(b"READY")
+        terminal.drain(1.5)
+
+        tail = terminal.since(mark)
+        # Passing an OSC sequence on asks nothing of the terminal, so a
+        # terminal that answers no query still receives them.
+        check_osc_sequences(terminal, tail)
+        assert b"\x1b_G" not in tail, "images without support"
+        assert b"\x1bP" not in tail, "sixel without support"
+        assert b"\x1b[=" not in tail, "keyboard flags without support"
+        assert b";38;2;" not in tail, "24 bit colour without support"
+
+        # The pane asked for the disambiguate flag and the event types.
+        # This terminal reports no key release, so pymux makes one up
+        # and the pane keeps both flags.
+        terminal.write(ASK_THE_FLAGS)
+        terminal.wait_for_input(flags_answer(3))
+
+        # And a key really comes up: one press of "a" reaches the pane
+        # as the character and the release of that key.
+        terminal.write(b"a")
+        terminal.wait_for_input(KEY_RELEASE_READ)
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("plain terminal: ok")
+
+
+def check_closing_split(tmp):
+    """
+    A split that closes must not upset the client.
+
+    A task of the server that nobody holds can be collected while it
+    still runs. The loop reports that, and prompt_toolkit answers an
+    exception in the loop by leaving the alternate screen and asking
+    for a key press. Nobody is there to press one, so the answer fails
+    and reports again: the client used to repaint without end.
+
+    This is a smoke check, not a proof: the collection depends on when
+    the garbage collector runs. `tests/test_server_tasks.py` pins the
+    two halves of the fix.
+    """
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        # A second pane that ends on its own.
+        split = run_cli(terminal.sock_path, ["split-window", "%s -c pass" % sys.executable])
+        assert split.returncode == 0, split.stderr
+        _until(
+            lambda: run_cli(terminal.sock_path, ["list-panes"]).stdout.count(b"\n") == 1,
+            "the split never closed",
+        )
+
+        # A repaint without end is a negative over time: this watches.
+        quiet = terminal.mark()
+        terminal.drain(3.0)
+        tail = terminal.since(quiet)
+
+        assert b"\x1b[?1049l" not in tail, "the client left the alternate screen after a split closed"
+        assert len(tail) < 200000, "the client repainted without end after a split closed: %i bytes" % len(tail)
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("closing split: ok")
+
+
+def check_pointer_shape(tmp):
+    """
+    The shape of the pointer follows the pane that the client looks at.
+
+    The first pane asks for a shape. A split into a pane that asks for
+    none has to take the shape away again, or the pointer keeps the
+    shape of a pane that the user left.
+    """
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        # The pane sends the pointer shape before it writes "READY", so
+        # the waits are in that order. `PANE_CHILD` is where the order
+        # comes from.
+        terminal.wait_for(OSC_POINTER.encode())
+        terminal.wait_for(b"READY")
+
+        # A second pane, which asks for no shape.
+        child = tmp / "quiet-child.py"
+        child.write_text(QUIET_CHILD)
+        mark = terminal.mark()
+        split = run_cli(
+            terminal.sock_path,
+            ["split-window", "%s %s" % (sys.executable, child)],
+        )
+        assert split.returncode == 0, split.stderr
+        terminal.wait_for(b"QUIET")
+        terminal.drain(1.0)
+        assert b"\x1b]22;\x1b\\" in terminal.since(mark), "the pointer kept the shape of the pane that the user left"
+
+        # Back to the pane that asked for the shape.
+        mark = terminal.mark()
+        back = run_cli(terminal.sock_path, ["last-pane"])
+        assert back.returncode == 0, back.stderr
+        terminal.drain(1.0)
+        assert OSC_POINTER.encode() in terminal.since(mark), "the shape did not come back with the pane"
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("pointer shape: ok")
+
+
+def check_cursor_shape(tmp):
+    """
+    The cursor of the client is the cursor of the pane it looks at.
+
+    A pane keeps its own shape, because a program in it writes DECSCUSR
+    and expects the terminal to obey. So the shape follows the pane the
+    user looks at, the same way the pointer shape does.
+
+    A pane that asks for nothing gives the cursor back rather than
+    naming a shape of its own. The person running pymux chose the cursor
+    of their terminal, and a pane holds a value from the moment it
+    starts only because it has to hold one.
+
+    And the client never takes the blinking away. prompt_toolkit used to
+    send "CSI ? 12 l" every time it showed the cursor, which stops the
+    cursor of the user blinking and never starts it again.
+    """
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        # The first pane asks for no shape, so nothing is said about
+        # the cursor at all. Anything said here lands on the cursor the
+        # person chose.
+        terminal.drain(1.0)
+        asked = re.findall(rb"\x1b\[[0-9]* q", terminal.seen)
+        assert asked == [], "a pane that asked for no shape named one: %r" % asked
+
+        # A second pane, which asks for a bar that does not blink.
+        child = tmp / "cursor-child.py"
+        child.write_text(CURSOR_CHILD)
+        mark = terminal.mark()
+        split = run_cli(
+            terminal.sock_path,
+            ["split-window", "%s %s" % (sys.executable, child)],
+        )
+        assert split.returncode == 0, split.stderr
+        terminal.wait_for(b"CURSORMARK")
+        terminal.drain(1.0)
+        assert b"\x1b[6 q" in terminal.since(mark), "the bar that the pane asked for never reached the terminal"
+
+        # Back to the pane that asked for nothing. The bar of the other
+        # pane is on the terminal now, so saying nothing would leave it
+        # there. "CSI 0 SP q" is what gives the cursor back.
+        mark = terminal.mark()
+        back = run_cli(terminal.sock_path, ["last-pane"])
+        assert back.returncode == 0, back.stderr
+        terminal.drain(1.0)
+        assert b"\x1b[0 q" in terminal.since(mark), "the cursor of the person never came back"
+
+        assert b"\x1b[?12l" not in terminal.seen, "the client stopped the cursor of the user blinking"
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("cursor shape: ok")
+
+
+def check_overlay_pane(tmp):
+    """
+    An overlay pane floats over the layout and takes the keyboard.
+
+    It opens in the middle of the screen, the program in it writes
+    there, and the overlay goes away when that program ends.
+    """
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        # An overlay that prints a mark, echoes what it reads and
+        # waits. The command of a pane is split on whitespace, so it
+        # goes into a file of its own.
+        child = tmp / "overlay-child.py"
+        child.write_text(OVERLAY_CHILD)
+        opened = run_cli(
+            terminal.sock_path,
+            ["display-popup", "-T", "the title", "%s %s" % (sys.executable, child)],
+        )
+        assert opened.returncode == 0, opened.stderr
+
+        terminal.wait_for(b"OVERLAYMARK")
+        tail = terminal.since(0)
+        assert b"the title" in tail, "the overlay drew no title bar"
+
+        # The keyboard reaches the overlay, not the pane behind it.
+        # One read of the overlay returns whatever has arrived, so two
+        # letters in a row can come back in one block. The next letter
+        # goes out only after the echo of the one before it, which
+        # keeps every block a single letter.
+        mark = terminal.mark()
+        for letter in b"OVER":
+            terminal.write(bytes([letter]))
+            terminal.wait_for(b"[[%c]]" % letter)
+        typed = terminal.since(mark)
+        assert b"<<" not in typed, "the pane behind the overlay received the keys"
+
+        # Closing it takes the program with it.
+        closed = run_cli(terminal.sock_path, ["close-popup"])
+        assert closed.returncode == 0, closed.stderr
+        terminal.drain(1.5)
+
+        quiet = terminal.mark()
+        terminal.drain(2.0)
+        after = terminal.since(quiet)
+        assert b"\x1b[?1049l" not in after, "the client left the alternate screen after the overlay closed"
+        assert len(after) < 200000, "the client repainted without end after the overlay closed: %i bytes" % len(after)
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("overlay pane: ok")
+
+
+def check_two_terminals_of_different_abilities(tmp):
+    """
+    Two clients, two terminals that can do different things, one
+    session.
+
+    One speaks the kitty graphics protocol. The other answers nothing
+    but the device attributes, so it draws the same image as half
+    blocks. Each gets what its own terminal takes, and neither gets the
+    other's.
+
+    The keyboard goes the other way, and on purpose. Only what every
+    attached client can report counts, so a plain terminal joining
+    would take the key releases away from the pane. Synthesis puts them
+    back: a pane keeps the flags it pushed, and a client that cannot
+    send a release has one made for it. A pane is never told that a
+    capability went away because somebody else attached.
+
+    **Not on the integrated route.** That server draws on the one
+    terminal it runs in and refuses an attach over its socket, so two
+    terminals of one session cannot exist there.
+    `check_second_terminal` is what says so. Lillecarl/pymux#159.
+    """
+    if ROUTE == "integrated":
+        print("two terminals of different abilities: one terminal on this route")
+        return
+
+    terminal = Terminal(tmp, "kitty")
+    second = None
+    try:
+        terminal.wait_for_queries()
+        # This terminal serves every flag of the keyboard protocol, so
+        # a release it sends is a real one.
+        terminal.write(b"\x1b[?31u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        # The pane pushed flags 1 and 2, and this terminal serves both.
+        terminal.write(ASK_THE_FLAGS)
+        terminal.wait_for_input(flags_answer(3))
+
+        # One client, and it reports a release itself. The pane hears
+        # the press on its own.
+        terminal.write(b"\x01")
+        terminal.wait_for_input(CTRL_A_KITTY)
+        terminal.drain(1.0)
+
+        # A second terminal joins. It answers the device attributes and
+        # nothing else: no kitty keyboard, no kitty graphics, no sixel.
+        second = SecondClient(tmp, terminal.sock_path, "plain")
+        # After the queries: the graphics query carries "\x1b_G" itself,
+        # so a check that it never arrives has to start past it.
+        after_queries = second.wait_for_queries()
+        second.write(b"\x1b[?62;1;6c")
+        second.drain(2.0)
+        drawn = second.since(after_queries)
+
+        # Each terminal drew the image the way it can.
+        assert b"\x1b_Ga=" in terminal.seen, "the kitty client drew no image"
+        assert b"READY" in second.seen, "the second client never drew the pane"
+        assert UPPER_HALF.encode() in drawn or LOWER_HALF.encode() in drawn, "the plain client drew no half blocks"
+
+        # And neither got what it cannot read.
+        assert b"\x1b_Ga=" not in drawn, "kitty graphics reached a terminal that never claimed them"
+        assert b"\x1bP0;" not in drawn, "sixel reached a terminal without it"
+
+        # The pane keeps both flags. The client that cannot report a
+        # release has one made for it, so nothing was taken away.
+        terminal.write(ASK_THE_FLAGS)
+        terminal.wait_for_input(flags_answer(3))
+
+        # Both clients still work: a key from either reaches the pane,
+        # in the encoding the pane asked for.
+        #
+        # It arrives as a press and a release together. Only what every
+        # client can report counts, and the plain terminal reports no
+        # release, so the release is made rather than taken away. The
+        # pane reads every key going down and coming up; only the time
+        # between them is lost.
+        terminal.write(b"\x01")
+        terminal.wait_for_input(CTRL_A_KITTY + CTRL_A_KITTY_RELEASE)
+        second.write(b"\x01")
+        second.wait_for_input(CTRL_A_KITTY + CTRL_A_KITTY_RELEASE)
+
+        # The second client leaves. The made up release goes with the
+        # client that needed it: the pane hears one press again.
+        second.close()
+        second = None
+        terminal.drain(1.0)
+        mark = terminal.mark()
+        terminal.write(b"\x01")
+        terminal.wait_for_input(CTRL_A_KITTY)
+        assert CTRL_A_KITTY_RELEASE not in keys_read(terminal.since(mark)), (
+            "the release is still made up after the plain client left"
+        )
+
+        # The server is whole: one session, one window, one pane.
+        listed = run_cli(terminal.sock_path, ["list-panes", "-a", "-F", "#{pane_id}"])
+        assert listed.returncode == 0, listed.stderr
+        assert len(listed.stdout.split()) == 1, listed.stdout
+
+    except BaseException:
+        terminal.report()
+        if second is not None:
+            second.report()
+        raise
+    finally:
+        if second is not None:
+            second.close()
+        terminal.close()
+    print("two terminals: ok")
+
+
+def check_second_terminal(tmp):
+    """
+    What a second terminal gets, and it is not the same on both routes.
+
+    A server with a socket of its own serves every terminal that
+    attaches to it. An integrated server draws on the one terminal it
+    runs in: the socket it binds is for commands, and an attach over it
+    is refused with the reason on the terminal that asked.
+
+    **This is what the refusal is for.** Two terminals of an integrated
+    session share a process that only one of them holds, so `ctrl+b d`
+    in that one ends the session for both. Lillecarl/pymux#159.
+    """
+    terminal = Terminal(tmp, "kitty")
+    second = None
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        second = SecondClient(tmp, terminal.sock_path, "second")
+
+        if ROUTE == "integrated":
+            second.wait_for(b"that terminal is taken")
+            try:
+                code = second.client.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                raise AssertionError("the refused client is still running")
+            # A refusal is not a detach, and a script has only the code
+            # to tell them apart. Lillecarl/pymux#332.
+            assert code == 1, "the refused client left with %r" % (code,)
+
+            # And the server kept serving: the first terminal still has
+            # its pane, and a command still reaches the socket.
+            listed = run_cli(terminal.sock_path, ["list-panes", "-a", "-F", "#{pane_id}"])
+            assert listed.returncode == 0, listed.stderr
+            assert len(listed.stdout.split()) == 1, listed.stdout
+        else:
+            second.wait_for_queries()
+            second.write(b"\x1b[?62;1;6c")
+            second.wait_for(b"READY")
+            assert second.client.poll() is None, "the second client left"
+
+    except BaseException:
+        terminal.report()
+        if second is not None:
+            second.report()
+        raise
+    finally:
+        if second is not None:
+            second.close()
+        terminal.close()
+    print("a second terminal: ok")
+
+
+def check_full_screen_pane(tmp):
+    """
+    One pane covers every cell of the terminal, and nothing else does.
+
+    A picture of a pane can only be compared against a picture of the
+    same program without pymux when the two line up. Every row that
+    pymux keeps for itself moves the content of the pane by one, and
+    then the comparison needs a crop, which is a place for a difference
+    to hide.
+
+    So this measures the whole grid. The pane fills it with "E", writes
+    a marker in each corner, and every cell of what the client draws
+    has to hold what the pane holds. The bottom right cell is the one
+    to watch: a renderer often leaves it alone, because writing it
+    scrolls some terminals.
+    """
+    rows, columns = 24, 80
+
+    config = tmp / "full-screen.conf"
+    # `set-client-option`, because full screen belongs to the terminal
+    # a person is sitting at. The client reads this file for itself and
+    # announces the line when it attaches. Lillecarl/pymux#471.
+    config.write_text("set-client-option full-screen on\n")
+
+    child_path = tmp / "corner_child.py"
+    child_path.write_text(CORNER_CHILD)
+
+    terminal = Terminal(
+        tmp,
+        "fullscreen",
+        command="python3 %s" % child_path,
+        rows=rows,
+        columns=columns,
+        config=config,
+    )
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"SIZE<")
+        # The pane draws again when the client gives it its real size.
+        # Nothing in the byte stream marks the last frame, so give the
+        # redraw time and read the screen it left.
+        terminal.drain(2.0)
+
+        # 1. The pane is as large as the terminal of the client.
+        size = run_cli(
+            terminal.sock_path,
+            ["list-panes", "-F", "#{pane_width}x#{pane_height}"],
+        )
+        assert size.stdout.strip() == b"%dx%d" % (columns, rows), size.stdout
+
+        # 2. Every cell of the screen holds what the pane holds.
+        screen = read_screen(terminal.seen, rows, columns)
+        assert len(screen) == rows
+
+        marker = "SIZE<%dx%d>" % (columns, rows)
+        wanted = [
+            "TL" + "E" * (columns - 4) + "TR",
+            marker + "E" * (columns - len(marker)),
+        ]
+        wanted += ["E" * columns] * (rows - 3)
+        wanted.append("BL" + "E" * (columns - 4) + "BR")
+
+        if screen != wanted:
+            raise AssertionError(
+                "the screen of the client is not the screen of the pane\n" + _side_by_side(wanted, screen)
+            )
+
+        print("full screen pane: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+#: The border between two columns. The plain one, and the one the
+#: focused pane draws over it: `layout._PaneMark` puts its
+#: highlight one cell outside the pane, which is that same cell.
+BORDERS = "│┃"
+
+
+def check_strip_follows_resize(tmp):
+    """
+    A strip is laid out again when the terminal changes size.
+
+    Carl: "The strip window mode doesn't react when i resize the
+    outside terminal." The resize was a font size change in kitty,
+    which is a new number of rows and columns and nothing else.
+    Lillecarl/pymux#208.
+
+    **The unit harness cannot see this.**
+    `tests/test_strip_resizes.py` holds a size a test can change,
+    changes it, and drives `write_to_screen` again. It passes at every
+    size, which rules out the arithmetic and leaves the path this
+    check drives: the client hears SIGWINCH, tells the server, the
+    server resizes the window, and something asks for a frame.
+
+    Two answers, because they fail differently. `list-panes` says what
+    the server thinks each pane is, and the cells say what the client
+    drew. A server that resized while the client drew the old width
+    would pass the first and fail the second.
+    """
+    # A font size change moves both numbers, because the window keeps
+    # its pixels and the cells change size. So both move here.
+    rows, columns = 24, 80
+    fewer, narrower = 18, 60
+
+    #: Three columns of half a window are wider than the window, so
+    #: the strip overflows and scrolls. That is the state a person is
+    #: in when they change the font size, and a strip that exactly
+    #: fits could follow a resize while an overflowing one did not.
+    HOW_MANY = 3
+
+    config = tmp / "strip.conf"
+    # A window option cannot be set for a window that does not exist
+    # yet, and a configuration file is read before the first one. `-g`
+    # says what every new window starts with. Lillecarl/pymux#199.
+    config.write_text("set-option pane-border-status on\nset-window-option -g strip on\n")
+
+    def every_column_at(wide, high):
+        """
+        What every column of the strip is at that terminal size.
+
+        Half of the window less the border the column owns
+        (Lillecarl/pymux#206), and two rows shorter than the terminal:
+        one for the status line and one for the pane's title bar.
+        """
+        return ["%dx%d" % (wide // 2 - 1, high - 2)] * HOW_MANY
+
+    terminal = Terminal(
+        tmp,
+        "strip",
+        command="sleep 600",
+        rows=rows,
+        columns=columns,
+        config=config,
+    )
+
+    def sizes():
+        "What the server says each pane is, as `widthxheight` strings."
+        listed = run_cli(terminal.sock_path, ["list-panes", "-F", "#{pane_width}x#{pane_height}"])
+        assert listed.returncode == 0, listed.stderr
+        return sorted(one.decode() for one in listed.stdout.split())
+
+    def border_column(mark, high, wide):
+        """
+        Which cell the first border was drawn in.
+
+        The middle row of the screen, which belongs to the panes: the
+        title bars are above it and the status line below.
+        """
+        screen = read_screen(terminal.since(mark), high, wide)
+        middle = screen[high // 2]
+
+        for x, char in enumerate(middle):
+            if char in BORDERS:
+                return x
+
+        raise Failed("no border on row %d of %r" % (high // 2, middle))
+
+    def laid_out(mark, high, wide) -> bool:
+        "Whether the columns and the border drawn since `mark` are where they belong."
+        terminal.drain(0.05)
+        try:
+            return sizes() == every_column_at(wide, high) and border_column(mark, high, wide) == wide // 2 - 1
+        except Failed:
+            return False
+
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        _until(
+            lambda: run_cli(terminal.sock_path, ["list-panes"]).returncode == 0,
+            "the session never had a window",
+        )
+
+        # The other columns, so that there is a strip to lay out.
+        for _ in range(HOW_MANY - 1):
+            opened = run_cli(terminal.sock_path, ["split-window", "-h", "sleep 600"])
+            assert opened.returncode == 0, opened.stderr
+
+        mark = terminal.mark()
+        _until(lambda: laid_out(mark, rows, columns), "the strip was never laid out")
+
+        assert sizes() == every_column_at(columns, rows), sizes()
+        assert border_column(mark, rows, columns) == columns // 2 - 1, (
+            "before the resize",
+            border_column(mark, rows, columns),
+        )
+
+        # The font size changed, which is all a resize is.
+        mark = terminal.mark()
+        terminal.resize(fewer, narrower)
+        # The asserts below say what is wrong if it never is.
+        with contextlib.suppress(AssertionError):
+            _until(lambda: laid_out(mark, fewer, narrower), "")
+
+        assert sizes() == every_column_at(narrower, fewer), (
+            "the server did not resize the columns",
+            sizes(),
+        )
+        assert border_column(mark, fewer, narrower) == narrower // 2 - 1, (
+            "the client drew the columns at the old width",
+            border_column(mark, fewer, narrower),
+        )
+
+        print("a strip follows a resize: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_quoted_argument(tmp):
+    """
+    An argument with a space in it reaches the pane in one piece.
+
+    A command reaches a pane as one string, and the quoting inside it is
+    what says where one argument ends. `Pymux._create_pane` used to
+    split it on whitespace, so `sh -c 'echo one two'` became seven words
+    and `sh` read `'echo` as the whole of its script. The pane then died
+    at once and took the window with it. Lillecarl/pymux#39.
+
+    The route matters here, so this runs on both. The integrated route
+    builds the argument vector and lets `run_pymux` quote it again; the
+    socket route sends the string to a server that parses it. Both end
+    at the same place.
+    """
+    child_path = tmp / "argument_child.py"
+    child_path.write_text(ARGUMENT_CHILD)
+
+    wanted = "one two"
+    terminal = Terminal(
+        tmp,
+        "quoted",
+        command="python3 %s %s" % (child_path, shlex.quote(wanted)),
+    )
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"ARGV<")
+        terminal.drain(1.0)
+
+        # The pane draws the arguments it really got. Read the screen and
+        # not the byte stream: a renderer writes a cell where it likes.
+        # The row is not known either: a pane keeps a title row above it
+        # and the session a status line below.
+        screen = read_screen(terminal.seen)
+        found = None
+        for row in screen:
+            start = row.find("ARGV<")
+            if start != -1:
+                found = row[start : row.index(">", start) + 1]
+                break
+        if found != "ARGV<%s>" % wanted:
+            raise AssertionError("the pane got %r, and the argument was %r\n%s" % (found, wanted, "\n".join(screen)))
+
+        print("quoted argument: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_non_breaking_space(tmp):
+    """
+    A non-breaking space reaches the terminal of the user as one.
+
+    The program in the pane chose that character. A terminal draws what
+    the program drew, so the byte has to come out again and nothing may
+    be drawn under it.
+
+    `checks.pymux-pictures` measures the underline; this measures the
+    character. It is the cheaper of the two and it says which of the two
+    things went wrong.
+    """
+    child_path = tmp / "nbsp_child.py"
+    child_path.write_text(NBSP_CHILD)
+
+    terminal = Terminal(tmp, "nbsp", command="python3 %s" % child_path)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for("A\u00a0B".encode("utf-8"))
+
+        # The character itself, and not the space that prompt_toolkit
+        # would put in its place.
+        written = terminal.seen
+        assert "A\u00a0B".encode("utf-8") in written, repr(written[-400:])
+
+        # And no rendition on it. The pane set none, so the cell has to
+        # arrive with none: an underline here is the one that
+        # `class:nbsp` draws.
+        drawn = re.search(rb"A(\x1b\[[0-9;:]*m)?\xc2\xa0", written)
+        assert drawn is not None, repr(written[-400:])
+        if drawn.group(1) is not None:
+            parameters = drawn.group(1)[2:-1].split(b";")
+            assert b"4" not in parameters, drawn.group(1)
+
+        print("non-breaking space: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_cursor_of_drawing_pane(tmp):
+    """
+    A pane that keeps drawing does not stop the cursor blinking.
+
+    The renderer used to hide the cursor before painting a frame and
+    show it after, every frame. Showing a cursor restarts its blink in
+    most terminals, so a pane with a spinner in it held the cursor in
+    its "on" phase for ever: it was there, and it never blinked.
+    Measured at nine times a second.
+
+    A terminal that holds a frame back needs none of that. The painting
+    is not shown, so the cursor can stay where it is, and it is left
+    alone from one frame to the next.
+
+    Claude Code is the program that showed it, and this is the shape of
+    it: something that redraws while the person is not typing.
+    """
+    program = tmp / "animate.sh"
+    # One cell, and it really changes: a frame that changes nothing is
+    # written no longer, so a pane that draws the same character would
+    # make the client say nothing at all. That is the check below this
+    # one. Lillecarl/pymux#117.
+    program.write_text(
+        "printf '\\033[2J\\033[H'\n"
+        "printf ANIMATING\n"
+        "i=0\n"
+        "while [ $i -lt 40 ]; do\n"
+        "  if [ $((i % 2)) -eq 0 ]; then c=-; else c=+; fi\n"
+        "  printf '\\033[10;1H%s' $c\n"
+        "  sleep 0.1\n"
+        "  i=$((i+1))\n"
+        "done\n"
+        "sleep 5\n"
+    )
+
+    terminal = Terminal(tmp, "animate", command="sh %s" % program)
+    try:
+        terminal.wait_for_queries()
+        # A terminal that holds a frame back says so.
+        terminal.write(b"\x1b[?2026;2$y")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"ANIMATING")
+
+        mark = terminal.mark()
+        terminal.drain(3.0)
+        since = terminal.since(mark)
+
+        toggles = len(re.findall(rb"\x1b\[\?25[lh]", since))
+        assert toggles == 0, "the client touched the cursor %d times while the pane drew" % toggles
+
+        # And it held each frame back instead.
+        assert b"\x1b[?2026h" in since, "no frame was held back"
+
+        print("cursor of a drawing pane: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_empty_rows_draw_the_pane(tmp):
+    """
+    Every row of the pane draws the pane, even the empty ones.
+
+    A row the program never wrote still reaches the terminal: the
+    first frame erases the tail of every row it touches, carrying the
+    background the fill painted, and a row the program shrinks keeps
+    it the same way. What neither reaches is a row the wire wipes with
+    the default instead -- and a judge that drops erased cells cannot
+    see that absence, so this counts the cells of every row: each one
+    of the pane's rows holds every column, all in the one background
+    of the pane.
+
+    The program writes one long row and then shrinks it to five
+    columns, the way a shell redraws a shorter prompt. The theme is a
+    pygments one with `paint-screen` on, so the pane's background is a
+    colour the terminal would never draw by itself. The last row is
+    the status bar, which draws itself and is not the pane.
+    """
+    config = tmp / "bare.conf"
+    config.write_text(
+        "set-option status on\nset-option pane-border-status off\nset-option paint-screen on\nset-client-option theme pygments:catppuccin-mocha\n"
+    )
+
+    program = tmp / "few.sh"
+    program.write_text(
+        # It shrinks the row on a key, sent once the long row is on the
+        # wire: a sleep in the program waited for that frame.
+        "stty -echo; printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\\n'; read go; printf '\\x1b[1A\\r\\x1b[Kshort\\n'; sleep 600\n"
+    )
+
+    def wrong_rows() -> str | None:
+        "What is wrong with the screen the wire built, or `None`."
+        judge = Screen(30, 100, write_process_input=lambda answer: None)
+        Stream(judge).feed(terminal.seen.decode("utf-8", "replace"))
+        buffer = judge.page.data_buffer
+        offset = judge.line_offset
+        for y in range(offset, offset + 29):
+            row = buffer[y] if y in buffer else {}
+            cells = [row[x] for x in range(100) if x in row]
+            if len(cells) < 100:
+                return "row %d drew %d of 100 cells" % (y - offset, len(cells))
+            bgs = {cell.appearance.rendition.bgcolor for cell in cells}
+            if len(bgs) != 1 or None in bgs:
+                return "row %d drew the backgrounds %r" % (y - offset, sorted(bgs, key=repr))
+        return None
+
+    terminal = Terminal(tmp, "empty-rows", command="sh %s" % program, config=config, rows=30, columns=100)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"AAAAAAAAAA")
+        terminal.write(b"\r")
+        terminal.wait_for(b"short")
+        # And the end of the frame that drew it: a frame ends showing
+        # the cursor again.
+        terminal.wait_for(SHOW_CURSOR)
+
+        # Until the screen is right, and what is wrong with it if it
+        # never is: a fixed four seconds stood here.
+        deadline = time.monotonic() + 10
+        while (wrong := wrong_rows()) is not None:
+            if time.monotonic() > deadline:
+                raise Failed(wrong)
+            terminal.drain(0.1)
+
+        print("empty rows draw the pane: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def _reading(terminal, args):
+    """
+    Run a command while the terminal goes on reading the client.
+
+    On the integrated route the server and the client are one process.
+    A terminal that stops reading a flood fills the pty, the client's
+    write blocks, and the server blocks with it: measured, no command
+    answered in twenty seconds, `kill-server` included.
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        answer = pool.submit(run_cli, terminal.sock_path, args)
+        while not answer.done():
+            terminal.drain(0.05)
+        return answer.result()
+
+
+def check_switch_window_under_flood(tmp):
+    """
+    A window switch lands while another window floods.
+
+    Window zero scrolls as fast as the pty gives it; window one holds
+    a marker and sleeps. Switching to window one paints the marker:
+    the flood must not hold the switch behind it. The bound is
+    generous on purpose -- this pins that a switch lands at all under
+    a flood, not how fast. Measured here at a sixtieth of a second;
+    without the urgent frame after input it waits out the postpone
+    behind the flood, a quarter of one. Lillecarl/pymux#524.
+    """
+    config = tmp / "bare.conf"
+    config.write_text("set-option status on\nset-option pane-border-status off\n")
+
+    child = tmp / "flood_child.py"
+    child.write_text(
+        "import os, sys, threading, tty\n"
+        "tty.setraw(0)\n"
+        "sys.stdout.write('READY\\n')\n"
+        "sys.stdout.flush()\n"
+        "def flood():\n"
+        "    n = 0\n"
+        "    while True:\n"
+        "        n += 1\n"
+        "        try:\n"
+        "            os.write(1, ('flood line %d\\n' % n).encode())\n"
+        "        except OSError:\n"
+        "            break\n"
+        "threading.Thread(target=flood, daemon=True).start()\n"
+        "while True:\n"
+        "    if not sys.stdin.buffer.read1(256):\n"
+        "        break\n"
+    )
+    marker = tmp / "marker.py"
+    marker.write_text("import sys, time\nsys.stdout.write('IDLEMARK\\n')\nsys.stdout.flush()\ntime.sleep(30)\n")
+
+    terminal = Terminal(tmp, "switch-flood", command="python3 %s" % child, config=config)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"flood line 1")
+        session = terminal.session_name
+        opened = _reading(terminal, ["new-window", "-d", "-t", session + ":", "-n", "idle", "python3 %s" % marker])
+        assert opened.returncode == 0, opened.stderr
+        listed = _reading(terminal, ["list-windows", "-t", session, "-F", "#{window_id}:#{window_name}"])
+        idle = [line.split(":")[0] for line in listed.stdout.decode().splitlines() if line.endswith(":idle")]
+        assert len(idle) == 1, listed.stdout
+        bound = _reading(terminal, ["bind-key", "-n", "F12", "select-window", "-t", idle[0]])
+        assert bound.returncode == 0, bound.stderr
+
+        before = time.time()
+        terminal.write(b"\x1b[24~")
+        terminal.wait_for(b"IDLEMARK", timeout=30.0)
+        print("switch under flood: %.1f ms" % ((time.time() - before) * 1000.0))
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_pane_that_changes_nothing(tmp):
+    """
+    A frame that changes nothing writes nothing.
+
+    pymux renders whenever something may have changed. Two things ask
+    for it while a person does nothing at all: the pane rewrites a cell
+    with the character it already holds, and the auto refresh thread
+    asks every `status-interval` seconds so the clock in the status bar
+    stays right. Most of those frames hold the screen that is already
+    there.
+
+    Such a frame used to go out as "hide the cursor, reset the
+    attributes, show the cursor". That is not nothing. It wakes the
+    terminal, and a terminal does more on a read than draw what
+    arrived: xterm advances the phase of its blinking text, so the
+    blinking rows of a pane appeared or disappeared with nothing on
+    screen to explain it. Lillecarl/pymux#117.
+
+    The session is full screen, so nothing but the pane can draw and
+    the clock is not on the screen to move.
+    """
+    config = tmp / "quiet.conf"
+    # A one second refresh, so that a short window still holds one.
+    config.write_text("set-client-option full-screen on\nset-option status-interval 1\n")
+
+    program = tmp / "still.sh"
+    # The same character in the same cell, over and over.
+    program.write_text(
+        "printf '\\033[2J\\033[H'\n"
+        "printf STILL\n"
+        "i=0\n"
+        "while [ $i -lt 40 ]; do printf '\\033[10;1Hx'; sleep 0.1; i=$((i+1)); done\n"
+        "sleep 5\n"
+    )
+
+    terminal = Terminal(tmp, "still", command="sh %s" % program, config=config)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"STILL")
+        # The "x" of the first turn is a change, and the ones after it
+        # are not. This waits for that first one to be drawn.
+        terminal.wait_for(b"x")
+        # **And for the frame that drew it to end.** A frame hides the
+        # cursor, draws, puts the cursor where the screen wants it and
+        # shows it again, and the "x" is in the middle of that. Marking
+        # there put the tail of the frame inside the window, and the
+        # tail of a frame that drew something is not a frame that drew
+        # nothing: the check went red about one run in thirteen with
+        # "\x1b[14A\x1b[C\x1b[0m\x1b[?25h", which is a cursor move, a
+        # reset and a show, and no drawing at all.
+        #
+        # A wait and not a sleep. The bytes say when the frame ended,
+        # so nothing here races. Lillecarl/pymux#187.
+        terminal.wait_for(SHOW_CURSOR)
+
+        mark = terminal.mark()
+        log_mark = terminal.log_mark()
+        started = time.time()
+        # Longer than `status-interval`, so the auto refresh asks at
+        # least once inside the window.
+        terminal.drain(1.5)
+        since = terminal.since(mark)
+
+        if since != b"":
+            # **The bytes alone are not enough to act on.** This check
+            # was red about one run in thirteen and passed twelve times
+            # after it on the same code, and the report said which
+            # bytes went out and nothing else. So it says when they
+            # went out and what the server was doing at that moment.
+            # `Woke` names every reason but one, and the one it cannot
+            # name is a pane writing. Lillecarl/pymux#180.
+            terminal.report_window(mark, log_mark, started)
+            raise Failed("the client wrote %r for a screen that did not change" % since)
+
+        print("a pane that changes nothing: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_command_palette(tmp):
+    """
+    `set command-palette on` draws the ":" line in the middle.
+
+    A float that renders in the wrong place is a wrong screen, and no
+    unit test sees it. This reads the cells: the ":" has to land inside
+    the box and nowhere near the bottom row, where the bar draws it.
+    Lillecarl/pymux#158.
+
+    The box takes the inset of the keys pop-up beside it: three columns
+    and five rows on every side. On a screen of 24 by 80 that is rows 5
+    to 18 and columns 3 to 76.
+    """
+    config = tmp / "palette.conf"
+    config.write_text("set command-palette on\n")
+
+    program = tmp / "palette_child.sh"
+    program.write_text("printf HOLDING\nsleep 60\n")
+
+    terminal = Terminal(tmp, "palette", command="sh %s" % program, config=config)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"HOLDING")
+
+        # ctrl+b : opens command mode. Then a word with completions
+        # behind it, so the menu has something to draw.
+        terminal.write(b"\x02:")
+        terminal.drain(1.0)
+        terminal.write(b"new")
+        terminal.drain(2.0)
+
+        screen = read_screen(terminal.seen)
+        rows_with_prompt = [number for number, row in enumerate(screen) if ":new" in row]
+        assert rows_with_prompt, "the command line drew nothing\n%s" % "\n".join(screen)
+
+        first = rows_with_prompt[0]
+        assert 5 <= first <= 18, "the command line landed on row %d, and the box is rows 5 to 18\n%s" % (
+            first,
+            "\n".join(screen),
+        )
+
+        # The title says what the box is, and it is above the input.
+        titles = [number for number, row in enumerate(screen) if "Command" in row]
+        assert titles and titles[0] == first - 1, "the title of the box is on row %r and the input on %d\n%s" % (
+            titles,
+            first,
+            "\n".join(screen),
+        )
+
+        # And the box starts where the keys pop-up starts.
+        assert screen[first].index(":new") >= 3, "the box reaches further left than three columns\n%s" % "\n".join(
+            screen
+        )
+
+        print("command palette: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_detach_ends_client(tmp):
+    """
+    `ctrl+b d` gives the terminal back and ends the client process.
+
+    On the socket route the client is a process of its own and the
+    server is a daemon, so the session outlives the detach. On the
+    integrated route both halves are one process, so the detach ends
+    the session with them: nothing is left to hold it.
+
+    Two faults made this hang on the integrated route. The key handler
+    asked for the client that `detach-client` had just taken away,
+    which raised `ValueError` on top of the prompt. And nothing stopped
+    the server, so a pane held a `waitpid` in the executor of the loop
+    and the interpreter could not exit. The person saw their shell
+    again with no prompt under it. Lillecarl/pymux#109.
+
+    The pane holds a program that outlives the check, on purpose. A
+    pane that ends on its own would end the session for another reason
+    and prove nothing.
+    """
+    program = tmp / "detach_child.sh"
+    program.write_text("printf HOLDING\nsleep 60\n")
+
+    terminal = Terminal(tmp, "detach", command="sh %s" % program)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"HOLDING")
+
+        terminal.write(DETACH)
+        try:
+            code = terminal.client.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the client was still running 20 seconds after the detach")
+        assert code == 0, "the client left with %r" % (code,)
+
+        errors = Path(terminal.stderr_path).read_bytes()
+        assert b"Traceback" not in errors, (
+            "the detach wrote a traceback on the terminal:\n%s" % errors.decode("utf-8", "replace")[-2000:]
+        )
+
+        answers = run_cli(terminal.sock_path, ["has-session"])
+        if ROUTE == "integrated":
+            assert answers.returncode != 0, "the session outlived the process that held it"
+        else:
+            assert answers.returncode == 0, "the detach took the session down: %r" % (answers.stderr,)
+
+        print("a detach ends the client: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def _client_ids(sock_path):
+    listed = run_cli(sock_path, ["list-clients", "-F", "#{client_id}"])
+    assert listed.returncode == 0, listed.stderr
+    return listed.stdout.split()
+
+
+def _restarting_terminal(tmp, name):
+    """
+    A client on a pane that says HOLDING, and a server told to restart.
+    Returns the terminal and the id the client gave the first server.
+    """
+    program = tmp / ("%s_child.sh" % name)
+    program.write_text("printf HOLDING\nsleep 60\n")
+    terminal = Terminal(tmp, name, command="sh %s" % program)
+    terminal.wait_for_queries()
+    terminal.write(b"\x1b[?62;1;6c")
+    terminal.wait_for(b"HOLDING")
+    before = _client_ids(terminal.sock_path)
+    assert len(before) == 1 and before[0], before
+
+    told = run_cli(terminal.sock_path, ["kill-server", "-r"])
+    assert told.returncode == 0, told.stderr
+    terminal.wait_for(b"pymux is restarting.")
+    return terminal, before[0]
+
+
+def check_a_restarted_server_gets_the_same_client(tmp):
+    """
+    `kill-server -r` says a new server follows on the socket, and the
+    attached client waits for it rather than leaving. When the new one
+    listens, the client attaches to it with the same terminal: it asks
+    the terminal's abilities again and draws the new server's pane.
+    Lillecarl/pymux#409.
+
+    On the integrated route the client and the server are one process,
+    so nothing outlives the server and there is nothing to check.
+    """
+    if ROUTE == "integrated":
+        print("a restarted server gets the same client: not on this route")
+        return
+
+    terminal, client_id = _restarting_terminal(tmp, "restart")
+    try:
+        assert terminal.client.poll() is None, "the client left when the server said it was restarting"
+
+        again = tmp / "restart_again.sh"
+        again.write_text("printf AGAIN\nsleep 60\n")
+        started = run_cli(terminal.sock_path, ["new-session", "-d", "-s", "test", "sh %s" % again])
+        assert started.returncode == 0, started.stderr
+
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"AGAIN")
+        assert terminal.client.poll() is None, "the client left after it attached to the new server"
+        # The id is what lets a server that loads a snapshot give this
+        # client its windows back.
+        assert _client_ids(terminal.sock_path) == [client_id], "the client came back as somebody else"
+
+        print("a restarted server gets the same client: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_an_upgraded_server_keeps_the_client_and_the_pane(tmp):
+    """
+    `upgrade-server` execs a new build over the same panes. The client
+    is told to wait, attaches again with the same id, and draws the
+    pane the new build thawed: the old program's text, which no
+    program wrote again. Lillecarl/pymux#408. Its message comes back
+    with it. Lillecarl/pymux#409.
+    """
+    if ROUTE == "integrated":
+        print("an upgraded server keeps the client and the pane: not on this route")
+        return
+
+    program = tmp / "upgrade_child.sh"
+    program.write_text("printf HOLDING\nsleep 60\n")
+    terminal = Terminal(tmp, "upgrade", command="sh %s" % program)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"HOLDING")
+        before = _client_ids(terminal.sock_path)
+        # It stays until a key is pressed, so it has to come back.
+        run_cli(terminal.sock_path, ["display-message", "KEPT-MESSAGE"])
+        terminal.wait_for(b"KEPT-MESSAGE")
+
+        # Its own connection goes with the exec, so its answer is no verdict.
+        run_cli(terminal.sock_path, ["upgrade-server", shlex.join([sys.executable, "-m", "pymux"])])
+        terminal.wait_for(b"pymux is restarting.")
+        back = terminal.passed
+
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"HOLDING")
+        terminal.wait_for(b"KEPT-MESSAGE", since=back)
+        assert terminal.client.poll() is None, "the client left after it attached to the new build"
+        assert _client_ids(terminal.sock_path) == before, "the client came back as somebody else"
+
+        print("an upgraded server keeps the client and the pane: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_a_server_that_ends_unannounced_ends_the_client(tmp):
+    """
+    Without `-r` nothing follows, so the client leaves at once, as it
+    always did. Waiting here would make a crash look like a restart.
+    Lillecarl/pymux#409.
+    """
+    if ROUTE == "integrated":
+        print("an unannounced end ends the client: not on this route")
+        return
+
+    program = tmp / "unannounced_child.sh"
+    program.write_text("printf HOLDING\nsleep 60\n")
+    terminal = Terminal(tmp, "unannounced", command="sh %s" % program)
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"HOLDING")
+
+        run_cli(terminal.sock_path, ["kill-server"])
+        try:
+            terminal.client.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the client was still running 10 seconds after the server ended")
+        assert b"pymux is restarting." not in terminal.seen
+
+        print("an unannounced end ends the client: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_q_leaves_a_client_waiting_for_a_restart(tmp):
+    "The wait is the person's to end: q leaves at once. Lillecarl/pymux#409."
+    if ROUTE == "integrated":
+        print("q leaves a waiting client: not on this route")
+        return
+
+    terminal, _ = _restarting_terminal(tmp, "restart-q")
+    try:
+        terminal.write(b"q")
+        try:
+            code = terminal.client.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the client still waited 10 seconds after q")
+        assert code != 0, "a client that never got its server back left with 0"
+
+        print("q leaves a waiting client: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_a_stopped_client_does_not_stop_the_server(tmp):
+    """
+    A client that stopped reading must not stop the server.
+
+    The client is a process, and a process can stop: ctrl+z suspends
+    it, a laptop sleeps. The server keeps drawing for it -- the clock
+    in the status line moves -- and every frame leaves through
+    `PosixSocketConnection.write`. A send to a client that never reads
+    fills the socket's kernel buffer and then blocks, and a send that
+    blocks inside a coroutine blocks the whole loop: list-sessions
+    hangs, a new attach connects and draws nothing, panes stop being
+    parsed. When the stopped client dies the send fails, the loop
+    comes back, and the fault reads as "attach is broken" and then,
+    unaccountably, as "it works again". Lillecarl/pymux#418.
+
+    So: stop the client, let a pane write past the size of the
+    kernel's buffer, and ask the server for something. It must answer,
+    and a client that arrives now must still draw.
+    """
+    if ROUTE == "integrated":
+        # Stopping the client stops the server with it: one process.
+        # The socket route is the one where the two halves can part.
+        print("a stopped client: socket route only")
+        return
+
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1bP1$r38:2::1:2:3m\x1b\\")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        child = tmp / "flood-child.py"
+        child.write_text(FLOOD_CHILD)
+        made = run_cli(terminal.sock_path, ["split-window", "%s %s" % (sys.executable, child)])
+        assert made.returncode == 0, made.stderr
+        terminal.wait_for(b"FLOOD")
+
+        # The client stops here. What the server sends it now queues in
+        # the kernel, and past ~200 kB there is no room left: the next
+        # send is the one that must not block the loop.
+        terminal.client.send_signal(signal.SIGSTOP)
+
+        def waiting() -> int:
+            "The bytes the server holds for its clients, from `counters`."
+            try:
+                answer = run_cli(terminal.sock_path, ["counters"])
+            except subprocess.TimeoutExpired:
+                raise AssertionError(
+                    "counters did not answer in 20s: the server is wedged on the client that stopped reading"
+                )
+            assert answer.returncode == 0, answer.stderr
+            found = re.search(rb"bytes waiting for a client\s+(\d+)", answer.stdout)
+            assert found, answer.stdout
+            return int(found.group(1))
+
+        # Until a send waits for room. A send gives the loop up only
+        # when the socket has none, so a command that runs on that loop
+        # sees bytes waiting only while one is parked: the buffer is
+        # full. A fixed ten seconds waited for the same thing, and a
+        # count of the characters sent cannot say it -- the frames that
+        # queue behind the parked one keep it creeping.
+        _until(lambda: waiting() > 0, "no send ever waited for the stopped client", timeout=30)
+
+        try:
+            answer = run_cli(terminal.sock_path, ["list-sessions"])
+        except subprocess.TimeoutExpired:
+            raise AssertionError(
+                "list-sessions did not answer in 20s: the server is wedged on the client that stopped reading"
+            )
+        assert answer.returncode == 0, answer.stderr
+
+        # And a client that arrives now still draws.
+        other = SecondClient(tmp, terminal.sock_path, "second-stopped")
+        try:
+            other.wait_for_queries()
+            other.write(b"\x1b[?1;2c")
+            other.wait_for(b"FLOOD", timeout=15)
+        except BaseException:
+            other.report()
+            raise
+        finally:
+            other.close()
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        # A stopped process answers no SIGTERM until it is continued,
+        # and `close` waits five seconds for one. Take it out first.
+        if terminal.client.poll() is None:
+            terminal.client.kill()
+        terminal.close()
+    print("a stopped client does not stop the server: ok")
+
+
+def check_a_client_whose_stdin_ends_leaves(tmp):
+    """
+    A client whose stdin ends leaves, and the session holds.
+
+    A harness runs attach with a pipe or an ended stdin: `script`, CI,
+    a supervisor that closed the pipe. `select` reports an ended stdin
+    readable forever, the loop then read empty packets from it at the
+    full rate of the machine, and the client sat in the alternate
+    screen burning a core and never left. tmux ends the client when
+    its stdin closes; this one does too now. Lillecarl/pymux#419.
+
+    The subject runs with its stdin at /dev/null, which answers end of
+    file on the first read. Before the fix it never left, so the
+    `wait` below is the judge: it either sees the exit, or kills a
+    client that has been spinning for twenty seconds.
+
+    Not on the integrated route: the client's stdin there is the one
+    pty the server draws on, and a pty has no end of file -- closing
+    the master takes the whole process with it.
+    """
+    if ROUTE == "integrated":
+        print("a client whose stdin ends: one terminal on this route")
+        return
+
+    terminal = Terminal(tmp, "plain")
+    eof_stderr = None
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        eof_stderr_path = tmp / "eof-client-stderr.log"
+        eof_master, eof_client, eof_stderr = on_pty(
+            [
+                "sh",
+                "-c",
+                "exec %s -m pymux -S %s attach < /dev/null" % (sys.executable, terminal.sock_path),
+            ],
+            eof_stderr_path,
+            env={
+                "TERM": "xterm-256color",
+                "LANG": "C.UTF-8",
+                "COLORTERM": "",
+            },
+        )
+        try:
+            code = eof_client.wait(timeout=20)
+            assert code == 0, code
+        except subprocess.TimeoutExpired:
+            eof_client.kill()
+            raise AssertionError("the client whose stdin ended did not leave in 20s")
+
+        # Leaving is a detach and not a quit: the session it was
+        # attached to is still there for the next client.
+        listed = run_cli(terminal.sock_path, ["list-sessions"])
+        assert listed.returncode == 0, listed.stderr
+        assert terminal.session_name.encode() in listed.stdout, listed.stdout
+    finally:
+        if eof_stderr is not None:
+            eof_stderr.close()
+            os.close(eof_master)
+        terminal.close()
+    print("a client whose stdin ends leaves: ok")
+
+
+def check_libpymux(tmp):
+    """
+    libpymux against a server that is really there.
+
+    The unit tests in `test_libpymux.py` answer with a socket that says
+    what the test tells it to say. This one asks the real server, so it
+    catches a format variable that went away, a command that changed its
+    options, and output that does not parse.
+    """
+    from libpymux import CommandError, Server
+
+    terminal = Terminal(tmp, "kitty")
+    try:
+        terminal.wait_for_queries()
+        terminal.write(b"\x1b[?1u")
+        terminal.write(b"\x1b_Gi=31;OK\x1b\\")
+        terminal.write(b"\x1b[6;20;10t")
+        terminal.write(b"\x1b[?62;1;6c")
+        terminal.wait_for(b"READY")
+
+        server = Server(str(terminal.sock_path))
+        assert server.is_alive(), "the library cannot reach the server"
+
+        # The session. A pymux server runs one.
+        session = server.session
+        # The two routes name the session differently: the socket route
+        # asks `new-session` for a name, the integrated route takes the
+        # default. `Terminal` says which one it started.
+        assert session.name == terminal.session_name, session.name
+        assert session.id == "$0", session.id
+        assert session.attached >= 1, session.attached
+        assert len(server.sessions) == 1
+
+        # The window and the pane that the session started with.
+        windows = server.windows
+        assert len(windows) == 1, windows
+        window = windows[0]
+        assert window.id.startswith("@"), window.id
+        assert window.active, "the only window is not the active one"
+
+        panes = server.panes
+        assert len(panes) == 1, panes
+        pane = panes[0]
+        assert pane.id.startswith("%"), pane.id
+        assert pane.pid > 0, pane.pid
+        assert pane.width > 0 and pane.height > 0, (pane.width, pane.height)
+        assert not pane.dead
+        assert pane.window_id == window.id
+        assert window.panes[0].id == pane.id
+        assert window.active_pane.id == pane.id
+        assert server.pane(pane.id).id == pane.id
+        assert server.pane("%99999") is None
+
+        # Every field the library asks for comes back with something in
+        # it. A variable that the server dropped would be empty here.
+        for name in ("pane_id", "pane_index", "window_id", "pane_width"):
+            assert pane.get(name), "%s came back empty" % (name,)
+
+        # A second pane, made through the library.
+        # A python with no arguments waits on its stdin, so the pane
+        # stays alive for the rest of this check.
+        second = window.split(command=sys.executable)
+        assert second is not None, "split-window said nothing"
+        terminal.drain(2.0)
+        assert len(server.panes) == 2, server.panes
+        assert len(window.panes) == 2, window.panes
+        assert second.id != pane.id
+
+        # Reading a pane back.
+        text = pane.capture()
+        assert "READY" in text, text[:200]
+
+        # The escape hatch, and the errors.
+        assert server.cmd("list-windows").ok
+        assert server.has_session()
+        assert not server.has_session("not-a-session")
+        try:
+            server.cmd(["select-window", "-t", "99"])
+        except CommandError as error:
+            assert error.result.exit_code != 0
+        else:
+            raise AssertionError("a command that fails has to raise")
+
+        # Killing the pane that the library made.
+        second.kill()
+        terminal.drain(2.0)
+        assert len(server.panes) == 1, server.panes
+    except BaseException:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+    print("libpymux: ok")
+
+
+#: Every check, in the order a whole run does them. Each one starts a
+#: server of its own, so the order is the order somebody wrote them in
+#: and not a chain.
+def check_detached_pane_has_a_width(tmp):
+    """
+    A pane nobody looks at still parses at a real width.
+
+    A screen starts at nought by nought and the first render sizes it.
+    A detached session never renders, so `create_pane` gives the pane a
+    default size -- and it used to give it to the pty alone. The screen
+    stayed at zero columns, so every character a program wrote wrapped
+    onto a row of its own.
+
+    It showed as `capture-pane -p` printing one character per line.
+    `-J` read correctly throughout, because it joins wrapped rows back
+    together, which is what hid this. Lillecarl/pymux#321.
+
+    No terminal here: a client is the one thing this must run without.
+    """
+    sock_path = tmp / "detached.sock"
+    line = "A" * 40
+    program = "%s -c \"print('%s'); import time; time.sleep(30)\"" % (
+        sys.executable,
+        line,
+    )
+    try:
+        made = run_cli(sock_path, ["new-session", "-d", program])
+        assert made.returncode == 0, made.stderr
+
+        captured = None
+        for _ in range(40):
+            time.sleep(0.25)
+            answer = run_cli(sock_path, ["capture-pane", "-p"])
+            assert answer.returncode == 0, answer.stderr
+            captured = answer.stdout.decode("utf-8", "replace")
+            if line in captured:
+                break
+        else:
+            raise AssertionError(
+                "the pane never held the line it printed.\n"
+                "Every row holding one character is this bug:\n%r" % (captured,)
+            )
+
+        one_character_rows = [row for row in captured.splitlines() if len(row.strip()) == 1]
+        assert len(one_character_rows) < 5, "the pane wrapped at one column: %r" % (one_character_rows[:10],)
+    finally:
+        run_cli(sock_path, ["kill-server"])
+    print("detached pane has a width: ok")
+
+
+def check_bare_new_session_starts_a_server(tmp):
+    """
+    `pymux new-session` with no `-S` and no server up starts one, the
+    way `tmux new-session` does. It said "No pymux instance found",
+    because a command with no socket only ever looked for a server to
+    send itself to.
+
+    The default socket lives under the temporary directory, so this one
+    gets a directory of its own and finds no other server there.
+    """
+    room = tmp / "bare"
+    room.mkdir()
+    env = {key: value for key, value in os.environ.items() if key != "PYMUX"}
+    env["TMPDIR"] = str(room)
+
+    def bare(*args):
+        return subprocess.run(
+            [sys.executable, "-m", "pymux", *args],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+
+    try:
+        made = bare("new-session", "-d", "-s", "bare", "%s -c 'import time; time.sleep(30)'" % (sys.executable,))
+        assert made.returncode == 0, made.stdout + made.stderr
+
+        listed = bare("list-sessions")
+        assert listed.returncode == 0, listed.stdout + listed.stderr
+        assert b"bare" in listed.stdout, listed.stdout
+    finally:
+        bare("kill-server")
+    print("bare new-session starts a server: ok")
+
+
+def check_relative_socket_name_survives_the_daemon(tmp):
+    """
+    A socket named relatively still works after the fork.
+
+    The bind happens before `daemonize`, which does `os.chdir("/")`, so
+    a relative name means one thing at bind time and another everywhere
+    after it. Two things went wrong, and both are silent:
+
+    * the server could not take its own socket file away when it
+      stopped, because `os.remove` looked for it under `/`, and
+    * a pane was told `PYMUX=<relative>,%1`, so a program inside it
+      could not find the server it runs in from any other directory.
+      tmux writes `TMUX` absolute for that reason.
+
+    Lillecarl/pymux#322.
+
+    The command runs from `tmp`, so the name is relative to a directory
+    that is not `/` and not the repository.
+    """
+    sock_name = "relative.sock"
+    absolute = tmp / sock_name
+    #: How long each command took. Every one is a fresh interpreter
+    #: importing pymux, which is most of the wait under a loaded gate.
+    took: list[float] = []
+
+    def cli(args):
+        started = time.monotonic()
+        try:
+            return subprocess.run(
+                [sys.executable, "-m", "pymux", "-S", sock_name, *args],
+                cwd=str(tmp),
+                capture_output=True,
+                timeout=20,
+                check=False,
+                env=dict(os.environ, PYTHONPATH=str(REPO_ROOT)),
+            )
+        finally:
+            took.append(time.monotonic() - started)
+
+    def timings() -> str:
+        return "%d commands, %.1fs each on average, %.1fs at most" % (len(took), sum(took) / len(took), max(took))
+
+    def until(answer, what):
+        """
+        Poll `answer` until it gives something. Each poll is a command,
+        so the deadline counts commands as well as seconds: a gate that
+        starves the interpreter gets its polls, and a server that never
+        answers still fails.
+        """
+        deadline = time.monotonic() + 10
+        polls = 0
+        while True:
+            got = answer()
+            polls += 1
+            if got:
+                return got
+            complaint = what() if callable(what) else what
+            assert time.monotonic() < deadline or polls < 10, "%s (%s)" % (complaint, timings())
+            time.sleep(0.05)
+
+    try:
+        made = cli(["new-session", "-d", "sh"])
+        assert made.returncode == 0, made.stderr
+        assert absolute.exists(), "the server bound somewhere else"
+
+        # The shell's prompt first: keys that arrive before it put the
+        # answer on the prompt's row.
+        captured = [b"", b""]
+
+        def prompted():
+            capture = cli(["capture-pane", "-p"])
+            captured[:] = [capture.stdout, capture.stderr]
+            return "$" in capture.stdout.decode("utf-8", "replace")
+
+        until(prompted, lambda: "the shell never prompted; the pane held %r, and the command said %r" % tuple(captured))
+
+        # What a program inside a pane is told to find the server with.
+        cli(["send-keys", "echo MARK=$PYMUX", "Enter"])
+
+        def told():
+            seen = cli(["capture-pane", "-p"]).stdout.decode("utf-8", "replace")
+            return [row for row in seen.splitlines() if row.startswith("MARK=")]
+
+        answer = until(told, "the pane never answered")[0]
+        assert answer.startswith("MARK=%s," % absolute), "a pane was given a socket path it cannot follow: %r" % (
+            answer,
+        )
+
+        stopped = cli(["kill-server"])
+        assert stopped.returncode == 0, stopped.stderr
+        until(lambda: not absolute.exists(), "the server left its socket file behind at %s" % absolute)
+    finally:
+        cli(["kill-server"])
+    print("relative socket name survives the daemon: ok (%s)" % timings())
+
+
+def _active_pane_index(sock_path):
+    "Which pane `list-panes` names active, by its place in the list."
+    listed = run_cli(sock_path, ["list-panes"])
+    assert listed.returncode == 0, listed.stderr
+    for index, line in enumerate(listed.stdout.decode().splitlines()):
+        if "(active)" in line:
+            return index
+    raise Failed("no active pane in:\n%s" % listed.stdout.decode())
+
+
+def _first_pane(sock_path, seconds=10.0):
+    """
+    Wait until the server has its first pane, and return its listing.
+
+    A client that answered its terminal's queries is attached, and the
+    server may still be making the window it opens on: a command in
+    between is answered "no current window". The gate met that twice.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        listed = run_cli(sock_path, ["list-panes"])
+        if listed.returncode == 0 and listed.stdout.strip():
+            return listed
+        if time.monotonic() > deadline:
+            raise Failed("no pane after %.0fs: %r" % (seconds, listed.stderr))
+        time.sleep(0.02)
+
+
+def _two_cats_side_by_side(tmp, mode):
+    """
+    One client on two `cat` panes, the left one active, settled.
+
+    Both programs echo what they read, so a capture says where keys
+    went; the geometry is fixed (no status line, 24 by 80), so column
+    sixty of row ten is always the right pane. Returns the terminal
+    and the two pane ids, left first.
+    """
+    config = tmp / ("%s.conf" % mode)
+    config.write_text("set-option status off\nset-option pane-border-status off\n")
+
+    terminal = Terminal(tmp, mode, command="cat", config=config, rows=24, columns=80)
+    terminal.wait_for_queries()
+    terminal.write(b"\x1b[?62;1;6c")
+    _first_pane(terminal.sock_path)
+    mark = terminal.mark()
+    made = run_cli(terminal.sock_path, ["split-window", "-h", "cat"])
+    assert made.returncode == 0, made.stderr
+    ids = run_cli(terminal.sock_path, ["list-panes", "-F", "#{pane_id}"]).stdout.decode().split()
+    assert len(ids) == 2, ids
+    selected = run_cli(terminal.sock_path, ["select-pane", "-t", ids[0]])
+    assert selected.returncode == 0, selected.stderr
+
+    # A click lands by the layout the client drew last, so the split
+    # has to be on the wire: its border, on the row the clicks use.
+    def split_drawn() -> bool:
+        terminal.drain(0.05)
+        return any(char in BORDERS for char in read_screen(terminal.since(mark), 24, 80)[10])
+
+    _until(split_drawn, "the split was never drawn")
+    assert _active_pane_index(terminal.sock_path) == 0
+    return terminal, ids
+
+
+def _until(condition, what: str, timeout: float = 10.0) -> None:
+    "Poll `condition` until it holds; a fixed wait stood here. Lillecarl/pymux#579."
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, what
+        time.sleep(0.05)
+
+
+def _captured(sock_path, pane_id) -> bytes:
+    return run_cli(sock_path, ["capture-pane", "-t", pane_id, "-p"]).stdout
+
+
+def _marked(sock_path, pane_id, mark: str) -> bytes:
+    """
+    What a pane holds once `mark`, sent to it alone, is on it.
+
+    The second event that proves a negative: bytes that reached the
+    pane before the mark are on it before the mark is.
+    """
+    run_cli(sock_path, ["send-keys", "-t", pane_id, mark, "Enter"])
+    _until(lambda: mark.encode() in _captured(sock_path, pane_id), "%s never reached the pane" % mark)
+    return _captured(sock_path, pane_id)
+
+
+def check_click_in_unfocused_pane_selects_it(tmp):
+    """
+    A click in a pane selects it.
+
+    The press alone selects nothing -- the focus lands on the
+    release, the way the clock does -- and the click itself never
+    reaches either program: the unfocused pane drops the press, and
+    the release focuses instead of forwarding. What the click moves
+    is the arrangement as well as the layout focus: without it the
+    next keypress would sync the layout straight back to the pane
+    that is active. Lillecarl/pymux#527.
+    """
+    terminal, ids = _two_cats_side_by_side(tmp, "click-selects")
+    try:
+        terminal.write(b"\x1b[<0;60;10M")
+        time.sleep(0.3)
+        terminal.write(b"\x1b[<0;60;10m")
+        _until(lambda: _active_pane_index(terminal.sock_path) == 1, "the click did not select the right pane")
+
+        terminal.write(b"clickmark\n")
+        _until(
+            lambda: b"clickmark" in _captured(terminal.sock_path, ids[1]),
+            "keys did not follow the click:\n%r" % (_captured(terminal.sock_path, ids[1])[-200:],),
+        )
+        left = _marked(terminal.sock_path, ids[0], "leftmark")
+        right = _captured(terminal.sock_path, ids[1])
+        assert b"clickmark" not in left, "keys reached both panes:\n%r" % (left[-200:],)
+        assert b"\x1b" not in right, "the click leaked into the program:\n%r" % (right[-200:],)
+
+        print("click in unfocused pane selects it: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+def check_wheel_over_unfocused_pane_does_nothing(tmp):
+    """
+    A wheel over a pane that has no focus does nothing at all.
+
+    No copy mode, no focus, no bytes to the program: scrolling
+    belongs to the pane under the focus, and a wheel that also
+    selected would scroll one pane while looking at another.
+    Lillecarl/pymux#527.
+    """
+    terminal, ids = _two_cats_side_by_side(tmp, "wheel-unfocused")
+    try:
+        terminal.write(b"\x1b[<64;60;10M")
+        # Typed after the wheel, so on the left once the wheel was taken.
+        terminal.write(b"wheelmark\n")
+        _until(lambda: b"wheelmark" in _captured(terminal.sock_path, ids[0]), "the keys after the wheel never arrived")
+        assert _active_pane_index(terminal.sock_path) == 0, "the wheel selected the right pane"
+        right = _marked(terminal.sock_path, ids[1], "rightmark")
+        assert b"<64" not in right, "the wheel reached the program:\n%r" % (right[-200:],)
+        assert b"wheelmark" not in right, "keys reached both panes:\n%r" % (right[-200:],)
+
+        print("wheel over unfocused pane does nothing: ok")
+    except Exception:
+        terminal.report()
+        raise
+    finally:
+        terminal.close()
+
+
+CHECKS = (
+    check_detached_pane_has_a_width,
+    check_bare_new_session_starts_a_server,
+    check_relative_socket_name_survives_the_daemon,
+    check_kitty_terminal,
+    check_sixel_terminal,
+    check_colorterm_terminal,
+    check_plain_terminal,
+    check_closing_split,
+    check_pointer_shape,
+    check_cursor_shape,
+    check_overlay_pane,
+    check_two_terminals_of_different_abilities,
+    check_second_terminal,
+    check_full_screen_pane,
+    check_strip_follows_resize,
+    check_quoted_argument,
+    check_non_breaking_space,
+    check_cursor_of_drawing_pane,
+    check_empty_rows_draw_the_pane,
+    check_switch_window_under_flood,
+    check_click_in_unfocused_pane_selects_it,
+    check_wheel_over_unfocused_pane_does_nothing,
+    check_pane_that_changes_nothing,
+    check_command_palette,
+    check_detach_ends_client,
+    check_a_restarted_server_gets_the_same_client,
+    check_an_upgraded_server_keeps_the_client_and_the_pane,
+    check_q_leaves_a_client_waiting_for_a_restart,
+    check_a_server_that_ends_unannounced_ends_the_client,
+    check_a_stopped_client_does_not_stop_the_server,
+    check_a_client_whose_stdin_ends_leaves,
+    check_libpymux,
+)
+
+
+def chosen_checks():
+    """
+    The checks this run does. `PYMUX_PTY_CHECKS` names them, comma
+    separated and without the `check_` in front:
+
+        PYMUX_PTY_CHECKS=pane_that_changes_nothing,command_palette
+
+    A whole run takes minutes and starts seventeen servers. One of
+    these checks is red about one run in thirteen, and hunting that
+    means running the one check many times. Lillecarl/pymux#180.
+
+    A name nobody knows is an error and not an empty run, because an
+    empty run passes and says the wrong thing.
+    """
+    by_name = {check.__name__[len("check_") :]: check for check in CHECKS}
+    asked = os.environ.get("PYMUX_PTY_CHECKS", "").strip()
+    if not asked:
+        return list(CHECKS)
+
+    wanted = [name.strip() for name in asked.split(",") if name.strip()]
+    unknown = [name for name in wanted if name not in by_name]
+    if unknown:
+        raise SystemExit(
+            "PYMUX_PTY_CHECKS names %s, and the checks are:\n  %s" % (", ".join(unknown), "\n  ".join(by_name))
+        )
+    return [by_name[name] for name in wanted]
+
+
+def main() -> None:
+    # The server inherits this, and a pane must not: it names the
+    # terminal that started the server, which is not what a pane is.
+    os.environ["KITTY_WINDOW_ID"] = "1"
+    os.environ["TERM_PROGRAM"] = "kitty"
+    # And a pane takes 24 bit colour whatever this says.
+    os.environ.pop("COLORTERM", None)
+
+    tmp = Path(tempfile.mkdtemp(prefix="pymux-pty-test-"))
+    checks = chosen_checks()
+
+    # Each check runs its own servers and mostly waits on them, so the
+    # checks run at once. Each gets a directory of its own, because two
+    # of them write a file of the same name. A short name, because a
+    # socket's path must fit in 104 bytes on macOS.
+    def run(number, check):
+        room = tmp / str(number)
+        room.mkdir()
+        started = time.monotonic()
+        check(room)
+        return time.monotonic() - started
+
+    # A quarter of the cores. Nix runs a job per core and tells each
+    # one it has them all, and every check here is a server and a client
+    # at work: a pool of all sixteen made the gate slower, and starved
+    # `switch_window_under_flood` past its twenty seconds.
+    failed = []
+    workers = max(2, (int(os.environ.get("NIX_BUILD_CORES") or 0) or os.cpu_count()) // 4)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        running = {pool.submit(run, number, check): check for number, check in enumerate(checks)}
+        for done in as_completed(running):
+            name = running[done].__name__
+            try:
+                took = done.result()
+            except Exception:
+                failed.append(name)
+                print("%s FAILED:\n%s" % (name, traceback.format_exc()), flush=True)
+                continue
+            # What each check costs, so a slow one has a name. Lillecarl/pymux#579.
+            print("    %s took %.1f s" % (name, took), flush=True)
+
+    if failed:
+        raise SystemExit("%d of %d pty checks failed: %s" % (len(failed), len(checks), ", ".join(sorted(failed))))
+    print("%d of %d pty checks passed." % (len(checks), len(CHECKS)))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,33 @@
+# Every difference between a scenario's picture with pymux and one without.
+# `tests/photograph_scenarios.py` says what this is and how to write it.
+#
+# A count is exact unless it is a range, and a range says why it moves.
+
+# ----------------------------------------------------------------------
+# claude-code, on one shared stream.
+#
+# One-pixel seams: at two cell joins in the mascot, at the "●" before
+# "high", and at column 79 of the two rules. The last two are the
+# mechanism `picture-differences.txt` records for the recorded
+# claude-code fixture (#371, #539). The mascot seams are not traced, and
+# the count moves between runs with the same text on screen: 35, 17, 24,
+# 24, 13 and 11 measured. Lillecarl/pymux#601. "long" has scrolled the
+# mascot away, so only the "●" and the rules are left: 11.
+xterm claude-code answer 11-35
+xterm claude-code cleared 11-35
+xterm claude-code long 11
+xterm claude-code start 11-35
+
+# ----------------------------------------------------------------------
+# yazi-images: each terminal runs and answers a yazi of its own.
+
+# xterm. This xterm offers yazi no image protocol, so the bare side
+# shows no preview. pymux offers one, takes yazi's image, and draws it
+# in cells of colour: pymux shows more than the terminal it runs in.
+xterm yazi-images dog 58000
+xterm yazi-images dog-small 19200
+xterm yazi-images forest-portrait 74800
+xterm yazi-images pug 67600
+xterm yazi-images puppy-icon 3000
+xterm yazi-images river-panorama 17400
+xterm yazi-images walrus-grey 58000
