@@ -1,0 +1,46 @@
+# Export each source to its own repository. `.github/josh-export.sh` says
+# what it checks before a push. Lillecarl/pymux#667.
+
+name: josh export
+on:
+  push:
+    branches: [monorepo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One export at a time, in push order: two at once could race to the same
+# branch, and the later one would be refused as behind.
+concurrency:
+  group: josh-export
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # josh filters the whole history, and the default depth is one commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        timeout-minutes: 10
+      - uses: cachix/install-nix-action@master
+        timeout-minutes: 15
+      # josh at the nixpkgs revision the first export was made with. Another
+      # version may filter the same history to other hashes, and then every
+      # push after it is refused as not a fast-forward.
+      - name: Install josh
+        run: |
+          josh=$(nix build --no-link --print-out-paths \
+            github:NixOS/nixpkgs/aff8a0b28396750446e5537a96461bc4facdb287#josh)
+          echo "$josh/bin" >> "$GITHUB_PATH"
+        timeout-minutes: 15
+      - name: Export
+        env:
+          TOKEN: ${{ secrets.JOSH_EXPORT_TOKEN }}
+        run: |
+          JOSH_REMOTE="https://x-access-token:${TOKEN}@github.com/Lillecarl/%s.git" \
+            .github/josh-export.sh "$GITHUB_SHA" --push
+        timeout-minutes: 10
