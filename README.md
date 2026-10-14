@@ -6,13 +6,16 @@ fills from this one: "The repository of each source", at the end, says how.
 
 | source | its repository | upstream | job |
 | --- | --- | --- | --- |
-| `pymux` | Lillecarl/pymux, `master` | prompt-toolkit/pymux | arrange several terminals |
-| `ptterm` | Lillecarl/ptterm, `master` | prompt-toolkit/ptterm | draw one with prompt-toolkit |
-| `txterm` | Lillecarl/txterm, `main` | | draw one with Textual |
-| `ptyhost` | Lillecarl/ptyhost, `main` | | run a program and carry its bytes |
-| `pyte` | Lillecarl/pyte, `master` | selectel/pyte | parse, and hold a screen |
-| `pysmithay` | Lillecarl/pysmithay, `main` | | a headless Wayland compositor, for GUI programs in a pane |
-| `pyterm-pytest` | Lillecarl/pyterm-pytest, `main` | | the test equipment the suites share |
+| `pymux` | Lillecarl/pymux | prompt-toolkit/pymux | arrange several terminals |
+| `ptterm` | Lillecarl/ptterm | prompt-toolkit/ptterm | draw one with prompt-toolkit |
+| `txterm` | Lillecarl/txterm | | draw one with Textual |
+| `ptyhost` | Lillecarl/ptyhost | | run a program and carry its bytes |
+| `pyte` | Lillecarl/pyte | selectel/pyte | parse, and hold a screen |
+| `pysmithay` | Lillecarl/pysmithay | | a headless Wayland compositor, for GUI programs in a pane |
+| `pyterm-pytest` | Lillecarl/pyterm-pytest | | the test equipment the suites share |
+
+Each one's `main` is the export, and `archive/pre-josh/<branch>` holds every
+branch it had before.
 
 **prompt-toolkit is not in this repository.** Every patch to it has to be one
 upstream could take, so it stays a branch of upstream's own repository,

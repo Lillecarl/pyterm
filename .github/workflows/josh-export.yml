@@ -4,7 +4,7 @@
 name: josh export
 on:
   push:
-    branches: [monorepo]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
