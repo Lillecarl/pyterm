@@ -1,52 +1,59 @@
-# A flake is not how this collection is built. It is here so that somebody
-# can install pymux with one command, and configure it with home-manager,
-# and for nothing else.
+# A wrapper. `default.nix` is the whole definition, and every output here
+# is an attribute of it, so a person with no flake reaches the same things:
+# `(import ./. { }).pymux`, and `imports = [ ./nix/home-manager.nix ]`.
 #
-# Neither of those is defined here. Both are attributes of `default.nix`
-# that this file passes through, so a person with no flake reaches the same
-# things: `(import ./. { }).pymux`, and
-# `imports = [ ./nix/home-manager.nix ]`. A flake output is a way to reach
-# what `default.nix` holds, never the place a thing is written.
+# This file owns the pins. `nix/compat.nix` reads the same `flake.lock` for
+# `default.nix`, through flake-compatish, so there is one lock.
 #
-# `default.nix` is the whole definition. The checks and the dev shell are not
-# exposed here on purpose: they read the environment through `builtins.getEnv`
-# for the knobs that narrow a run, and a flake evaluates purely and would see
-# none of them. `nix build --file . checks.all` is how the tests are run.
+# The checks are not here on purpose: they read the environment through
+# `builtins.getEnv` for the knobs that narrow a run, and a flake evaluates
+# purely. `nix build --file . checks.all` runs them.
 {
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-compatish.url = "github:Lillecarl/flake-compatish";
+    # Our branch of upstream's repository: every patch there has to be one
+    # upstream could take. An ignored checkout at ./prompt-toolkit takes its
+    # place, `nix/compat.nix` says how.
+    prompt-toolkit = {
+      url = "github:Lillecarl/python-prompt-toolkit/render-performance";
+      flake = false;
+    };
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      flake = false;
+    };
+  };
+
   outputs =
     inputs:
     let
       inherit (inputs.nixpkgs) lib;
-      forEachSystem = lib.genAttrs lib.systems.flakeExposed;
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
+      perSystem = lib.genAttrs systems (system: import ./default.nix { inherit inputs system; });
+      forAllSystems = f: lib.mapAttrs (_: f) perSystem;
     in
     {
-      packages = forEachSystem (
-        system:
-        let
-          pkgs = import inputs.nixpkgs { inherit system; };
-          defaultNix = import ./. { inherit pkgs; };
-        in
-        {
-          default = defaultNix.pymux;
-          inherit (defaultNix)
-            pymux
-            libpymux
-            ptterm
-            pyte
-            prompt-toolkit
-            ;
-        }
-      );
+      packages = forAllSystems (p: {
+        default = p.pymux;
+        inherit (p)
+          pymux
+          libpymux
+          ptterm
+          pyte
+          prompt-toolkit
+          ;
+      });
+      devShells = forAllSystems (p: {
+        default = p.shell;
+      });
 
-      # The home-manager module. One module for every system, so it is not
-      # inside `forEachSystem`, and it holds a path rather than a package,
-      # so it needs no nixpkgs of its own.
-      #
-      # The default of its `package` option builds pymux out of the source
-      # this flake was evaluated from, with prompt-toolkit at its pin:
-      #
-      #     pyterm.url = "github:Lillecarl/pyterm";
-      inherit (import ./. { }) homeManagerModules;
+      # One module for every system: it holds a path, and builds pymux from
+      # the consumer's own pkgs.
+      homeManagerModules.default = ./nix/home-manager.nix;
     };
 }

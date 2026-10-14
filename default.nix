@@ -1,13 +1,26 @@
+let
+  compat = import ./nix/compat.nix;
+in
 {
-  # Unfree for claude-code, which a scenario check drives.
-  pkgs ? import <nixpkgs> { config.allowUnfree = true; },
+  inputs ? compat.inputs,
+  system ? builtins.currentSystem,
+  # Unfree for claude-code, which a scenario check drives. Overlays empty,
+  # and config set, so nixpkgs never reads ~/.config/nixpkgs.
+  pkgs ? import inputs.nixpkgs {
+    inherit system;
+    config.allowUnfree = true;
+    overlays = [ ];
+  },
+  # A source to build from another directory: a clone of one source passes
+  # itself here, so it builds against its siblings in this tree.
+  sourceOverrides ? { },
 }:
 let
   inherit (pkgs) lib;
 
   # Every source, each one a directory. `nix/sources.nix` says where each
   # comes from.
-  sources = import ./nix/sources.nix;
+  sources = import ./nix/sources.nix inputs // sourceOverrides;
 
   # The builders that assemble a virtualenv instead of a PYTHONPATH.
   # `nix/python-set.nix` says why, and why the third-party packages still

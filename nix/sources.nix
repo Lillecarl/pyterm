@@ -1,18 +1,17 @@
 # Every source the collection builds, each one a directory.
 #
-# Seven are in this tree. Each `default.nix` picks its own files with
+# Seven are in this tree. Each `package.nix` picks its own files with
 # `lib.fileset`, so a `result` or a cache beside them changes no store path.
 #
-# Two come from outside, pinned in `npins/sources.json`; `npins update`
-# moves a pin. prompt-toolkit is one of them because every patch there has
-# to be one upstream could take. A checkout at `./prompt-toolkit`, which
-# git ignores, takes its place when it holds anything: that is how an edit
-# there reaches the next build. A flake never sees it, because a flake copies
-# only what git tracks, so a flake build always takes the pin.
+# Two come from outside, pinned in `flake.lock`: prompt-toolkit, because every
+# patch there has to be one upstream could take, and pyproject.nix.
+# `nix/compat.nix` says how a checkout at ./prompt-toolkit replaces its pin.
+inputs:
 let
-  pins = import ../npins;
-  checkout = ../prompt-toolkit;
-  hasCheckout = builtins.pathExists checkout && builtins.readDir checkout != { };
+  # flake-compatish gives an overridden input as a string. A path is what
+  # copies the checkout, or one file of it, into the store; a string naming
+  # a directory in $HOME reaches a derivation as text the sandbox cannot read.
+  asPath = dir: if builtins.substring 0 11 dir == "/nix/store/" then dir else /. + dir;
 in
 {
   pyte = ../pyte;
@@ -22,6 +21,6 @@ in
   pymux = ../pymux;
   pysmithay = ../pysmithay;
   pyterm-pytest = ../pyterm-pytest;
-  prompt-toolkit = if hasCheckout then checkout else pins.prompt-toolkit.outPath;
-  pyproject-nix = pins.pyproject-nix.outPath;
+  prompt-toolkit = asPath inputs.prompt-toolkit.outPath;
+  pyproject-nix = inputs.pyproject-nix.outPath;
 }

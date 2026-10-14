@@ -21,16 +21,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      # The sources are in the tree. prompt-toolkit comes from its pin in
-      # npins/sources.json, because a runner has no checkout of it.
+      # The sources are in the tree, and flake.lock pins nixpkgs and
+      # prompt-toolkit, so the runner needs no channel.
       - uses: actions/checkout@v4
         timeout-minutes: 10
       - uses: cachix/install-nix-action@master
-        with:
-          # <nixpkgs> is what default.nix imports, and the runner has
-          # no channel of its own: the action fetches the unstable
-          # channel and puts it on NIX_PATH.
-          nix_path: nixpkgs=channel:nixpkgs-unstable
         timeout-minutes: 15
       - name: Build the galleries and the page around them
         run: nix build --file . site -o site --print-build-logs

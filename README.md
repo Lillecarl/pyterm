@@ -19,16 +19,15 @@ branch it had before.
 
 **prompt-toolkit is not in this repository.** Every patch to it has to be one
 upstream could take, so it stays a branch of upstream's own repository,
-`render-performance` of Lillecarl/python-prompt-toolkit. `npins/sources.json`
-pins it, beside pyproject.nix. A checkout of it at `./prompt-toolkit`, which
-git ignores, takes the place of the pin, so an edit there reaches the next
-build. `nix/sources.nix` says how.
+`render-performance` of Lillecarl/python-prompt-toolkit. `flake.lock` pins
+it, beside nixpkgs and pyproject.nix. A checkout of it at `./prompt-toolkit`,
+which git ignores, takes the place of the pin, so an edit there reaches the
+next build. `nix/compat.nix` says how.
 
-Each source carries its own `default.nix`. That file holds the package and
-the tests that judge it, and nothing else. Sibling packages arrive as arguments
-rather than paths, so a source built on its own takes its dependencies from
-nixpkgs, and built here it takes the directories next to it. Nothing in a
-source points back at this repository.
+Each source carries its own `package.nix`. That file holds the package and
+the tests that judge it, and nothing else. Sibling packages arrive as
+arguments rather than paths, and built here it takes the directories next
+to it.
 
 The root owns the assembly. It names the tests, and it holds the dev shell.
 
@@ -51,13 +50,14 @@ To work on prompt-toolkit as well, clone it into the ignored directory:
 ## Building
 
     nix build --file . pymux    # or pyte, ptterm, prompt-toolkit
-    nix-shell                   # pymux, npins and the test dependencies
+    nix-shell                   # pymux and the test dependencies
 
 `default.nix` is the whole definition. `shell.nix` and `flake.nix` only call
-into it, and the flake takes nixpkgs as its one input. The two sources from
-outside come from `npins/sources.json`.
+into it. `flake.lock` is the one lock, and `nix/compat.nix` reads it for a
+build from the file through flake-compatish. `default.nix` takes `pkgs`, so
+a caller with a nixpkgs of their own passes it and gets one nixpkgs, not two.
 
-Each source's `default.nix` holds its package alone. The suites that judge
+Each source's `package.nix` holds its package alone. The suites that judge
 it live in that repository's `nix/checks.nix`, which declares its own inputs,
 so a package definition does not name the six terminal emulators and two
 display servers that only a test needs.

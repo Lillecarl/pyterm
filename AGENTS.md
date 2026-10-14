@@ -15,11 +15,11 @@ exports each to a repository of its own (`.github/josh-export.sh`):
 | `prompt-toolkit` | upstream toolkit under `ptterm`/`pymux` |
 
 `prompt-toolkit` is upstream, not ours, and not in this repository:
-`npins/sources.json` pins it, and an ignored checkout at
+`flake.lock` pins it, and an ignored checkout at
 `./prompt-toolkit` replaces the pin. Hands off, except a patch
 upstream could take: minimal, in upstream style, about one thing
-(`prompt-toolkit-upstreaming.md`). `npins update` moves the pin,
-never a hand.
+(`prompt-toolkit-upstreaming.md`). `nix flake update prompt-toolkit`
+moves the pin, never a hand.
 
 The other seven are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),

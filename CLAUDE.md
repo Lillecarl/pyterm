@@ -31,9 +31,9 @@ repository is not brought back, and the next export refuses to overwrite
 it. Lillecarl/pymux#667.
 
 **prompt-toolkit is the exception.** It is not in this repository, because
-every patch there has to be one upstream could take. `npins/sources.json`
-pins it, and a checkout at `./prompt-toolkit`, which git ignores, takes the
-place of the pin when it is there. `nix/sources.nix` says how.
+every patch there has to be one upstream could take. `flake.lock` pins it,
+and a checkout at `./prompt-toolkit`, which git ignores, takes the place of
+the pin when it is there. `nix/compat.nix` says how.
 
 **A layer may reach the layers under it and never the ones above.** Three
 files hold that, one per layer: `pyte/tests/test_the_layers.py` sorts every
@@ -91,9 +91,9 @@ a reminder that repeats does not weaken it.
 no `git merge`, no `git push`. It bypasses jj's operation log, so none of
 jj's recovery works afterwards. Use jj. Read-only git is fine.
 
-**Never write `npins/sources.json` by hand.** It carries a hash beside each
-revision, so a line you typed is a line nothing can verify. `npins update
-prompt-toolkit` moves a pin, and the dev shell carries `npins`.
+**Never write a `flake.lock` by hand.** It carries a hash beside each
+revision, so a line you typed is a line nothing can verify. `nix flake
+update <input>` moves a pin in the root's.
 
 **A jj bookmark does not move when you commit.** `jj commit` leaves the new
 commit on no bookmark, and `jj git push` pushes nothing, because it pushes

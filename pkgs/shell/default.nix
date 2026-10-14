@@ -9,8 +9,6 @@
   runCommand,
   lib,
   devEnv,
-  # Moves the pins of the sources that live outside this tree.
-  npins,
   # The mock model API the agent CLIs are driven against.
   aimock,
   # pkgs.jj is a JSON stream editor. jujutsu is the version control system.
@@ -47,7 +45,6 @@ mkShell {
   packages = [
     devEnv
     (justTheBinaries black)
-    npins
     aimock
     jujutsu
     git
