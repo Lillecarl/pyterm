@@ -12,10 +12,6 @@
 # exposed here on purpose: they read the environment through `builtins.getEnv`
 # for the knobs that narrow a run, and a flake evaluates purely and would see
 # none of them. `nix build --file . checks.all` is how the tests are run.
-#
-# The sources are not in this repository at all: `nix/sources.lock` names a
-# revision and a narHash for each, and the build fetches them. So a flake
-# build needs nothing asked for by name.
 {
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   outputs =
@@ -39,7 +35,6 @@
             ptterm
             pyte
             prompt-toolkit
-            umbrella
             ;
         }
       );
@@ -49,8 +44,7 @@
       # so it needs no nixpkgs of its own.
       #
       # The default of its `package` option builds pymux out of the source
-      # this flake was evaluated from, which resolves every project through
-      # `nix/sources.lock`:
+      # this flake was evaluated from, with prompt-toolkit at its pin:
       #
       #     pyterm.url = "github:Lillecarl/pyterm";
       inherit (import ./. { }) homeManagerModules;

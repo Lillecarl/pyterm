@@ -21,9 +21,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      # No working copies. nix/sources.lock names a revision and a
-      # narHash for each source, so the build fetches them itself and a
-      # runner gets what this checkout gets.
+      # The sources are in the tree. prompt-toolkit comes from its pin in
+      # npins/sources.json, because a runner has no checkout of it.
       - uses: actions/checkout@v4
         timeout-minutes: 10
       - uses: cachix/install-nix-action@master

@@ -5,18 +5,9 @@
 let
   inherit (pkgs) lib;
 
-  # The eight sources the umbrella owns, each one a directory.
-  #
-  # `nix/sources.nix` says where each comes from and `nix/sources.lock` says
-  # which revision; `nix/resolve.nix` joins them. A working copy that holds
-  # anything is read at the revision the lock names, so a build here and a
-  # build in CI agree. UMBRELLA_DEV names the sources to read as plain
-  # directories instead, and `.envrc` sets it to `all`: the loop here is to
-  # edit a working copy and build without committing.
-  #
-  # So a clone with no working copies builds from the lock, and nothing has
-  # to be checked out first.
-  sources = import ./nix/wire.nix { };
+  # Every source, each one a directory. `nix/sources.nix` says where each
+  # comes from.
+  sources = import ./nix/sources.nix;
 
   # The builders that assemble a virtualenv instead of a PYTHONPATH.
   # `nix/python-set.nix` says why, and why the third-party packages still
@@ -217,7 +208,7 @@ let
     Every `pyproject.toml` project this collection builds, as the
     directories that hold them.
 
-    Seven are a source of the umbrella each. The eighth is libpymux,
+    Seven are a source each. The eighth is libpymux,
     which is a project inside the repository of pymux: a caller that
     only drives a server takes that one and none of the rest.
 
@@ -530,11 +521,6 @@ in
 rec {
   inherit pkgs sources aimock;
 
-  # umbrella drives this collection. It is a source like the rest, so it can
-  # be edited in place, and it is also the tool that fetches the others --
-  # which the lock makes possible without it.
-  umbrella = (import sources.umbrella { inherit pkgs; }).umbrella;
-
 
   # The collection's package scopes, one per interpreter: the same
   # seven sources and the same venvs, built on each python the
@@ -719,7 +705,7 @@ rec {
   # needs nothing but python.
   suites = {
     # The one check that belongs to the collection and to no package:
-    # only the umbrella can see all seven copies of `nix/suite.nix` at
+    # only the root can see all seven copies of `nix/suite.nix` at
     # once. Lillecarl/pymux#367.
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
@@ -834,7 +820,7 @@ rec {
     pymux-types = pymux.checks.types;
     # The style of pymux: the selected lint rules, the layout at
     # width 120, and the future import in every file. `ruff.toml`
-    # beside the umbrella says what each rule is for.
+    # in the root says what each rule is for.
     pymux-ruff = pymux.checks.ruff;
     # The `ssh://` client against a real openssh sshd, rather than the
     # asyncssh server that stands in for one everywhere else. It is the
@@ -978,6 +964,6 @@ rec {
   devEnv = default.devEnv;
 
   shell = pkgs.callPackage ./pkgs/shell {
-    inherit devEnv umbrella aimock;
+    inherit devEnv aimock;
   };
 }

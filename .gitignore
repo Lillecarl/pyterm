@@ -5,3 +5,6 @@ result-*
 __pycache__/
 .direnv/
 /.claude/settings.local.json
+# A checkout of our prompt-toolkit branch, read in place of its pin when
+# present. `nix/sources.nix` says how.
+/prompt-toolkit/

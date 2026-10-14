@@ -180,7 +180,7 @@ rec {
     Evidence for reviewing one upstream PR, base against head.
 
     Fetches the PR into a throwaway sandbox -- a plain git clone,
-    never the umbrella checkout -- builds one worktree per side, and
+    never the checkout in this tree -- builds one worktree per side, and
     runs the same verdicts on both: `prompt-toolkit-ci` whole, and
     `prompt-toolkit-pyrefly` over the PR's own Python files. Reports
     only the delta, because anything failing on base is not the

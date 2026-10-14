@@ -9,7 +9,8 @@
   runCommand,
   lib,
   devEnv,
-  umbrella,
+  # Moves the pins of the sources that live outside this tree.
+  npins,
   # The mock model API the agent CLIs are driven against.
   aimock,
   # pkgs.jj is a JSON stream editor. jujutsu is the version control system.
@@ -28,16 +29,13 @@ let
   # pymux and ran code nobody built. Lillecarl/pymux#318.
   #
   # Measured 2026-09-13, by building one shell per input: the venv with
-  # jujutsu, git, ruff and ncurses gives an empty PYTHONPATH; adding umbrella
-  # gives seven entries and adding black gives ten, and in both the first
-  # entry is the venv. The cause is nixpkgs' python setup hook, which a
+  # jujutsu, git, ruff and ncurses gives an empty PYTHONPATH; adding black
+  # gives ten entries, and the first is the venv. The cause is nixpkgs' python setup hook, which a
   # `buildPythonApplication` brings in and which then adds the site-packages
   # of every input.
   #
   # A symlink to the wrapper keeps the program whole -- the wrapper sets its
-  # own path and runs its own interpreter -- and carries none of that. It
-  # also leaves the package alone, which umbrella needs: it stands on its
-  # own, so other umbrella repositories can take it.
+  # own path and runs its own interpreter -- and carries none of that.
   justTheBinaries =
     pkg:
     runCommand "${lib.getName pkg}-bin" { } ''
@@ -48,8 +46,8 @@ in
 mkShell {
   packages = [
     devEnv
-    (justTheBinaries umbrella)
     (justTheBinaries black)
+    npins
     aimock
     jujutsu
     git

@@ -1,9 +1,9 @@
 # Every source's `nix/suite.nix` is the same file, and this says so.
 #
 # There are seven copies, one per source, and they are byte for byte the
-# same. They exist because a source has to stand alone: each is an
-# ordinary clone with its own `default.nix`, buildable with no umbrella,
-# so it cannot import a file from a sibling checkout by path.
+# same. They exist because a source has to stand alone: josh exports each
+# one as its own repository, with its own `default.nix`, so it cannot
+# import a file from a sibling directory by path.
 #
 # **The cost is that a change to the rule is a change to seven files**,
 # and the copies can drift without anything noticing. Landing the
@@ -20,10 +20,10 @@
 let
   # Any of the seven would do, and this check is what says so. pyte's is
   # the one the header of each copy and `CLAUDE.md` both point at.
-  inherit (callPackage "${sources.pyte}/nix/suite.nix" { }) suite;
+  inherit (callPackage (sources.pyte + "/nix/suite.nix") { }) suite;
 
-  # Named rather than taken from `sources` wholesale: `pyproject-nix` and
-  # `umbrella` are in there too and neither has one of these.
+  # Named rather than taken from `sources` wholesale: `pyproject-nix` is in
+  # there too and has none of these.
   named = [
     "prompt-toolkit"
     "ptterm"
@@ -34,9 +34,11 @@ let
     "txterm"
   ];
 
+  # A path joined and not interpolated: a source in this tree is a path,
+  # and "${path}" copies its whole directory, caches and all, to the store.
   copies = map (name: {
     inherit name;
-    path = "${sources.${name}}/nix/suite.nix";
+    path = sources.${name} + "/nix/suite.nix";
   }) named;
 
   first = builtins.head copies;

@@ -13,7 +13,7 @@
   curl,
 }:
 let
-  inherit (import "${sources.pyte}/nix/suite.nix" { inherit runCommand; }) suite;
+  inherit (import (sources.pyte + "/nix/suite.nix") { inherit runCommand; }) suite;
 in
 suite {
   name = "aimock-fixtures";
