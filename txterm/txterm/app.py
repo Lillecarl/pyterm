@@ -69,7 +69,12 @@ class TerminalApp(App):
 
 def main() -> None:
     "Run one program in one terminal. `txterm <command>`."
+    import argparse
     import sys
+
+    parser = argparse.ArgumentParser(prog="txterm", description="Run one program in one terminal.")
+    parser.add_argument("command", nargs=argparse.REMAINDER, help="The program to run.")
+    args = parser.parse_args()
 
     async def run(command: list[str] | None) -> None:
         async with anyio.create_task_group() as task_group:
@@ -78,4 +83,4 @@ def main() -> None:
             # leaving the scope waits for its tasks, so end them.
             task_group.cancel_scope.cancel()
 
-    anyio.run(run, sys.argv[1:] or None)
+    anyio.run(run, args.command or None)

@@ -18,7 +18,8 @@ Each one's `main` is the export, and `archive/pre-josh/<branch>` holds every
 branch it had before.
 
 **prompt-toolkit is not in this repository.** Every patch to it has to be one
-upstream could take, so it stays a branch of upstream's own repository,
+upstream could take, so it stays a branch of a fork of upstream's own
+repository,
 `render-performance` of Lillecarl/python-prompt-toolkit. `flake.lock` pins
 it, beside nixpkgs and pyproject.nix. A checkout of it at `./prompt-toolkit`,
 which git ignores, takes the place of the pin, so an edit there reaches the
@@ -429,8 +430,8 @@ So record it once, where it goes wrong, and replay the bytes:
     ptyhost-record --into pymux/tests/recordings --lines 24 --columns 80 \
         claude -- claude
 
-`ptyhost-record` comes with ptyhost, and the pymux package puts it on the
-path, so it runs anywhere. The program behaves
+`ptyhost-record` comes with ptyhost, so it runs wherever that package is
+installed. The program behaves
 normally: use it, reproduce the fault, and quit. A `claude.bin` in
 `pymux/tests/recordings` then becomes a fixture called `recorded-claude`, and
 `checks.pymux-pictures` plays it back bare and in a pane and subtracts the two
@@ -1017,12 +1018,11 @@ a real client, so a person reading it sees which function the seconds are in. A
 count says whether something got dearer; a profile says where.
 
 Server and client are in one process, which is what `pymux integrated` is, so a
-frame is followed the whole way instead of up to a socket. Three phases, because
-"what a frame costs" is three questions: frames with nothing changed, frames
-after a program printed a line, and frames after a key moved the focus. A fourth
-feeds a few scattered cells a frame, which is what an animating pane is, and a
-fifth runs a real program in the pane and times render and parse inside the live
-loop.
+frame is followed the whole way instead of up to a socket. Eight phases, one
+per cost: idle frames, sparse cells, rain, program output, keys, scrolls,
+emits, and redraws. `PYMUX_PROFILE_PHASES` names the ones to run, and an
+extra `animated` phase runs a real program in the pane and times render and
+parse inside the live loop.
 
     PYMUX_PROFILE_PANES=16 nix build --file . checks.pymux-profile.run
     less result/log
@@ -1119,12 +1119,12 @@ Each source keeps a repository of its own, and josh fills it from this one.
 the commits each source always had, with their own hashes, so the history
 of every repository goes on where it stopped. Lillecarl/pymux#667.
 
-The workflow `josh-export.yml` runs it after every push. It never forces a
+The workflow `josh-export.yml` runs it after every push to main. It never forces a
 push. It refuses a source whose repository holds a commit this repository
 does not, so a commit made straight in one of them stops the export of that
 source rather than disappearing. Commit here.
 
-josh comes from the nixpkgs `flake.lock` pins. Another version of josh may
+josh comes from the nixpkgs that `flake.lock` pins. Another version of josh may
 filter the same history to other hashes, and then every export is refused:
 **after a nixpkgs update, run `josh-export HEAD` before the push** and read
 that every source still says ok.
