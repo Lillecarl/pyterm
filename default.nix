@@ -289,7 +289,7 @@ let
     # drivers, the budgets. It takes the floor the widgets take and never
     # a layer above it, so every repository's checks can take it as an
     # input without a cycle. Lillecarl/pymux#274.
-    pyterm-pytest = final.callPackage sources.pyterm-pytest {
+    pyterm-pytest = final.callPackage (sources.pyterm-pytest + "/package.nix") {
       inherit (ps) mkProject;
     };
 
@@ -307,7 +307,7 @@ let
 
     # The floor: the parser, the screen and everything under them. Both
     # widgets take it, and it takes nothing of theirs.
-    pyte = final.callPackage sources.pyte {
+    pyte = final.callPackage (sources.pyte + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `pyte-ruff` runs.
       inherit (pkgs) ruff;
@@ -330,7 +330,7 @@ let
     # The layer that runs a program on a pty. It depends on nothing here,
     # which is the point: two widgets need it, and neither may drag a
     # toolkit in behind it. Lillecarl/pymux#85.
-    ptyhost = final.callPackage sources.ptyhost {
+    ptyhost = final.callPackage (sources.ptyhost + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `ptyhost-ruff` runs, and the player
       # whose own reader judges an exported asciicast.
@@ -342,7 +342,7 @@ let
     # that this one builds. Both take it from the set, which is why it had
     # to convert first -- a lifted package keeps a package's files and not
     # the passthru those tools ride on.
-    ptterm = final.callPackage sources.ptterm {
+    ptterm = final.callPackage (sources.ptterm + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `ptterm-ruff` runs.
       inherit (pkgs) ruff;
@@ -379,7 +379,7 @@ let
 
     # A headless Wayland compositor on Smithay, which hands each window's
     # pixels to Python. Its own source, because nothing of pymux is in it.
-    pysmithay = final.callPackage sources.pysmithay {
+    pysmithay = final.callPackage (sources.pysmithay + "/package.nix") {
       inherit (pkgs)
         rustPlatform
         cargo
@@ -405,7 +405,7 @@ let
       inherit (ps) mkProject;
     };
 
-    pymux = final.callPackage sources.pymux {
+    pymux = final.callPackage (sources.pymux + "/package.nix") {
       inherit (ps) mkProject;
       # The one that draws, which its checks need for kitty.
       inherit (pkgs) mesa;
@@ -428,7 +428,7 @@ let
     # it, which is what Lillecarl/pymux#82 asks for -- and the set is
     # what keeps that true now, because a virtualenv holds exactly what
     # was asked for and nothing propagates into it.
-    txterm = final.callPackage sources.txterm {
+    txterm = final.callPackage (sources.txterm + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `txterm-ruff` runs.
       inherit (pkgs) ruff;
