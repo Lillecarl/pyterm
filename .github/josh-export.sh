@@ -12,7 +12,7 @@
 # already holds. Without --push, report only.
 #
 # JOSH_REMOTE is the URL of a source with %s for its name, and JOSH_BRANCH
-# the branch to push to. josh-filter must be on PATH, and at the version the
+# the branch to push to; `default` is each source's own default branch. josh-filter must be on PATH, and at the version the
 # workflow pins: another version may filter to other hashes.
 set -euo pipefail
 REV=${1:?usage: josh-export.sh <rev> [--push]}
@@ -42,24 +42,26 @@ for src in "${!DEFAULT_BRANCH[@]}"; do
   # shellcheck disable=SC2059
   url=$(printf "$REMOTE" "$src")
   default=${DEFAULT_BRANCH[$src]}
+  target=$TARGET
+  [[ $target == default ]] && target=$default
   # Not under refs/heads, so jj does not take it for a bookmark.
   ref=refs/josh-export/$src
   josh-filter ":/$src" "$commit" --update "$ref" >/dev/null
   exported=$(git rev-parse "$ref")
   remote_default=$(git ls-remote "$url" "refs/heads/$default" | cut -f1)
-  remote_target=$(git ls-remote "$url" "refs/heads/$TARGET" | cut -f1)
+  remote_target=$(git ls-remote "$url" "refs/heads/$target" | cut -f1)
   if ! behind "$remote_default" "$exported"; then
     verdict="REFUSED: $default is not behind the export; import it again"
   elif ! behind "$remote_target" "$exported"; then
-    verdict="REFUSED: $TARGET is not behind the export"
+    verdict="REFUSED: $target is not behind the export"
   else
     verdict=ok
   fi
-  echo "$src: export ${exported:0:12}, $default ${remote_default:0:12}, $TARGET ${remote_target:0:12}: $verdict"
+  echo "$src: export ${exported:0:12}, $default ${remote_default:0:12}, $target ${remote_target:0:12}: $verdict"
   if [[ $verdict != ok ]]; then
     failed=1
   elif [[ $PUSH == --push && $exported != "$remote_target" ]]; then
-    git push "$url" "$exported:refs/heads/$TARGET"
+    git push "$url" "$exported:refs/heads/$target"
   fi
 done
 exit $failed
