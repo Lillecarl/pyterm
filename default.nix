@@ -703,9 +703,10 @@ rec {
           root = src;
           fileset = lib.fileset.unions (
             builtins.filter builtins.pathExists [
-              (src + "/README.rst")
               (src + "/README.md")
               (src + "/docs")
+              # The pictures a README shows.
+              (src + "/images")
             ]
           );
         };
@@ -723,8 +724,7 @@ rec {
       };
     in
     {
-      # pyte's own `docs/` names what its API reference holds.
-      pyte = source "pyte" [ ];
+      pyte = source "pyte" [ "pyte" ];
       ptyhost = source "ptyhost" [ "ptyhost" ];
       ptterm = source "ptterm" [ "ptterm" ];
       txterm = source "txterm" [ "txterm" ];

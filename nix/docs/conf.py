@@ -1,11 +1,11 @@
-"""The one Sphinx configuration every source's site builds with. `build.py` sets the layout."""
+"""The one Sphinx configuration every source's site builds with. `build.py` lays the project out."""
 
 import json
 import os
 
 project = json.loads(os.environ["docs"])["name"]
-master_doc = os.environ["DOCS_MASTER"]
-include_patterns = json.loads(os.environ["DOCS_INCLUDE"])
+master_doc = "index"
+include_patterns = ["index.rst", "api.rst", "_autosummary/**", "docs/**"]
 
 extensions = [
     "myst_parser",

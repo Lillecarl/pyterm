@@ -10,6 +10,10 @@ holds a copy instead:
   source's own `[tool.ruff.lint.isort]`, which names its first-party
   modules and is kept by hand.
 - `nix/shared/gitignore`, as its `.gitignore`.
+- `nix/shared/readme-head.md` and `readme-tail.md`, with the source's
+  name in them, as the start and the end of its `README.md`. The first
+  and last line of each is a comment, which is how the copy is found
+  again; what lies between the two is the source's own.
 
     sync-sources [ROOT]            rewrite each copy
     sync-sources --check [ROOT]    exit 1 if a copy differs
@@ -52,6 +56,16 @@ def with_stanza(pyproject: str, copy: str, name: str) -> str:
     return pyproject[:start] + copy + pyproject[end:]
 
 
+def with_frame(readme: str, head: str, tail: str, name: str) -> str:
+    head_end = head.rstrip("\n").rsplit("\n", 1)[-1]
+    tail_start = tail.split("\n", 1)[0]
+    _, found_head, body = readme.partition(head_end + "\n")
+    body, found_tail, _ = body.partition(tail_start)
+    if not found_head or not found_tail:
+        raise SystemExit(f"{name}/README.md: needs the lines {head_end!r} and {tail_start!r}")
+    return head + "\n" + body.strip("\n") + "\n\n" + tail
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", nargs="?", default=".", type=Path)
@@ -60,6 +74,8 @@ def main() -> int:
 
     copy = stanza((args.root / "ruff.toml").read_text())
     shared = {to: (args.root / origin).read_text() for origin, to in SHARED.items()}
+    head = (args.root / "nix/shared/readme-head.md").read_text()
+    tail = (args.root / "nix/shared/readme-tail.md").read_text()
     stale = []
     for flake in sorted(args.root.glob("*/flake.nix")):
         source = flake.parent
@@ -69,6 +85,10 @@ def main() -> int:
             continue
         wanted = {pyproject: with_stanza(pyproject.read_text(), copy, name)}
         wanted |= {source / to: text for to, text in shared.items()}
+        readme = source / "README.md"
+        wanted[readme] = with_frame(
+            readme.read_text(), head.replace("{name}", name), tail.replace("{name}", name), name
+        )
         for path, after in wanted.items():
             before = path.read_text() if path.exists() else None
             if before == after:

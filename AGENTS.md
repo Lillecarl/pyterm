@@ -26,6 +26,10 @@ The other seven are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),
 one `checks.*-ruff` gate per package, tests beside the code they
 judge, no backwards compatibility. `CLAUDE.md` holds the rest.
+Shared files (ruff stanza, `.gitignore`, README head/tail) are copies:
+edit the root's (`ruff.toml`, `nix/shared/`), then
+`nix run --file . sync-sources`; `checks.pyterm-sources-in-step`
+gates drift.
 
 A change that touches frame cost is profiled on a huge screen too
 (856x178), not only at the issue's geometry: copy, diff and wire

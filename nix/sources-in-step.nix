@@ -26,6 +26,7 @@ let
     touch tree/${name}/flake.nix
     cp ${sources.${name} + "/pyproject.toml"} tree/${name}/pyproject.toml
     cp ${sources.${name} + "/.gitignore"} tree/${name}/.gitignore
+    cp ${sources.${name} + "/README.md"} tree/${name}/README.md
   '') ours;
 in
 suite {
@@ -35,6 +36,6 @@ suite {
   ${copies}
   mkdir -p tree/nix/shared
   cp ${../ruff.toml} tree/ruff.toml
-  cp ${./shared/gitignore} tree/nix/shared/gitignore
+  cp ${./shared}/* tree/nix/shared/
   sync-sources --check tree
 ''

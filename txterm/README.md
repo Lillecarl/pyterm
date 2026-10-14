@@ -4,7 +4,9 @@
 > [pyterm](https://github.com/Lillecarl/pyterm), which exports its `txterm/`
 > directory here on every push. Send changes there, and issues to
 > [Lillecarl/pymux](https://github.com/Lillecarl/pymux/issues).
-> `nix build github:Lillecarl/txterm` builds it from this repository alone.
+> The docs are at <https://lillecarl.github.io/txterm/>.
+
+<!-- The lines above are pyterm's nix/shared/readme-head.md, written by sync-sources. -->
 
 A terminal widget for [Textual]. It runs a program on a pty and draws
 what the program writes.
@@ -45,24 +47,11 @@ application that will really move the widget passes `may_resize` and
 
 ## Where the rest of it is
 
-txterm draws and reads keys. Everything else already had a home:
-
-| | job |
-| --- | --- |
-| `pyte` | parse, and hold a screen |
-| `ptyhost` | run a program and carry its bytes |
-| `ptterm` | draw it with prompt-toolkit |
-| `txterm` | draw it with Textual |
-| `pymux` | arrange several of them |
-
-`Lillecarl/pymux#82` holds the argument, and `#11` the four layers.
-
-**The parser is in `ptterm` today, and it should be in `pyte`.** That
-layer imports no toolkit at all, so nothing of prompt-toolkit comes into
-this package with it, and `tests/test_the_layers.py` holds that. The
-same file names every module of `ptterm` this package touches. That list
-is the move: when the pure layer reaches `pyte`, it is the list to carry
-and the imports here to rewrite.
+txterm draws and reads keys. The screen and the parser are in `pyte`,
+and the pty is in `ptyhost`. `tests/test_the_layers.py` names every
+module of `pyte` this package imports, and holds that nothing of
+prompt-toolkit comes in behind them. Lillecarl/pymux#82 holds the
+argument.
 
 ## What Rich cannot draw
 
@@ -76,3 +65,30 @@ a `rich.style.Style`. `style.py` says so at the top:
 The screen still holds them, and a program can still read them back.
 
 [Textual]: https://github.com/Textualize/textual
+
+<!-- The lines below are pyterm's nix/shared/readme-tail.md, written by sync-sources. -->
+
+## Building
+
+    nix build github:Lillecarl/txterm    # from this repository alone
+    nix build --file . txterm            # in a checkout of pyterm
+
+The suites that judge it run in pyterm, as `checks.txterm-*`.
+
+## The collection
+
+txterm is one source of [pyterm](https://github.com/Lillecarl/pyterm), and
+each source claims one job:
+
+| source | job |
+| --- | --- |
+| [pyte](https://lillecarl.github.io/pyte/) | parse, and hold a screen |
+| [ptyhost](https://lillecarl.github.io/ptyhost/) | run a program on a pty, and carry its bytes |
+| [ptterm](https://lillecarl.github.io/ptterm/) | draw one terminal, with prompt-toolkit |
+| [txterm](https://lillecarl.github.io/txterm/) | draw one terminal, with Textual |
+| [pymux](https://lillecarl.github.io/pymux/) | arrange several of them |
+| [pysmithay](https://lillecarl.github.io/pysmithay/) | a headless Wayland compositor, for a GUI program in a pane |
+| [pyterm-pytest](https://lillecarl.github.io/pyterm-pytest/) | the test equipment the suites share |
+
+[pyterm's site](https://lillecarl.github.io/pyterm/) holds every source's
+docs.

@@ -1,21 +1,19 @@
 # pysmithay
 
-A headless Wayland compositor for Python, built on
-[Smithay](https://github.com/Smithay/smithay) with PyO3.
-
-It draws nothing. Each window's pixels come back to Python as RGBA, with
-the rectangles the client damaged. The aim is to show a lightweight GUI
-program inside a [pymux](https://github.com/Lillecarl/pymux) pane.
-
 > This repository is a copy. Work on pysmithay happens in
 > [pyterm](https://github.com/Lillecarl/pyterm), which exports its `pysmithay/`
 > directory here on every push. Send changes there, and issues to
 > [Lillecarl/pymux](https://github.com/Lillecarl/pymux/issues).
-> `nix build github:Lillecarl/pysmithay` builds it from this repository alone.
+> The docs are at <https://lillecarl.github.io/pysmithay/>.
 
-Linux only.
+<!-- The lines above are pyterm's nix/shared/readme-head.md, written by sync-sources. -->
 
-## Use
+A headless Wayland compositor for Python, built on
+[Smithay](https://github.com/Smithay/smithay) with PyO3. Linux only.
+
+It draws nothing. Each window's pixels come back to Python as RGBA, with
+the rectangles the client damaged. It is how a GUI program shows inside
+a [pymux](https://github.com/Lillecarl/pymux) pane.
 
 ```python
 import select
@@ -30,38 +28,48 @@ while True:
         if event[0] == "commit":
             _, window, damage = event
             width, height, rgba = compositor.frame(window)
-            compositor.frame_done(0)   # let the client draw the next frame
+            compositor.frame_done(window, 0)   # let it draw the next frame
 ```
 
 The caller owns the event loop: wait for either descriptor in `fds()`
 to become readable, then call `dispatch()`. Nothing blocks and no
-thread starts.
+thread starts. The API reference on the docs site lists every call:
+input, popups, scale, the clipboard, and `Vp9Encoder`, which encodes a
+window's frames for a pane.
 
-| call | what it does |
-| --- | --- |
-| `dispatch()` | accept clients, run requests, return events |
-| `frame(id)` | the window's last buffer, as `(width, height, rgba)` |
-| `frame_done(time)` | tell every window its frame was shown |
-| `configure(id, w, h)` | ask a window to take this size |
-| `close(id)` | ask a window to close |
-| `focus(id)` | give the keyboard to a window |
-| `key(code, pressed, time)` | an evdev key code |
-| `pointer_motion(id, x, y, time)` | in the window's surface pixels |
-| `pointer_button(button, pressed, time)` | an evdev button code |
-
-Events are tuples: `("toplevel", id)`, `("title", id, str)`,
-`("app_id", id, str)`, `("commit", id, [(x, y, w, h), ...])` and
-`("closed", id)`. A commit's damage is empty when it drew nothing; it
-still waits on `frame_done`.
+Events are tuples, such as `("toplevel", id, tag)`,
+`("commit", id, [(x, y, w, h), ...])` and `("closed", id)`. A commit's
+damage is empty when it drew nothing, and it still waits on
+`frame_done`. `Compositor.dispatch` lists them all.
 
 ## What it does not do yet
 
-- Subsurfaces and popups: only a window's own surface is read.
 - Buffers other than wl_shm, so no GPU clients.
-- Scroll, touch, clipboard and drag and drop.
+- Touch, and drag and drop.
 
-## Checks
+<!-- The lines below are pyterm's nix/shared/readme-tail.md, written by sync-sources. -->
 
-From the pyterm root:
+## Building
 
-    nix build --file . checks.pysmithay-unit checks.pysmithay-lint
+    nix build github:Lillecarl/pysmithay    # from this repository alone
+    nix build --file . pysmithay            # in a checkout of pyterm
+
+The suites that judge it run in pyterm, as `checks.pysmithay-*`.
+
+## The collection
+
+pysmithay is one source of [pyterm](https://github.com/Lillecarl/pyterm), and
+each source claims one job:
+
+| source | job |
+| --- | --- |
+| [pyte](https://lillecarl.github.io/pyte/) | parse, and hold a screen |
+| [ptyhost](https://lillecarl.github.io/ptyhost/) | run a program on a pty, and carry its bytes |
+| [ptterm](https://lillecarl.github.io/ptterm/) | draw one terminal, with prompt-toolkit |
+| [txterm](https://lillecarl.github.io/txterm/) | draw one terminal, with Textual |
+| [pymux](https://lillecarl.github.io/pymux/) | arrange several of them |
+| [pysmithay](https://lillecarl.github.io/pysmithay/) | a headless Wayland compositor, for a GUI program in a pane |
+| [pyterm-pytest](https://lillecarl.github.io/pyterm-pytest/) | the test equipment the suites share |
+
+[pyterm's site](https://lillecarl.github.io/pyterm/) holds every source's
+docs.

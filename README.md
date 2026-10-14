@@ -1138,13 +1138,27 @@ refuses a lock that names a commit with anything but locks changed since,
 and `--verify` requires that each exported tree builds the derivation pyterm
 builds for it here.
 
+### What every source holds alike
+
+Each source has the same shape: `package.nix`, a standalone `default.nix`,
+`flake.nix` and `shell.nix`, its suites in `nix/checks.nix`, a
+`README.md` and a `-ruff` gate. Some files have to be the same in all of
+them, and a source cannot read the root's, so it holds a copy:
+
+- the `[tool.ruff]` of its `pyproject.toml`, from `ruff.toml`;
+- its `.gitignore`, from `nix/shared/gitignore`;
+- the start and the end of its `README.md`, from `nix/shared/readme-*.md`.
+
+`nix run --file . sync-sources` writes the copies, and
+`checks.pyterm-sources-in-step` fails while one differs. Change the root's
+file, never a copy.
+
 ### The docs sites
 
 Each repository publishes a docs site on GitHub Pages:
 `lillecarl.github.io/<source>/`. `nix build --file . pages.<source>` builds
 it here. It is the source's README, its `docs/`, and an API reference, made
-with Sphinx by `nix/docs`. pyte keeps its own `docs/index.rst`.
-Lillecarl/pymux#671.
+with Sphinx by `nix/docs`. Lillecarl/pymux#671.
 
 The galleries of every picture check, `pictures`, take half an hour, so only
 pymux's site holds them, under `pictures/`. A source's
