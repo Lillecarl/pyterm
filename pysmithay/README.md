@@ -7,9 +7,9 @@ It draws nothing. Each window's pixels come back to Python as RGBA, with
 the rectangles the client damaged. The aim is to show a lightweight GUI
 program inside a [pymux](https://github.com/Lillecarl/pymux) pane.
 
-It is one source of the
-[pyterm umbrella](https://github.com/Lillecarl/pyterm), and builds and
-tests from there. Linux only.
+It is one source of
+[pyterm](https://github.com/Lillecarl/pyterm), which exports this
+repository from its `pysmithay/` directory, and builds and tests from there. Linux only.
 
 ## Use
 
@@ -58,6 +58,6 @@ still waits on `frame_done`.
 
 ## Checks
 
-From the umbrella:
+From the pyterm root:
 
     nix build --file . checks.pysmithay-unit checks.pysmithay-lint
