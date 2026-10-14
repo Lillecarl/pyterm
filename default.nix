@@ -698,7 +698,6 @@ rec {
             builtins.filter builtins.pathExists [
               (src + "/README.rst")
               (src + "/README.md")
-              (src + "/CHANGES")
               (src + "/docs")
             ]
           );
