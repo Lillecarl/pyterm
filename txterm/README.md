@@ -1,5 +1,11 @@
 # txterm
 
+> This repository is a copy. Work on txterm happens in
+> [pyterm](https://github.com/Lillecarl/pyterm), which exports its `txterm/`
+> directory here on every push. Send changes there, and issues to
+> [Lillecarl/pymux](https://github.com/Lillecarl/pymux/issues).
+> `nix build github:Lillecarl/txterm` builds it from this repository alone.
+
 A terminal widget for [Textual]. It runs a program on a pty and draws
 what the program writes.
 

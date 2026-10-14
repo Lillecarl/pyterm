@@ -7,9 +7,13 @@ It draws nothing. Each window's pixels come back to Python as RGBA, with
 the rectangles the client damaged. The aim is to show a lightweight GUI
 program inside a [pymux](https://github.com/Lillecarl/pymux) pane.
 
-It is one source of
-[pyterm](https://github.com/Lillecarl/pyterm), which exports this
-repository from its `pysmithay/` directory, and builds and tests from there. Linux only.
+> This repository is a copy. Work on pysmithay happens in
+> [pyterm](https://github.com/Lillecarl/pyterm), which exports its `pysmithay/`
+> directory here on every push. Send changes there, and issues to
+> [Lillecarl/pymux](https://github.com/Lillecarl/pymux/issues).
+> `nix build github:Lillecarl/pysmithay` builds it from this repository alone.
+
+Linux only.
 
 ## Use
 
