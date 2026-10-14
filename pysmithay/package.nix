@@ -32,11 +32,11 @@
   wl-clipboard,
   dejavu_fonts,
   makeFontsConf,
+  # The linter and formatter that the `ruff` check runs.
+  ruff,
 }:
 let
   fs = lib.fileset;
-
-  inherit (callPackage ./nix/suite.nix { }) suite;
 
   src = fs.toSource {
     root = ./.;
@@ -45,6 +45,8 @@ let
       ./Cargo.lock
       ./build.rs
       ./pyproject.toml
+      ./README.md
+      ./LICENSE
       ./src
       ./python
     ];
@@ -52,70 +54,39 @@ let
 
   cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
 
-  # The Rust's style, held by the formatter and by clippy with every
-  # warning an error.
-  #
-  #     nix build --file . checks.pysmithay-lint
-  checks.lint = suite {
-    name = "pysmithay-lint";
-    # A compiler, for the build scripts of the crates: a `runCommand`
-    # has none of its own.
-    inputs = [
-      cargo
-      rustc
-      clippy
-      rustfmt
-      stdenv.cc
-      pkg-config
-      rustPlatform.bindgenHook
-    ];
-    setup = ''
-      cp -r ${src}/. crate
-      chmod -R +w crate
-      cd crate
-      export HOME="$TMPDIR"
-      export PYO3_PYTHON=${python.interpreter}
-      export CARGO_TARGET_DIR="$TMPDIR/target"
-      export LIBRARY_PATH=${libxkbcommon}/lib:${pixman}/lib
-      export PKG_CONFIG_PATH=${lib.getDev libvpx}/lib/pkgconfig
-      # What `cargoSetupHook` writes, which a `runCommand` never runs.
-      mkdir -p .cargo
-      printf '[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "%s"\n' ${cargoDeps} > .cargo/config.toml
-    '';
-  } ''
-    cargo fmt --check
-    cargo clippy --offline --frozen -- -D warnings
-  '';
-
   testEnv = mkVirtualEnv "pysmithay-test-env" {
     pysmithay = [ "test" ];
   };
 
-  # The compositor against a client that draws known pixels, against
-  # foot, a real program, and the clipboard against wl-copy and wl-paste.
-  #
-  #     nix build --file . checks.pysmithay-unit
-  checks.unit = suite {
-    name = "pysmithay-unit";
-    inputs = [
+  checks = callPackage ./nix/checks.nix {
+    inherit
+      python
+      src
+      cargoDeps
       testEnv
+      rustPlatform
+      cargo
+      rustc
+      clippy
+      rustfmt
+      ruff
+      libxkbcommon
+      pixman
+      libvpx
+      pkg-config
+      ffmpeg-headless
       foot
       wl-clipboard
-      ffmpeg-headless
-    ];
-    env.FONTCONFIG_FILE = makeFontsConf { fontDirectories = [ dejavu_fonts ]; };
-    setup = ''
-      cp -r ${./tests} tests
-      chmod -R +w tests
-      export HOME="$TMPDIR"
-      export LANG=C.UTF-8
-      export PYTHONDONTWRITEBYTECODE=1
-    '';
-  } "python -m pytest tests -q -p no:cacheprovider";
+      dejavu_fonts
+      makeFontsConf
+      ;
+  };
+
+  pyproject = lib.importTOML ./pyproject.toml;
 in
 stdenv.mkDerivation {
   pname = "pysmithay";
-  version = "0.1.0";
+  inherit (pyproject.project) version;
 
   inherit src cargoDeps;
 
@@ -144,18 +115,12 @@ stdenv.mkDerivation {
   '';
 
   passthru = {
-    dependencies = { };
-    optional-dependencies = {
-      docs = {
-        sphinx = [ ];
-        myst-parser = [ ];
-        furo = [ ];
-      };
-      test = {
-        pytest = [ ];
-        pywayland = [ ];
-      };
-    };
+    # What `mkProject` reads out of `pyproject.toml` for the others. The
+    # names carry no version bound, so a name is the whole entry.
+    dependencies = lib.genAttrs pyproject.project.dependencies (_: [ ]);
+    optional-dependencies = lib.mapAttrs (
+      _: names: lib.genAttrs names (_: [ ])
+    ) pyproject.project.optional-dependencies;
     inherit checks;
   };
 

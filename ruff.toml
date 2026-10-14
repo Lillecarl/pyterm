@@ -13,9 +13,10 @@
 # the `runtime-evaluated-*` exemptions, per symbol, and nothing about
 # laziness changes for the rest.
 #
-# Each package repeats this stanza in its own `pyproject.toml`: the
-# build sandbox sees only that package's tree, so discovery from a
-# file under it must end there. Keep the two in step.
+# Each source holds a copy of everything above `[lint.isort]` in its
+# own `pyproject.toml`: its lint sees only its own tree, and its
+# repository stands alone. `nix run --file . sync-sources` writes the
+# copies, and `checks.pyterm-sources-in-step` fails while one differs.
 target-version = "py314"
 # Pinned: a ruff upgrade must never silently reflow the tree.
 line-length = 120

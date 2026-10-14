@@ -77,7 +77,7 @@ def paste(compositor, *flags):
     return process.returncode, stdout, stderr
 
 
-@pytest.mark.parametrize("target, flags", [("clipboard", ()), ("primary", ("--primary",))])
+@pytest.mark.parametrize(("target", "flags"), [("clipboard", ()), ("primary", ("--primary",))])
 def test_what_a_client_copies_reaches_python(compositor, target, flags):
     holder = copy(compositor, "copied by wl-copy", *flags)
     try:
@@ -95,9 +95,9 @@ def test_what_a_client_copies_reaches_python(compositor, target, flags):
         holder.wait()
 
 
-@pytest.mark.parametrize("target, flags", [("clipboard", ()), ("primary", ("--primary",))])
+@pytest.mark.parametrize(("target", "flags"), [("clipboard", ()), ("primary", ("--primary",))])
 def test_what_python_holds_reaches_a_client(compositor, target, flags):
-    compositor.set_selection(target, {TEXT: "held by pymux".encode(), "text/plain": b"held by pymux"})
+    compositor.set_selection(target, {TEXT: b"held by pymux", "text/plain": b"held by pymux"})
 
     code, stdout, stderr = paste(compositor, *flags)
 

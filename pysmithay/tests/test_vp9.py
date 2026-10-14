@@ -13,8 +13,9 @@ import struct
 import subprocess
 import sys
 
-from pysmithay import Vp9Encoder
 from test_compositor import CLIENT, commits, launch, pump
+
+from pysmithay import Vp9Encoder
 
 WIDTH, HEIGHT = 64, 32
 #: The probe's fill and square, as RGB.
@@ -31,14 +32,29 @@ def frame(compositor, encoder):
 
 def decoded(packets: list[bytes]) -> list[bytes]:
     "Every frame of the stream as RGB, decoded by ffmpeg."
-    header = b"DKIF" + struct.pack("<HH4sHHIIII",0, 32, b"VP90", WIDTH, HEIGHT, 30, 1, len(packets), 0)
+    header = b"DKIF" + struct.pack("<HH4sHHIIII", 0, 32, b"VP90", WIDTH, HEIGHT, 30, 1, len(packets), 0)
     ivf = header + b"".join(struct.pack("<IQ", len(packet), at) + packet for at, packet in enumerate(packets))
     ffmpeg = shutil.which("ffmpeg")
     assert ffmpeg, "the check puts ffmpeg on PATH"
     raw = subprocess.run(
-        [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "ivf", "-i", "-",
-         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        input=ivf, capture_output=True, check=True,
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "ivf",
+            "-i",
+            "-",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        input=ivf,
+        capture_output=True,
+        check=True,
     ).stdout
     size = WIDTH * HEIGHT * 3
     return [raw[at : at + size] for at in range(0, len(raw), size)]

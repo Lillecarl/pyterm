@@ -304,6 +304,8 @@ let
     # input without a cycle. Lillecarl/pymux#274.
     pyterm-pytest = final.callPackage (sources.pyterm-pytest + "/package.nix") {
       inherit (ps) mkProject;
+      # The linter and formatter that `pyterm-pytest-ruff` runs.
+      inherit (pkgs) ruff;
     };
 
     # The toolkit under ptterm and pymux, and the one source here that is
@@ -406,6 +408,8 @@ let
         wl-clipboard
         dejavu_fonts
         makeFontsConf
+        # The linter and formatter that `pysmithay-ruff` runs.
+        ruff
         ;
     };
 
@@ -549,6 +553,9 @@ rec {
   lock-subtrees = pkgs.callPackage ./pkgs/lock-subtrees { };
   # Filters each source out of this repository into its own. Lillecarl/pymux#667.
   josh-export = pkgs.callPackage ./pkgs/josh-export { };
+  # Copies what the root holds for every source into each one, and
+  # `checks.pyterm-sources-in-step` holds the copies.
+  sync-sources = pkgs.callPackage ./pkgs/sync-sources { };
 
 
   # The collection's package scopes, one per interpreter: the same
@@ -837,6 +844,11 @@ rec {
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
     };
+    # Each source's copy of `ruff.toml` and of the `.gitignore` is the
+    # root's.
+    pyterm-sources-in-step = pkgs.callPackage ./nix/sources-in-step.nix {
+      inherit sources sync-sources;
+    };
     # The mock the agent CLIs are driven against: the server comes up and
     # every wire format answers from a fixture. It gates the fixtures and the
     # package, not the agents -- their binaries are not this collection's to
@@ -861,9 +873,11 @@ rec {
     # Lillecarl/pymux#574.
     pymux-rs-parity = pymux-rs.checks.parity;
     pymux-rs-lint = pymux-rs.checks.lint;
-    # The compositor against real Wayland clients, and its Rust's style.
+    # The compositor against real Wayland clients, its Rust's style, and
+    # its Python's.
     pysmithay-unit = pysmithay.checks.unit;
     pysmithay-lint = pysmithay.checks.lint;
+    pysmithay-ruff = pysmithay.checks.ruff;
     # The style of pyte: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     pyte-ruff = pyte.checks.ruff;
@@ -890,6 +904,8 @@ rec {
     # budgets. Its own gate is the ceiling; the suites that use it are
     # the real judges.
     pyterm-pytest-unit = pyterm-pytest.checks.unit;
+    # The style of pyterm-pytest.
+    pyterm-pytest-ruff = pyterm-pytest.checks.ruff;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.
