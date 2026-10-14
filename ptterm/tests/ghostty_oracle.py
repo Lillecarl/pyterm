@@ -1,0 +1,52 @@
+"""
+Compare the screen of ptterm against Ghostty.
+
+Ghostty keeps its terminal in libghostty-vt, a library with a C API
+that is meant to be embedded. `tests/judges-c` reads a screen back
+through it, and `PTTERM_GHOSTTY` names that program.
+
+Ghostty holds the rendition of a cell whole: the shape of an underline
+and the colour of the line included.
+
+**It answers where a link goes, and not which cells are one link.**
+`ghostty_grid_ref_hyperlink_uri` hands over the target of an "OSC 8".
+Nothing hands over the name that Ghostty gives that one link, so
+`_as_ghostty_sees` drops the name from both sides and keeps the target.
+
+Naming a link after its target would not fix that. It would decide, for
+Ghostty, that two openings of one address are one link, and that is the
+question the panel is being asked. See Lillecarl/pymux#92.
+
+A judge that cannot hold something has to say so. One that answers
+anyway is worse than one that abstains, because the panel counts its
+vote.
+"""
+
+from __future__ import annotations
+
+from kitty_oracle import Cell
+from line_judge import LineJudge
+
+__all__ = ["_as_ghostty_sees", "ghostty_cells", "ghostty_is_available"]
+
+_JUDGE = LineJudge("PTTERM_GHOSTTY", ("ghostty",))
+
+
+def ghostty_is_available() -> bool:
+    "True when `PTTERM_GHOSTTY` names a program that runs."
+    return _JUDGE.is_available()
+
+
+def ghostty_cells(data: str, lines: int, columns: int, resize: tuple[int, int] | None = None) -> list[list[Cell]]:
+    "Feed `data` to Ghostty and read the screen back."
+    return _JUDGE.cells("ghostty", data, lines, columns, resize)
+
+
+def _as_ghostty_sees(cell: Cell) -> Cell:
+    """
+    The part of a cell that libghostty-vt reports.
+
+    It names no baseline: `ghostty/vt/sgr.h` holds no superscript and
+    no subscript, so "SGR 73" leaves the glyph where it was.
+    """
+    return cell._replace(hyperlink_id=None, baseline=0)

@@ -1,0 +1,1611 @@
+# Deviations from the panel
+
+Six emulators judge ptterm, and ptterm is not one of them. Each is
+written by other people, and each comes from a different line:
+
+- kitty, in C, through the python extension that kitty ships.
+- WezTerm and Alacritty, in Rust, through `tests/judges`.
+- libvterm, in C, the one that Vim and Neovim carry.
+- Ghostty, in Zig, through libghostty-vt and `tests/judges-c`.
+- xterm.js, in TypeScript, the one VS Code draws in, through
+  `tests/judges-js`.
+
+**xterm itself has no seat, and it answers anyway.** It is a program
+and not a library, so `tests/xterm_oracle.py` runs one on a display of
+its own and reads the screen back with DECRQCRA, one cell at a time. A
+checksum holds the character and nothing else, so xterm cannot join the
+vote: `verdict()` drops what any judge on the panel misses, and a judge
+that misses everything would blind the panel to every colour and every
+line. `panel.what_xterm_draws` asks it on its own instead.
+`tests/test_xterm_itself.py` asks it exactly where the panel abstains,
+and `tests/test_corpus_against_the_panel.py` asks it about every
+recording of a real program.
+
+**A tally says more than a comparison.** Where every judge differs from
+ptterm and the judges agree with each other, ptterm is wrong and nobody
+has to decide anything. Where the judges disagree, the difference is a
+choice. `verdict()` in `tests/panel.py` answers "agree", "ptterm-wrong"
+or "split".
+
+**Nothing here is meant to live in anyone's head.** Every deviation
+below names the program that shows it, the side each judge takes, the
+reason ptterm does what it does, and whether it could become a setting.
+A reader who has never seen this code should be able to reopen any one
+of them without asking a person.
+
+- `tests/test_the_panel.py` holds the tally of every deviation that
+  stands, and the programs the whole panel agrees on.
+- `tests/test_known_deviations.py` holds each deviation as a strict
+  `xfail` against kitty. One that starts to pass means it is gone.
+- `tests/test_against_kitty.py` and `tests/test_against_vterm.py` hold
+  sequences by hand.
+- `tests/test_corpus_against_kitty.py` and
+  `tests/test_corpus_against_the_panel.py` replay what real programs
+  wrote. The second puts each capture to xterm as well, and xterm
+  draws the same 24 by 80 screen of characters as ptterm for every one
+  of them.
+- `tests/judges` builds the two written in Rust, `tests/judges-c` the
+  one that reads libghostty-vt, and `tests/judges-js` the one that
+  reads xterm.js. Each is a program that answers one line of JSON with
+  another; `tests/line_judge.py` is the side that asks.
+- `tests/drive_with_esctest.py` runs esctest2, the conformance suite of
+  xterm, on a pty that ptterm owns. It judges from the inside, which
+  the panel cannot: it writes sequences and reads the reports that come
+  back. `tests/esctest-failures.txt` holds what fails, and the section
+  at the end of this file says what each one is.
+- `tests/fuzz_against_kitty.py` builds random programs with hypothesis.
+  `nix build --file . checks.ptterm-fuzz` runs it from the pyterm checkout
+  and `nix build --file . checks.fuzz` from this one. `PTTERM_FUZZ` says how
+  many examples.
+
+## Fixed by the comparison
+
+- An erased cell took no background. htop draws the header of its table
+  with "CSI K" and expects the colour to reach the end of the line.
+- "CSI J" stopped at the last line in use instead of the bottom of the
+  screen, and did nothing at all on a screen that held no cell yet.
+- The first sixteen colours of the palette became numbers of their own
+  instead of names, so a program that asked for "red" got the red of
+  xterm and not the red of the theme of the user.
+- The other 240 colours of the palette had the same fault, and Alacritty's
+  reference tests found it. A number above fifteen became the colour that
+  xterm paints, so the theme of the user reached only sixteen cells out of
+  256. Every judge of the panel keeps the number.
+- The id of a hyperlink ("OSC 8") was read and dropped, and Alacritty's
+  reference tests found it. The id joins the pieces of one link, so a
+  link that a line break cuts in two is one link. Without it a terminal
+  gives each run one of its own, and the link becomes two.
+- SU and SD ("CSI S" and "CSI T") did nothing. pyte has neither.
+- "CSI 2 L" dragged the lines above the cursor down with it.
+- The blanks that "CSI @" and "CSI P" leave took no background, and an
+  insert did not drop what falls off the right edge.
+
+- A write over one half of a double width character left the other
+  half behind, and a character that needs two columns wrapped one
+  column too late, so it wrote past the last column.
+- A combining mark after a double width character landed in the empty
+  second half, so the character never got it.
+- A CSI sequence that carries more parameters than its command takes
+  raised a TypeError in pyte and stopped the whole stream. One stray
+  sequence took the pane with it.
+- The first visible line followed the cursor as well as the content, so
+  a cursor that moved above it pulled the screen back into the history
+  and hid the line that a program had just written.
+- A move down that starts above the scrolling region stopped at the
+  bottom margin, and a move up that starts below it stopped at the top
+  margin. The screen stops both now.
+- "ESC ( 0" names the line drawing set of the DEC terminals, which is
+  how ncurses draws a box. pyte dropped it in UTF-8 mode and the screen
+  had no handler for it either, so a box came out as the letters "lqk".
+- The line drawing set drew "h" as U+2591 LIGHT SHADE. The DEC special
+  graphics set puts the newline symbol there. Alacritty, WezTerm,
+  libvterm, Ghostty and xterm.js all draw U+2424 SYMBOL FOR NEWLINE,
+  and kitty alone keeps the shade, so the vote is five to one. pyte
+  took the table from the linux kernel, which draws the shade.
+  Alacritty's `saved_cursor` found it: a shell prompt that holds an
+  "h" comes out wrong in every box that ncurses draws around it.
+- A tab found a stop past the last column, put the cursor there, and
+  the next character wrapped to the line below.
+- Only "?1049" took the alternate screen. A program that sends "?47" or
+  "?1047" drew over the shell it came from.
+- A terminal keeps one alternate screen for its whole life and hands it
+  back with what it held. ptterm made a new one on every switch, so a
+  program that takes the screen with "?47" or "?1047", which do not
+  clear it, found it empty. The vote called this one: kitty and
+  libvterm both keep the content.
+- "?1049" does what "ESC 7" and "ESC 8" do, on the screen it comes
+  from: it saves the place, the rendition and the character sets, and
+  brings them back. The screen did none of that, so a colour set on the
+  alternate screen stayed on the shell behind it. "?47" and "?1047"
+  save nothing, so the cursor stays where the program left it.
+- The scrolling region and the saved cursor sat on the wrong side of
+  the switch: the region belongs to the terminal and survives it, and
+  the saved cursor belongs to one screen and does not.
+- RIS ("ESC c") kept what "ESC 7" saved, and DECSTR ("CSI ! p") threw
+  it away. That is the wrong way round: DECSTR is the weaker of the two
+  resets, and RIS is the power-up state, where a terminal remembers no
+  cursor. Alacritty, Ghostty, kitty and xterm.js all forget it on RIS.
+  libvterm and WezTerm keep it, and they keep it through DECSTR as
+  well, so neither of them drew the line where ptterm drew it. Nothing
+  in esctest2 asks, so nothing had caught it.
+- The saved cursor of the alternate screen went away when a program
+  took that screen again. "?1049h" clears the content and leaves the
+  save alone: xterm holds one saved cursor per screen for the life of
+  the terminal. So a program that takes the alternate screen, saves,
+  leaves and comes back finds its own save. ptterm sent the cursor
+  home instead, and dropped the character sets with it. The whole
+  panel was against ptterm here, six to nothing. Alacritty's
+  `saved_cursor_alt` found it.
+- A restore with nothing saved kept the character set that "ESC ( 0"
+  had picked, instead of the one a terminal starts with.
+- G1 held the line drawing set before any program named it, so a stray
+  shift out turned every letter into a box character.
+- A linefeed, an index and a move down left the cursor past the last
+  column, where a character waits to wrap. A move ends that wait, so
+  the next character went to the line below instead of the last column.
+
+- A restore of the cursor was not faithful: it clamped the position
+  into the margins that are set now, it read a stack instead of the
+  one cursor that a terminal remembers, and it kept a row of the
+  buffer instead of a row of the screen, so a scroll in between
+  dragged the cursor back into the history.
+- A margin held the cursor wherever it was, so a move up above the top
+  margin moved the cursor down. "CSI r" homes the cursor, which puts
+  it above the top margin nearly every time.
+- The bounds let the cursor sit one row below the last, so a position
+  past the bottom of the screen drew a line that pushed the screen
+  into the history. DECALN found it: a full screen makes the drift
+  visible where a blank one hides it.
+- DECALN ("ESC # 8") drew the pattern and did nothing else. The DEC
+  manuals also put the margins back to the whole screen and send the
+  cursor home, and kitty does both; libvterm does neither, so the vote
+  calls this a split and the manual breaks the tie.
+- CHT and CBT ("CSI Ps I" and "CSI Ps Z") did nothing at all: pyte has
+  neither. kitty and libvterm agree on both, so the vote called it a
+  bug with nothing to decide.
+- DL left the cursor where it was. It moves to the first column, the
+  same way IL does.
+- A tab ended the wait to wrap. A character in the last column leaves
+  the cursor waiting, and a tab cleared that wait, so the character
+  after the tab landed over the one that is there. The whole panel
+  puts it on the next line: four judges to nothing, and only a
+  document behind ptterm. The tab is the one cursor move that does not
+  end the wait.
+- A combining mark hung on a cell that an erase had blanked, but only
+  when a background was set. An erase with no background drops the
+  cell, so the mark had nothing to reach and went away; an erase with
+  a background wrote a space, and the mark hung on that. One program
+  gave two answers. A cell that an erase leaves now holds no
+  character, whatever its background, so the mark goes away in both.
+  kitty and WezTerm draw the same line.
+
+## The deviations that stand
+
+**The user has decided seven of these fourteen, and ptterm keeps what
+it does in each.** Do not reopen one of those without a new reason. The
+tally is what the decision rested on, so it stands beside each entry.
+
+**The standing rule, when a tally leaves ptterm alone against the
+rest:** follow the rest. That settles it, and no one has to be asked. A
+tally where ptterm sits with one or more judges is not that case, and
+it goes to the user.
+
+**Two new judges changed the picture, and they changed it our way.**
+Ghostty and xterm.js joined a panel of four. Three differences that
+split it two against two are now four against two for the side ptterm
+is on: the tab on the last row, `?1047l`, and DECALN. Nothing that was
+decided has to be decided again.
+
+They also found one. What looked like a quirk of Alacritty, in CBT and
+CHT, is a real difference: Ghostty and xterm.js take that side too, and
+the panel is three against three. It is number 9, and it is open.
+
+**xterm answers most of these, and it is a judge of characters only.**
+It votes where the difference is which character lands where, and the
+last column says what it said. Two go against ptterm: numbers 9 and 22
+are four against three now, where they were three against three.
+`tests/test_xterm_itself.py` holds each answer, and neither is decided
+here.
+
+| # | What | With ptterm | Against ptterm | xterm |
+| --- | --- | --- | --- | --- |
+| 1 | A tab in the last column of the last row | Ghostty, libvterm, WezTerm, xterm.js | Alacritty, kitty | with ptterm |
+| 2 | `?1047l` clears the alternate screen | Ghostty, libvterm, WezTerm, xterm.js | Alacritty, kitty | with ptterm |
+| 3 | A sequence with too many parameters | Alacritty, libvterm, xterm.js | Ghostty, kitty, WezTerm | with ptterm |
+| 4 | DECALN homes the cursor and clears the margins | Ghostty, kitty, WezTerm, xterm.js | Alacritty, libvterm | with ptterm |
+| 5 | A backspace in the first column | every other judge | kitty | with ptterm |
+| 6 | A count of zero for SU or SD | Alacritty, libvterm, WezTerm, xterm.js | Ghostty, kitty | with ptterm |
+| 7 | The background of the line a scroll brings in | Alacritty, libvterm, WezTerm, xterm.js | Ghostty, kitty | holds no colour |
+| 8 | A combining mark on a cell an erase left | kitty, WezTerm, xterm.js | Alacritty, Ghostty, libvterm | holds no mark |
+| 9 | CBT and CHT over the tab stops | Alacritty, Ghostty, xterm.js | kitty, libvterm, WezTerm | with ptterm |
+| 20 | The blank of the line drawing set | kitty | Alacritty, Ghostty, libvterm, WezTerm, xterm.js | a fourth answer |
+| 21 | Reverse video on a cell an erase leaves | kitty, WezTerm | Alacritty, Ghostty, libvterm, xterm.js | holds no colour |
+| 22 | A saved cursor and the wait to wrap | Alacritty, Ghostty, WezTerm | kitty, libvterm, xterm.js | with ptterm |
+| 23 | Two runs of one target with no id | kitty, WezTerm | Alacritty | holds no link |
+| 24 | `?47l` gives back a screen `?1049h` took | Ghostty, kitty, WezTerm, xterm.js | Alacritty, libvterm | with ptterm |
+
+Number 20 is the newest, and it is open. The five judges against ptterm
+do not agree with each other either: one draws a space and four draw
+the underscore, so there is no answer to follow.
+
+Number 21 was decided in the code and never written down here. The
+tally moved it: `erase_style` in `ptterm/screen.py` carried it alone.
+
+Number 23 was the first that a panel of three decided, and it is a
+panel of four now. libvterm holds no hyperlink and Ghostty reports no
+name for one, so those two abstain. Reading a link out of xterm.js
+brought the fourth name in, and the tally is even.
+
+### 1. A tab in the last column of the last row
+
+`\x1b[8;20H12345\t` on 8 lines and 24 columns.
+
+ptterm keeps the cursor where it is, and so do Ghostty, libvterm,
+WezTerm and xterm.js. kitty and Alacritty scroll the screen up.
+
+A tab draws nothing. A character in the last column leaves the cursor
+waiting to wrap, and a tab leaves that wait alone, so no character has
+arrived to need a new line. The right margin case, one column earlier,
+is not a deviation any more: the whole panel puts the character after
+the tab on the next line, and ptterm does too.
+
+**As a setting:** a branch in `tab()`, for a cursor that waits to wrap
+on the last row. Cheap to add if a program ever needs it.
+
+### 2. "?1047l" clears the alternate screen
+
+`\x1b[?1047h X \x1b[?1047l \x1b[?47h` on 3 lines and 6 columns.
+
+ptterm clears the alternate screen before it gives it back, and so do
+Ghostty, libvterm, WezTerm and xterm.js. kitty and Alacritty keep the
+content.
+
+xterm documents the clear for this mode. `?1049l` and `?47l` do not
+clear, and ptterm keeps the screen for both of those, so a program that
+wants its content back sends one of them. libvterm clears whenever it
+leaves, whatever the mode.
+
+**As a setting:** it cannot answer one way for one client and another
+way for another. A pane holds one screen, and every attached client
+draws the cells of that screen. The keyboard can translate per client
+because it is a negotiation between a pane and a terminal; the content
+of a screen is one buffer. So a setting belongs to the server or the
+pane, and it decides once, where the program writes the mode.
+
+### 3. A sequence with more parameters than its command takes
+
+`\x1b[3;9;9GX` on 4 lines and 8 columns.
+
+ptterm reads the parameters the command takes and ignores the rest, and
+so do Alacritty, libvterm and xterm.js. kitty, WezTerm and Ghostty drop
+the sequence whole. Three against three.
+
+xterm reads the ones it needs, and it says so itself now:
+`test_xterm_itself.py::test_xterm_reads_the_parameters_it_needs_out_of_too_many`
+draws the same screen ptterm draws, so the tally is four against three
+and ptterm is on the larger side. Dropping the sequence loses a move
+that the program meant. pyte raised a TypeError here and took the whole
+stream with it, so the forgiving side is also the safe one.
+
+**As a setting:** possible, at the one place that counts the
+parameters. Little value: no program sends these on purpose.
+
+### 4. DECALN homes the cursor and clears the margins
+
+`ab\x1b#8X` on 4 lines and 6 columns.
+
+ptterm draws the pattern, puts the margins back to the whole screen and
+sends the cursor home, and so do Ghostty, kitty, WezTerm and xterm.js.
+Alacritty and libvterm draw the pattern and leave the cursor where it
+was.
+
+The DEC manuals say all three, and kitty and WezTerm do all three.
+
+**As a setting:** no. DECALN is an alignment test for a real tube.
+Nothing in daily use sends it.
+
+### 5. A backspace in the first column
+
+`\n\x080` on 4 lines and 8 columns.
+
+ptterm keeps the cursor in the first column, and so does every other
+judge. kitty alone steps back to the end of the row above.
+
+xterm does that only with reverse wraparound, `DECSET 45`, and that
+mode is off by default.
+
+**As a setting:** this one already has a name, and it is not ours.
+ptterm does not read mode 45 today. The honest way to make it
+configurable is to implement that mode, so a program turns it on the
+way it does in xterm.
+
+### 6. A count of zero for SU or SD
+
+`a\r\nb\x1b[0S` on 4 lines and 8 columns.
+
+ptterm reads a count of zero as one, and so do Alacritty, libvterm,
+WezTerm and xterm.js. kitty and Ghostty read it as no scroll.
+
+Every other sequence that counts reads a zero as one, on both sides.
+`test_known_deviations.py` checks twelve of them.
+
+**As a setting:** no. It would make SU and SD the only sequences that
+count differently from the rest.
+
+### 7. The background of the line a scroll brings in
+
+`\x1b[42m\x1b[1S` on 4 lines and 6 columns.
+
+ptterm paints the new line with the background that is set, and so do
+Alacritty, libvterm, WezTerm and xterm.js. kitty and Ghostty give it
+the default.
+
+Every way of bringing a line in paints it: SU, a linefeed at the
+bottom of the screen, and a linefeed or IND at the bottom of a
+scrolling region. A linefeed with no region painted nothing until
+Alacritty's `vim_large_window_scroll` reference test found it, so the
+same linefeed painted or did not paint by whether a program had set a
+region. `tests/test_scroll_background.py` holds all four.
+
+xterm paints it, and the terminfo entry of ptterm claims `bce`. A
+capability that is claimed has to hold.
+
+**As a setting:** no, not on its own. It would have to move with the
+`bce` claim in the terminfo entry, because a program reads that and
+draws what it says.
+
+### 8. A combining mark on a cell that an erase left
+
+`0\x1b[40m\x1b[1K\u0301` on 3 lines and 6 columns.
+
+The erase takes the "0" away. A combining mark then arrives with no
+character to hang on.
+
+ptterm drops it, and kitty, WezTerm and xterm.js drop it too. Alacritty
+and Ghostty hang it on the blank that the erase left. libvterm puts the
+"0" back and hangs the mark on that.
+
+Three against three. ptterm used to hang the mark on the blank, but
+only when a background was set, which is the bug in the list above.
+Whichever side it takes, it has to take the same one both times.
+
+**As a setting:** no. Not while the panel is this evenly divided and
+nothing turns on it.
+
+### 9. CBT and CHT over the tab stops
+
+`\x1b[Ix\x1b[2Iy\x1b[Zz` on 8 lines and 24 columns.
+
+"CSI Ps I" moves forward over tab stops and "CSI Ps Z" moves back, and
+neither draws anything. Alacritty, Ghostty and xterm.js land somewhere
+else than ptterm, kitty, libvterm and WezTerm.
+
+**This is the one the new judges found.** It read as a quirk of
+Alacritty while the panel was four, and it sat in the list of judges
+standing apart. Two more judges took that side, so it is a difference
+that stands.
+
+**The three that stand apart all draw it in the same place**, at row 1
+column 0, and **xterm draws it there too**. That made it four against
+three with ptterm on the smaller side, and Carl decided it:
+Lillecarl/pymux#107 says the three places where ptterm dropped the wait
+to wrap are one flag, and ptterm carries it through all three now. So
+the sides above are ptterm's own side and the three that still move the
+cursor back.
+
+**What differs is the wait to wrap, not the column.** The "y" lands in
+the last column, which leaves the cursor waiting to wrap. A second
+probe, `\x1b[Ix\x1b[2Iy\x1b[Z\x1b[Dz`, puts the "z" at column 15 in
+xterm: "CSI D" clears the wait and moves one column left, so CBT had
+moved the cursor back to column 16 after all. The cursor stands at 16
+and the next character wraps anyway.
+ptterm reads it the same way now: the cursor really does go back to 16
+and the wait survives.
+`test_xterm_itself.py::test_xterm_wraps_rather_than_moving_back_over_a_tab_stop`
+holds both probes, and
+`pyte/tests/test_the_wait_to_wrap_is_cursor_state.py` is the gate.
+
+**One thing xterm does that ptterm does not**, and it is a different
+question: "CSI D" from a cursor that waits folds that cursor back onto
+the last column *first* in xterm, so the move lands two columns from
+where the wait sat. All six judges move one column. ptterm is with the
+six.
+
+**As a setting:** no. It is settled, and it follows xterm and the three
+judges. ncurses uses CHT to reach a column without drawing the blanks
+in between, so a program does depend on this.
+
+### 10. Left and right margins
+
+`a\r\nb\r\nc\r\nd\x1b[?69h\x1b[2;4s\x1b[2S` on 8 lines and 24 columns,
+and six more programs in `test_the_judges_that_carry_margins_agree`.
+
+DECSLRM ("CSI Pl ; Pr s") names a left and a right margin, and private
+mode 69 (DECLRMM) says whether it may. Ghostty, libvterm and WezTerm
+carry them. Alacritty, kitty and xterm.js drop DECSLRM and draw the
+whole width, so they differ from ptterm on every program that sets a
+margin.
+
+**This is a missing feature and not a decision.** The three that carry
+margins draw what ptterm draws, cell for cell, on scrolling, on
+inserting and deleting lines and characters, and on a line feed at the
+bottom margin. xterm carries them as well, and esctest2 tests them
+heavily: 73 of its tests set a margin.
+
+**xterm says so itself now.** It draws what ptterm draws on all seven
+programs, cell for cell.
+`test_xterm_itself.py::test_the_margins_draw_what_xterm_draws` is the
+measurement, and it stands beside the word of the suite.
+
+**As a setting:** no. A program asks for the margins, and a program
+that does not ask never sees them.
+
+### 11. DECIC, DECDC, DECBI and DECFI
+
+`abcdefg\r\nABCDEFG\x1b[1;2H\x1b['}` and `x\x1b[1;1H\x1b6` on 4 lines
+and 24 columns.
+
+DECIC ("CSI Pn ' }") and DECDC ("CSI Pn ' ~") insert and delete columns
+of the scrolling region. DECBI ("ESC 6") and DECFI ("ESC 9") move the
+cursor one column, and move the region when the cursor stands on a
+margin.
+
+Only libvterm and xterm.js carry DECIC and DECDC. **No judge carries
+DECBI or DECFI.** xterm carries all four, and esctest2 holds twenty
+tests for them, which ptterm passes.
+
+**This is the widest gap between ptterm and the panel.** ptterm stands
+alone on DECBI and DECFI, six to nothing. It stands there because the
+side it is on is xterm and DEC STD 070, and because every judge that
+differs differs by doing nothing at all. A program that sends "ESC 6"
+means the column move, and a terminal that drops it draws the wrong
+screen quietly.
+
+**xterm says so itself now.** It draws what ptterm draws on all four
+programs, DECBI and DECFI included.
+`test_xterm_itself.py::test_the_columns_of_a_region_draw_what_xterm_draws`
+is the measurement, so the widest gap between ptterm and the panel is
+no longer the word of a suite alone.
+
+**As a setting:** no, for the same reason as the margins.
+
+### 12. DECFRA, DECERA, DECSERA and DECCRA
+
+`abcdefg\r\nABCDEFG\r\nhijklmn\r\nHIJKLMN\r\nopqrstu\x1b[37;2;2;4;4$x`
+and the three commands beside it, on 6 lines and 8 columns.
+
+The four commands take a rectangle of the screen. DECFRA
+("CSI Pch ; Pt ; Pl ; Pb ; Pr $ x") fills one with a character. DECERA
+("$ z") erases one. DECSERA ("$ {") erases one and leaves a cell that
+DECSCA marked alone. DECCRA ("$ v") copies one to another place.
+
+**No judge carries any of the four.** All six leave the screen exactly
+as it was, in every one of fifteen probes. So the panel gives no tally
+here, and it cannot give one: a judge that does nothing reads the same
+way as a judge that disagrees, and six abstentions are not six votes.
+
+xterm is the anchor instead. esctest2 is xterm's own suite, and its
+`DECFRATests`, `DECERATests`, `DECSERATests` and `DECCRATests` hold
+thirty-two tests between them, of which twenty-four failed before this
+work. The other eight ask a command to do nothing, which a terminal
+without the command does very well. `test_rectangles.py` follows the
+suite, and
+`test_the_panel.py` writes down the abstention so that a judge which
+grows the feature makes a test fail.
+
+**xterm says so itself now.** It draws what ptterm draws on all four
+commands, on the screen that `DECCRATests` draws.
+`test_xterm_itself.py::test_a_rectangle_command_draws_what_xterm_draws`
+is the measurement.
+
+One rule inside the four is worth naming, because it looks like an
+inconsistency and is not. **DECSERA reads only the mark of DECSCA.**
+The mark of ISO 6429 does not hold it away from a cell, and DECSEL
+("CSI ? Ps K") reads both marks. esctest2 asks for each of the two, in
+`test_DECSERA_doesNotRespectISOProtect` and in the DECSEL tests, so
+ptterm answers each of the two.
+
+**As a setting:** no, for the same reason as the margins. A program
+that sends "$ v" means the copy.
+
+### 13. DECRQSS reports the height a pane has, not the one it was told
+
+`\x1b[27t` then `\x1bP$qt\x1b\\` on a pane of any height.
+
+"CSI Ps t" with a Ps of 24 or more is DECSLPP. It asks for a page of
+that many lines, and xterm resizes its window to match. DECRQSS "t"
+then reports the number the program wrote.
+
+ptterm reports how tall the pane really is.
+
+**Why.** A pane cannot resize itself. It sits in a layout beside other
+panes, and making one taller makes another shorter, so ptterm hands
+the ask to the embedder through `resize_func` and pymux decides. The
+option `allow-program-resize` says whether a program gets its way, and
+it is off, because a person arranged those panes on purpose.
+
+Either way the report is the truth. With the option on, the pane
+really did change height and the number matches. With it off, the
+number a program wrote was never true of anything. A program reads
+this to learn how much room it has, and the height of the pane is that
+answer.
+
+The panel says nothing here: DECRQSS reports through a channel the
+judges do not carry. `DECRQSSTests.test_DECRQSS_DECSLPP` of esctest2
+asks for the number that was written, so it fails while the option is
+off, and the failure list records it.
+
+**As a setting:** it is one. `set-option allow-program-resize on`.
+
+### 14. A reset of a dynamic colour gives white text, not black
+
+`\x1b]10;#aabbcc\x1b\\` then `\x1b]110\x1b\\` then `\x1b]10;?\x1b\\`.
+
+"OSC 110" puts the foreground back to the colour the terminal starts
+with. xterm starts with black text on a white background, so it
+answers black. ptterm answers white, because a pane draws on a dark
+background.
+
+**Why.** This is not a difference in the command. Both terminals put
+the colour back to the one they began with; the two simply begin with
+different colours. A pane reports what a program will really draw on,
+and pymux paints a dark pane.
+
+esctest2 makes the difference visible by accident. Before each test it
+writes `OSC 10 ; #000` and `OSC 11 ; #ffffff`, to work around a bug
+where "OSC 104" leaves the dynamic colours alone. Those two values are
+the defaults of xterm, so on xterm the reset lands back on the value
+the harness wrote and the test passes.
+`ResetSpecialColorTests.test_ResetSpecialColor_Dynamic` therefore
+fails here, and the failure list records it. The other four tests of
+that class pass.
+
+The panel says nothing here: a colour query travels through a channel
+the judges do not carry.
+
+### 15. A pane has no window to move or iconify
+
+`\x1b[3;10;20t` then `\x1b[13t`, and `\x1b[2t` then `\x1b[11t`.
+
+"CSI 3 t" moves the window, "CSI 2 t" iconifies it, and "CSI 13 t" and
+"CSI 11 t" report where it is and whether it is iconified. xterm has a
+window and does all four. ptterm ignores the two that act and answers
+nothing for the two that ask.
+
+**Why.** A pane is not a window. It has no place on a screen to be
+moved to, and nothing to be iconified into. There is no honest number
+to report, and an invented one is worse than none: a program that
+reads a position will draw at it.
+
+The related question does have an honest answer, and ptterm gives it.
+"CSI 19 t" asks how much room there is. For a window that is the
+display it stands on; for a pane it is the pane, because a pane draws
+where the embedder puts it and cannot take more. So the room it has is
+the room it already fills, and "CSI 19 t" answers its own size. That
+is what makes a maximize or a fullscreen ask come out right: the pane
+is already as large as it can be.
+
+`XtermWinopsTests.test_XtermWinops_MoveToXY`,
+`test_XtermWinops_MoveToXY_Defaults` and
+`test_XtermWinops_IconifyDeiconfiy` of esctest2 ask for the window, so
+they fail, and the failure list records them. The other fifteen of
+that class pass.
+
+**A note on what a query costs.** Answering nothing is right here, and
+it is not free: a program that asks and waits hears nothing back. The
+two that ask are rare, and neither xterm nor a multiplexer can promise
+an answer to them, so a program that sends one already has to cope
+with silence. Where a pane can answer at all, it answers; see
+`DEVIATIONS.md` entry 13 and the device status reports.
+
+### 16. A pane cannot take a 132 column page on its own
+
+`\x1b[?40h\x1b[?3h`, then `\x1b[18t`.
+
+DECCOLM ("?3") picks the 80 or the 132 column page, and private mode 40
+says whether it may. ptterm carries both: the mode is off until a
+program sets it, and DECCOLM then asks for the width through
+`resize_func`, the same route that DECSLPP and the window resizes use.
+
+**Why it asks instead of taking.** A pane is not a window. Its width
+comes from the layout, and pymux answers a program that asks for room
+by moving the weights of the panes around, and only when the person
+allowed it with `set-option allow-program-resize on`.
+
+ptterm used to resize its own screen for DECCOLM. That does not hold:
+`TerminalControl.create_content` calls `set_size` on every draw with
+the width the layout gives, so the 132 lasts until the next frame. A
+program that read 132 and laid its output out for it would then draw
+off the edge of an 80 column pane. A width that is right for one frame
+is worse than a width that never moved.
+
+So a pane reaches 132 columns only when the window has 132 columns to
+give. esctest2 runs in a window of 80, so three of its tests fail and
+the failure list records them:
+
+- `DECSETTests.test_DECSET_Allow80To132`
+- `DECSETTests.test_DECSET_DECCOLM`
+- `RISTests.test_RIS_ResetDECCOLM`
+
+The first two passed while ptterm resized its own screen, because each
+asks for the width straight after setting it and the answer arrives
+before the next draw. That is the whole of what they proved.
+
+`tests/test_page_width.py` covers the same steps by reading the ask
+rather than the width.
+
+**DECNCSM.** A fourth test used to fail here, and it passes in a pane
+now.
+
+DECNCSM ("?95") tells DECCOLM to keep the page instead of clearing it.
+ptterm carries it, from conformance level 5 up, because the VT510
+brought it. xterm keeps it behind the `allowWindowOps` resource, and
+the suite is told that resource is off, so it expects a terminal to
+refuse the mode. `DECRQMTests.test_DECRQM_DEC_DECNCSM` failed: ptterm
+answered that the mode was set, and the suite wanted no answer at all.
+
+A pane has its own version of that resource, `allow-program-resize`,
+and ptterm could not see it: the screen held `resize_func` and learned
+nothing about what the embedder would allow. It holds `may_resize`
+beside it now (Lillecarl/pymux#31), read at the time of the ask and
+never cached, because a person can change the option while a pane runs.
+DECNCSM goes away when the answer is no, so the mode cannot be set and
+DECRQM reports it unknown.
+
+That is why the test passes in a pane and still fails on ptterm's own
+pty: with no embedder there is nothing in the way, and every ask is
+granted. `pymux/tests/esctest-failures.txt` is one line shorter than
+`ptterm/tests/esctest-failures.txt` for exactly this reason, which is
+the kind of difference the two runs exist to show.
+
+**Mode 40 is not gated, and the suite is why.**
+`DECSCLTests.test_DECSCL_Level4_SupportsDECSLRMDoesntSupportDECNCSM`
+carries no `optionRequired` marker, so xterm takes mode 40 whatever
+`allowWindowOps` says, and DECCOLM still clears the page. Refusing the
+mode would stop the clear as well, and that test would fail. So the ask
+for the width still goes out and is still refused, and the three
+failures above stand.
+
+**As a setting:** it already is one. `allow-program-resize` decides,
+and it decides for every sequence that asks for room, not for DECCOLM
+alone.
+
+**A terminal that owns its pty takes the page, and a fault came out
+from behind it.** `checks.ptterm-esctest` gives ptterm a pty of its own
+and answers the ask, so DECCOLM really changes the width there. RIS
+then left the page at 132 columns, which nothing could see while the
+width never moved. Fixed; `tests/test_page_width.py` holds it, and
+Lillecarl/pymux#42 says what it was.
+
+**The mode starts off, and one esctest2 test assumes it starts on.**
+`DECSETTests.test_DECSET_DECNCSM` never sets mode 40. So DECCOLM does
+nothing, the page keeps what was written on it, and the test reads a
+character where it wants a blank. xterm passes it because its
+`allowC132` resource turns mode 40 on by default; ptterm follows the
+mode and not the resource. `test_DECSET_Allow80To132`, which sets the
+mode itself, passes here, and so does `test_DECSET_DECCOLM`. So the
+three tests together say the behaviour is consistent and the default
+is the only difference.
+
+**As a setting, again:** a resource that turns mode 40 on at startup
+would make that test pass and change nothing else. Nobody has asked
+for one.
+
+### 17. Where the cursor stands after the alternate screen is taken
+
+`\x1b[2;3H\x1b[?47hX` and the same with `?1047` and `?1049`, on 3 lines
+and 6 columns.
+
+For `?47` and `?1047`, ptterm leaves the cursor where it stands, and so
+do Alacritty, Ghostty, libvterm, WezTerm and xterm.js. kitty alone puts
+it home. `DECSETTests.test_DECSET_ALTBUF` and
+`test_DECSET_OPT_ALTBUF` of esctest2 ask for the same thing, so xterm
+is with the five.
+
+For `?1049`, ptterm used to put the cursor home, and so do kitty and
+WezTerm. Alacritty, Ghostty, libvterm and xterm.js leave it, and xterm
+describes the mode as a save, a switch and a clear, with no move.
+
+**ptterm leaves it now, so it is with the four.** The argument for home
+was that `?1049` saves the cursor on the way in and gives it back on
+the way out, so a program that uses the pair never has to know where
+the cursor stood in between. That argument does not cover a program
+that takes the screen and then reads the cursor, and the panel was four
+to two against with the documentation on the four's side.
+Lillecarl/pymux#34.
+
+`test_xterm_itself.py::test_where_xterm_leaves_the_cursor_on_the_newest_alternate_mode`
+holds xterm's answer: the "X" lands at row 1, column 2, where the
+cursor stood. With ptterm the "X" lands there too now.
+
+**As a setting:** the same argument as entry 2. A pane holds one
+cursor, so the choice belongs to the pane and is made once.
+
+### 18. A pane names fewer extensions than xterm in its DA answer
+
+`\x1b[c`, and the answer that comes back.
+
+xterm at level 5 names thirteen: `65;1;2;6;9;15;16;17;18;21;22;28;29`.
+A pane names ten: `65;1;4;6;9;15;17;21;22;28`.
+
+Four of xterm's are missing, and a pane has none of them:
+
+- **2**, the printer port. There is no printer, and DECPFF and DECPEX
+  are kept and not acted on.
+- **16**, the locator device port. It reports the mouse the way ReGIS
+  does, and a pane reports the mouse the way xterm does.
+- **18**, user windows. A pane is one window and cannot make another.
+  Entry 15 says the same about moving one.
+- **29**, the ANSI text locator. The other half of 16.
+
+**9 and 15 were named and were not true, and now they are true.**
+`pyte/charsets.py` held `B`, `0`, `U` and `V` and nothing else, so
+`ESC ( A` and `ESC ( >` reached `define_charset`, matched nothing and
+were dropped without a word: a program that took 9 at its word got
+ASCII and drew the wrong glyph. vttest read the answer back and said
+so, and the numbers came out (Lillecarl/pymux#112). The sets are
+written now -- the twelve national replacement sets of a VT320 and the
+DEC technical set -- so the numbers are back with them
+(Lillecarl/pymux#111). `test_the_charset_claims_follow_the_charsets_that_exist`
+is what ties the claim to the code, and it fails if either moves alone.
+
+One is there that xterm does not name: **4**, sixel. A pane draws sixel
+images, so it says so.
+
+**Why.** A capability claimed and not served is worse than one that is
+missing. A program reads the list to decide what to send, and a claim
+it acts on and gets nothing for leaves it waiting. The list is the one
+place a program asks before it commits.
+
+`DATests.test_DA_NoParameter` and `test_DA_0` of esctest2 check for all
+thirteen, so they fail, and the failure list records them. The rest of
+that class passes.
+
+**As a setting:** no. The list has to say what the pane really does,
+and a person cannot make a pane grow a printer.
+
+### 19. A pane writes the clipboard and does not read it
+
+`\x1b]52;;?\x1b\\`, and the answer that never comes.
+
+"OSC 52" carries the clipboard of the user. A program can set it and a
+program can ask for it, and ptterm serves the two differently: a set
+goes out through `osc_func` to whoever embeds the pane, and a query is
+dropped where it arrives. `_forward_osc` in `ptterm/screen.py` is the
+line, and `tests/test_osc_forward.py` holds both halves.
+
+**Why.** The clipboard holds what the person copied somewhere else: a
+password, an address, a paragraph of a document they were reading. A
+program in a pane has no claim on that, and a program that asks is
+asking to read something nobody gave it. Setting the clipboard needs no
+such trust, so it is handed on.
+
+The cost is a program that copies with "OSC 52" and reads back to check
+that it worked. It does not get an answer. That is a small price beside
+the alternative.
+
+**A host that keeps a clipboard does not change this.** The query is
+dropped before `osc_func` sees it, so nothing an embedder does can
+answer one. Lillecarl/pymux#45 asked for such a host and is closed for
+that reason.
+
+`ManipulateSelectionDataTests.test_ManipulateSelectionData_default` of
+esctest2 sets the clipboard and reads it back, so it waits for the
+report timeout and fails. That is the one test it costs.
+
+**It is on ptterm's failure list and not on txterm's, and that is not a
+difference between the two.** Measured: the test fails identically on
+both, with the same `Timeout waiting to read`. It is decorated
+`@optionRequired(terminal="xterm", option=XTERM_WINOPS_ENABLED)`, and
+that decorator downgrades a failure to an expected one when the option
+is absent. ptterm's esctest host passes the option because it owns its
+pty and answers a resize; txterm's widget does not, so the same failure
+is excused there and counted here. Lillecarl/pymux#124.
+
+**As a setting:** it could be. A person who wants a pane to read the
+clipboard could say so, the way `allow-program-resize` lets a program
+take room. Nobody has asked, and the default stays no either way.
+
+### 20. The blank of the line drawing set
+
+`\x1b[(0_` on 3 lines and 6 columns.
+
+Position 0x5F of the DEC special graphics set is a blank, and the panel
+gives three answers for it. ptterm and kitty draw U+00A0 NO-BREAK
+SPACE, which is the mapping that Markus Kuhn's table of the set names
+and that xterm's own documentation carries. Alacritty draws U+0020
+SPACE. Ghostty, libvterm, WezTerm and xterm.js draw the underscore
+itself: their tables start at 0x60 and leave this one alone.
+
+Nobody draws anything a reader can see, because all three are blank.
+The difference reaches a program that reads the screen back, and a
+comparison against a recorded grid.
+
+Three answers is not a rule, so ptterm keeps the one the table names.
+It sits with kitty, so the standing rule above sends this to the user
+rather than settling it.
+
+**xterm gives a fourth answer, and it is none of the three.** It draws
+nothing at all: `xtermCharSetDec` in `charsets.c` maps position 0x5F to
+0, and a cell of 0 never takes the `CHARDRAWN` mark. A program that
+reads the cell back with DECRQCRA gets a space, because the checksum
+counts an undrawn cell as one; the same query with `csDRAWN` off gets
+nothing.
+`test_xterm_itself.py::test_what_xterm_draws_for_the_blank_of_the_line_drawing_set`
+holds it. Four answers is still no rule.
+
+This is the whole of the `saved_cursor` difference that
+`checks.pymux-alacritty` reports: one cell, the underscore of a shell
+prompt drawn in the line drawing set.
+
+**As a setting:** no. A blank is a blank on the screen, and the choice
+only shows to a reader of the buffer.
+
+### 21. Reverse video on a cell that an erase or a delete leaves
+
+`\x1b[31;1;7;4;9mabcdef\x1b[1;1H\x1b[1P` on 3 lines and 8 columns, and
+the same rendition with "CSI K" and "CSI J".
+
+An erased cell takes the background that is set now. That much is a
+rule, and five judges keep it. Reverse video paints the cell with the
+foreground instead, and there the panel splits: ptterm, kitty and
+WezTerm paint it; Alacritty, Ghostty, libvterm and xterm do not.
+
+`erase_style` in `ptterm/screen.py` keeps it. A program that turns
+reverse video on and then erases means the block to be seen, and
+dropping the reverse leaves the block invisible.
+
+DCH and ICH read the same style, and the tally there is not the same.
+Ghostty and WezTerm colour a delete with nothing at all, not even the
+background, so neither takes a side on this question. Of the five that
+do colour it, kitty and ptterm paint the reverse, libvterm keeps the
+foreground without it, and Alacritty and xterm keep only the
+background.
+
+This is the whole of `delete_chars_reset` that
+`checks.pymux-alacritty` reports: twelve cells at the end of one row,
+each one a blank with our red foreground and the reverse flag where
+Alacritty holds a plain blank.
+
+**As a setting:** it could be, and it is the same shape as entry 2. A
+pane paints its own cells, so the choice belongs to the pane.
+
+### 22. A saved cursor remembers the wait to wrap
+
+`aaaaaa\x1b7\x1b[1;1H\x1b8b` on 4 lines and 6 columns, and the same
+through `?1048` and `?1049`. A `b` on the next line means the restore
+brought the wait back.
+
+A character in the last column leaves the cursor waiting to wrap.
+`save_cursor` in `pyte/screen.py` stored the column the cursor stands
+on, which is the same fold DSR reports, so the wait was not in the
+savepoint and nothing could bring it back. **It is in the savepoint
+now**, which is Lillecarl/pymux#88 and Carl's decision on
+Lillecarl/pymux#107.
+
+| case | keeps the wait | loses it |
+| --- | --- | --- |
+| "ESC 7" and "ESC 8" | Alacritty, Ghostty, WezTerm, xterm, ptterm | kitty, libvterm, xterm.js |
+| "?1049h" and "?1049l" | Alacritty, Ghostty, WezTerm, xterm, ptterm | kitty, libvterm, xterm.js |
+| a save and a restore with no move between | Alacritty, Ghostty, libvterm, WezTerm, xterm, ptterm | kitty, xterm.js |
+
+Four against three on the first two, and five against two on the third,
+with ptterm on the smaller side of each.
+`test_xterm_itself.py::test_xterm_brings_the_wait_to_wrap_back_through_a_restore`
+holds what xterm answers, and
+`pyte/tests/test_the_wait_to_wrap_is_cursor_state.py` is the gate.
+
+The third row is the one that decided it. With no move in between, a
+save and a restore leave the screen alone in five emulators, and
+libvterm joins them there because its restore does nothing rather than
+folding the column. Only kitty and xterm.js changed the screen the way
+ptterm did. A pair that should be a no-op and is not is hard to argue
+for, whatever the first two rows say.
+
+This was the whole of `wrapline_alt_toggle` that
+`checks.pymux-alacritty` reported: 40 cells. The recording fills a row
+with 139 characters, takes the alternate screen, gives it back and
+writes one more. Alacritty starts a new line for it, ptterm wrote it
+into the last column, and every row after it sat one row higher.
+ptterm starts the new line now, and the render of that frame costs one
+row more: `wrapline_alt_toggle (render)` in
+`tests/instruction-budgets.txt` went from 20,119 instructions to
+29,017, which is 8,898 for 139 cells.
+
+**As a setting:** no. This is one answer or the other, and a person has
+no reason to hold an opinion about it.
+
+### 23. Two runs of one target, opened twice with no id
+
+    OSC 8 ; ; https://a  ST  ab  OSC 8 ; ;  ST  xy  OSC 8 ; ; https://a  ST  cd
+
+on 2 lines and 4 columns. Two runs of the same target, with plain text
+between them and no id on either.
+
+ptterm calls that one link, and so do kitty and WezTerm. Alacritty and
+xterm.js call it two. libvterm holds no link at all, and Ghostty holds
+one whose name it does not report, so the panel is four.
+
+**Two against two, and the specification is on the other side.** This
+entry used to be two against one, which is the smallest tally the panel
+has ever run, and it moved when the judge for xterm.js learned to read
+a link (Lillecarl/pymux#92 and the section on xterm.js below).
+
+xterm.js is not simply on Alacritty's side. Wherever a program writes
+an id it keys on the id and the target the way kitty does: two openings
+of one target under one id are one link, and a wrap does not cut a link
+in two. Only the empty id sends it the other way, and there it mints a
+new name for each opening.
+
+Ghostty does vote on where a link goes and not on this. libghostty-vt
+hands over the target of a link and not the name Ghostty gives it, and
+the name is the whole question here. Reading a name out of a target
+would be us voting for Ghostty, so the judge writes none.
+
+Alacritty mints a name for every link that arrives without an id, out
+of a counter of the process, so two openings are never one link. kitty
+keys its pool on the id and the target together, and an empty id is
+still an id, so both openings land on one entry.
+
+The specification of "OSC 8" is on that side: without an id, only cells
+that touch are one link. ptterm cannot take it as it stands. A cell
+carries the target and the id, and nothing that says which opening drew
+it, so two openings of one target are the same cell either way.
+Lillecarl/pymux#91 holds what changing that would take.
+
+Two against two is a split, so nothing changes here. The tally is worth
+a second look now that it is even and the specification is on the side
+ptterm is not: Lillecarl/pymux#91 is the place for that decision.
+`test_the_panel.py::test_two_judges_split_a_link_that_carries_no_id`
+holds the tally.
+
+**As a setting:** no. A program that wants two links writes an id, and
+that works in all four.
+
+### 24. "?47l" gives back a screen that "?1049h" took
+
+`\x1b[?1049h\x1b[14G00000你你你\x1b[?47l0` on 6 lines and 24 columns.
+
+The two modes are not a pair. `?1049h` saves the cursor, switches to
+the alternate screen and clears it; `?47l` is the older, smaller mode,
+and it switches back without saying anything about saving or clearing.
+So what row 0 of the original screen holds afterwards is not written
+down.
+
+ptterm gives back the original row, which is empty here, and so do
+Ghostty, kitty, WezTerm and xterm.js. Alacritty and libvterm leave the
+alternate screen's `00000你你你` behind.
+
+**xterm gives back the original row**, measured: row 0 reads empty.
+That is six to two with ptterm, and it is the terminal both modes come
+from. `test_giving_the_screen_back_panel.py` holds it.
+
+This is the same family as number 2. Both are a program leaving the
+alternate screen under a name that is not the one it entered by, and
+in both the judges that differ are the ones that treat every leave the
+same way -- libvterm clears whenever it leaves, whatever the mode.
+
+**It cost a reading.** `test_wait_to_wrap_panel.py` met this while
+measuring where the cursor went in the same program, and `verdict()`
+called that a split when the seven judges were unanimous: a judge that
+differs for two reasons in one program cannot agree cell for cell with
+one that differs for one. Any question asked with a program that mixes
+`?1049h` and `?47l` reads the same way. Lillecarl/pymux#328.
+
+**As a setting:** no, and for the reason number 2 gives. A pane holds
+one screen and every attached client draws its cells, so the content of
+a screen cannot answer one way for one client and another for another.
+
+### 25. A pane has the national sets a VT320 had, and applies them at once
+
+`\x1b(A#`, and the eleven probes beside it in
+`test_the_panel.py::test_who_holds_the_same_table_as_ptterm`.
+
+A national replacement set is ASCII with a handful of positions
+replaced by the letters one country needs. A pane has the twelve a
+VT320 had and the DEC technical set with them, and it applies one as
+soon as a program selects it. Lillecarl/pymux#111.
+
+**Two separate votes, and they do not say the same thing.**
+
+*When a set applies.* kitty, WezTerm, libvterm, Ghostty and xterm.js
+draw `£` for `\x1b(A#` with no mode asked for. xterm waits for DECNRCM
+(`CSI ? 42 h`), and Alacritty has no national sets at all. Five to one
+among the judges, so a pane does not wait either, and it keeps no
+DECNRCM.
+
+*Which sets exist.* This is where the first vote stops carrying. Those
+five agree on British and on **nothing else**: kitty, WezTerm,
+libvterm and Ghostty leave the other eleven sets as plain ASCII, and
+xterm.js holds eight of them -- Finnish, Swedish, Swiss, German,
+French, French Canadian, Italian and Spanish. Nobody but a pane has
+Dutch, Portuguese or Norwegian and Danish.
+
+So a pane is not following the panel here. It is following **xterm**,
+whose `charsets.h` is the only published list of these tables there is;
+`checks.pyte-xterm-tables` compares all twelve against that header on
+every run. A judge drawing ASCII has never heard of the set, which is
+a capability it lacks and not an opinion it holds, so there is nothing
+to disagree with.
+
+**Two judges draw something else, and both are findings.**
+
+- **kitty cannot reach Portuguese.** It reads `ESC ( %` as a one byte
+  name, so `\x1b(%6` selects nothing and the `6` is drawn as a letter:
+  `6[\]{|}` where a pane draws `ÃÇÕãçõ`. A pane had the same bug until
+  Lillecarl/pymux#111 read the intermediate.
+- **xterm.js approximates two positions of Dutch**, `i` for U+0133
+  LATIN SMALL LIGATURE IJ and `f` for U+0192 LATIN SMALL LETTER F WITH
+  HOOK. Those are xterm's `UNI` entries: the positions that need a
+  character Latin-1 has not got, which xterm draws only in UTF-8 NRC
+  mode and otherwise leaves as ASCII. **A pane is always in UTF-8**,
+  so it draws both, which is what xterm does in the mode a pane is
+  permanently in. The technical set is nearly all `UNI` entries and
+  reads the same way.
+
+**Thirteen positions of the technical set stay as ASCII.** 0x31 to
+0x37 are the seven pieces a terminal drew a large sigma out of, and
+Unicode has no character for one; xterm draws them from its own
+private area, which a screen of characters cannot do. 0x38 to 0x3B,
+0x52, 0x54, 0x55, 0x6D and 0x75 are undefined in the set itself.
+
+**As a setting:** no. Which letters a set holds is not a preference,
+and the one thing a person might want to choose -- whether DECNRCM
+gates it -- would make a pane draw a different letter for the same
+bytes depending on a mode five of six emulators do not have.
+
+### 26. A pane has four character set slots, and three judges have two
+
+`\x1b*0\x1bnl` and `\x1b*0\x1bNll` on one line and four columns.
+
+A VT100 had two slots, G0 and G1, and the two control characters that
+pick between them: SI and SO. A VT220 has four. `ESC *` and `ESC +`
+designate G2 and G3, a locking shift (`ESC n`, `ESC o`) moves one of
+them into the letters, and a single shift (`ESC N`, `ESC O`) lends one
+for the next character alone. A pane has all of it.
+Lillecarl/pymux#373.
+
+**The panel cannot settle this, because most of it is a capability and
+not an opinion.** Measured:
+
+| probe | draws the box | draws the letter |
+| --- | --- | --- |
+| `ESC n` (LS2) | ptterm, Ghostty, libvterm, xterm.js | kitty, WezTerm, Alacritty |
+| `ESC N` (SS2) | ptterm, Ghostty, libvterm | kitty, WezTerm, Alacritty, xterm.js |
+
+A judge drawing `l` never designated the set, so the letter is the
+letter. That is a feature it has not got.
+
+**xterm draws what a pane draws, on all three probes**, measured in
+`test_xterm_itself.py`: the locking shift, the single shift, and the
+single shift surviving a cursor move between the shift and the
+character. It is the terminal the four slots come from, so it is the
+one a pane follows here.
+
+**A single shift belongs to the next character and not the next
+byte.** `\x1b*0\x1bN\x1b[3Gl` moves the cursor between the shift and
+the letter, and both xterm and a pane still draw the box. `draw` is
+the only thing that spends one.
+
+**GR is not here.** `LS1R`, `LS2R` and `LS3R` move a slot into the
+right half of an eight bit world, and a pane reads UTF-8, so there is
+no right half for them to move anything into. Nothing claims them, so
+nothing is untrue; Lillecarl/pymux#373 holds the question of whether
+they are worth keeping as state a pane never acts on.
+
+**As a setting:** no. Which slot a program shifted to is state the
+program set, not a preference.
+
+### 27. A variation selector does not widen a text emoji
+
+`✳️X` (and the same with `⚠`, `❤`, `⏺`) on one line.
+
+U+FE0F asks for the emoji presentation of the character before it.
+`✳`, `⚠`, `❤` and `⏺` default to text presentation, one column wide,
+and a pane keeps them one column wide with the selector after them.
+Lillecarl/pymux#539.
+
+| probe | one column | two columns |
+| --- | --- | --- |
+| text emoji + U+FE0F | ptterm, WezTerm, Alacritty, libvterm, Ghostty, xterm.js | kitty |
+| the same, bare or + U+FE0E | all seven | |
+| `✅`, emoji presentation by default | xterm.js | ptterm, kitty, WezTerm, Alacritty, libvterm, Ghostty |
+
+**kitty means it.** `kitty/screen.c` widens the cell when the selector
+arrives, under the comment "emoji presentation variation marker makes
+default text presentation emoji (narrow emoji) into wide emoji". It is
+a choice, and the five judges beside a pane make the other one.
+WezTerm and Ghostty widen as kitty does only under grapheme clustering
+(mode 2027), which nothing turns on here.
+
+**What it costs pymux is not here.** A program that counts the pair as
+two columns -- Node's `string-width`, which Claude Code uses -- draws
+one column past where a pane holds it, and kitty, drawing pymux's
+output, widens the glyph over the next cell. That is the renderer
+meeting one outer terminal, and Lillecarl/pymux#539 holds it.
+
+**As a setting:** not yet. Mode 2027 is the protocol for a program to
+ask for the wide reading, and a pane does not have it.
+
+## What vttest tests and no judge implements
+
+### VT52 mode
+
+vttest item 7 is "Test of VT52 mode". ptterm ignores "ESC [ ? 2 l"
+(DECANM off) and has no VT52 command set, so "ESC Y row col", "ESC H",
+"ESC J", "ESC F" and "ESC G" fall through as unknown escapes and their
+arguments print. On a screen that reads like a fault, and it is not one.
+
+Four probes, each ending with "ESC <" to get back to ANSI, put the
+bytes to the panel:
+
+| probe | bytes |
+| --- | --- |
+| cursor address | `\x1b[?2l\x1bY !X` |
+| home | `\x1b[?2lAB\x1bHX` |
+| cursor keys | `\x1b[?2lAB\x1bA\x1bDX` |
+| graphics set | `\x1b[?2l\x1bFabc\x1bGdef` |
+
+**The verdict is "agree" on all four.** kitty, WezTerm, Alacritty,
+libvterm, Ghostty and xterm.js each draw exactly what ptterm draws. The
+six agree because none of them implements VT52 either: with DECANM off
+they read "ESC H" as HTS and "ESC D" as IND, so the screens show the
+ANSI meanings of those bytes. xterm was not asked. It does implement
+VT52, and the oracle reads a screen back through CSI, which a terminal
+in VT52 mode does not parse.
+
+**So there is nothing to follow, and the decision is to keep doing
+nothing.** No modern terminal implements VT52 and no program asks for
+it. vttest item 7 is named in `drive_with_vttest.py` as an item that is
+not entered, so no picture of it is taken and no garbage is written
+down as a difference. Lillecarl/pymux#113.
+
+**DA1 still names a VT500.** "CSI c" answers `65;...`, which is a VT500
+level, and a program that reads it and then asks for VT52 with
+"ESC [ ? 2 l" gets no mode change and no error. Every judge gives the
+same answer, so it is not a difference; it is the edge of the mode that
+is absent.
+
+**As a setting:** no. A whole mode is what is missing, and a setting
+would be implementing it.
+
+## Where kitty looks wrong
+
+kitty puts the second character after a wrap into the cell of the
+first, when that character is not ASCII and the cursor sits below the
+scrolling region. Every case around it draws two cells on both sides.
+The oracle takes the second character out of the cell, because a reader
+sees two cells either way, and `test_known_deviations` holds the case.
+
+## Where Alacritty looks wrong
+
+Alacritty reads "SGR 21" as the end of bold. Five judges read it as a
+double underline, which is what ECMA-48 numbers it: kitty, WezTerm,
+libvterm, Ghostty and xterm.js all keep the bold and draw the line.
+xterm.js used to abstain here, because the judge for it said only
+whether a line was there. It now reports the shape.
+`test_the_panel.py::test_what_sgr_21_means` holds the tally.
+
+This is the whole of the `underline` difference that
+`checks.pymux-alacritty` reports. That reference test writes
+`CSI 4:3 ; 21 m` and records a curl, so ten cells differ. ptterm keeps
+all five shapes of a line, and a bare `CSI 4:3 m` reaches the wire as
+`SGR 4:3`.
+
+Alacritty also writes a tab character into the cell that a tab moves
+the cursor from. Nobody else does: kitty, WezTerm, libvterm, Ghostty
+and xterm.js all leave the cells a tab steps over holding what was
+already there, and so does ptterm. Five to one again, and
+`test_the_panel.py::test_what_a_tab_leaves_in_the_cell_it_moves_from`
+holds the tally.
+
+A tab moves the cursor and draws nothing, so there is nothing for a
+cell to take. Alacritty keeps the character for its own selection: a
+copy of the line then gives the tab back, instead of the spaces that
+the line looks like. A pane does not select, and it hands cells to a
+renderer, so it has no use for the character and nowhere to put it.
+
+This is the whole of the `tab_rendering` and `vttest_tab_clear_set`
+differences, 11 cells and 13 cells, and every one of them is a `\t`
+where ptterm holds a space.
+
+## Where a judge cannot answer
+
+A judge that cannot hold something says nothing about it. A comparison
+that asks for more reads a limit of the reference as a difference, so
+`panel.py` runs each answer through a projection that drops what the
+judge misses.
+
+**Saying nothing is not agreeing.** A judge whose projection hides the
+difference in front of it abstains, and `abstained()` names those. It
+used to count as a judge that agrees with ptterm, which turned a
+question that every judge who could see it answered the same way into a
+"split". Lillecarl/pymux#89 holds what that cost.
+
+**Read the judge before you trust a tally.** The reader in
+`tests/judges/src/main.rs` took the character of an Alacritty cell and
+stopped there. Alacritty keeps a mark of no width beside the cell and
+not in it, so every combining mark went missing, and Alacritty voted
+"no mark" on every case that had one. That made one deviation look
+like four judges to nothing when it was two against two. The reader
+now takes the marks as well.
+
+### libvterm
+
+libvterm is the second opinion, not a second authority. It holds less
+than kitty does. `test_against_vterm.py` writes each of these down.
+
+- It reads "?1047" and "?1049" and not "?47", so it draws the
+  alternate screen of the oldest name on the first screen.
+- It knows three shapes of underline: single, double and curly. A
+  dotted and a dashed line both come out single, so the comparison
+  reads those two as single on every side.
+- It carries no colour for the line itself ("SGR 58"), so the
+  comparison drops the colour before it looks.
+- It reads a colour of its own as "38:2:r:g:b" only. ISO 8613-6 writes
+  "38:2:<colour space>:r:g:b", with the colour space empty, and
+  libvterm takes that empty part for the red. kitty reads both forms
+  and ptterm follows kitty.
+- It holds no hyperlink. `vterm.h` names none, so libvterm says nothing
+  about an "OSC 8".
+- It keeps no history and does not reflow, until it is asked. Both are
+  the embedder's job: `vterm_screen_enable_reflow` turns the first on,
+  and a scrollback is the `sb_pushline` and `sb_popline` callbacks. The
+  reader sets all three, so libvterm votes on a reflow. Its own suite
+  asks for the same pair with `WANTSCREEN rb`, and the cases that ask
+  for `r` alone are the ones whose expectations nobody else matches.
+
+### xterm.js
+
+The buffer API of xterm.js says whether a cell carries an underline and
+nothing more, and it names no hyperlink at all. **The judge does not
+stop at that API.** It reads three things `IBufferCell` does not name:
+
+- `cell.getUnderlineStyle()`, the shape of the line and its colour, so
+  xterm.js votes on both like everybody else.
+- `cell.extended.urlId`, the name xterm.js gives one link.
+- `terminal._core._oscLinkService`, which turns that name into a target.
+
+Those are private paths of `@xterm/headless` 6.0.0, and the judge names
+them where it uses them, so a version bump knows what to probe again. A
+judge that reports less than the emulator holds is not neutral: it
+abstains, and an abstention is a vote nobody cast.
+
+**A link overwrites the shape of a line.** xterm.js draws a link as a
+dashed underline and writes it into the cell. A link on its own reads
+as no line, because the mark lives in the extended attributes and
+`getUnderlineStyle` reaches them only when a program asked for a line
+too. A link over a curly line reads as dashed, both ways round, and the
+curl is gone. So the shape on a linked cell says nothing about the
+program, and the projection drops the whole underline of such a cell
+from both sides.
+`test_the_panel.py::test_a_link_overwrites_the_shape_of_a_line` reads
+the raw answer to record it.
+
+**"SGR 59" never gets back to the default colour of a line.** xterm.js
+stores the default as -1 in a field of twenty six bits, so the sentinel
+reads back as the colour with every bit set and the line goes white. It
+is alone: four judges and ptterm go back to the default, and libvterm
+holds no colour for a line to vote.
+`test_the_panel.py::test_xterm_js_never_gets_back_to_the_default_colour_of_a_line`
+holds the tally.
+
+### Ghostty
+
+libghostty-vt holds every part of the rendition that ptterm holds, the
+shape of an underline and the colour of the line included.
+
+It reports no hyperlink. Ghostty itself keeps one; `ghostty/vt.h` names
+no hyperlink symbol, so the library that Ghostty hands out does not
+report it yet.
+
+## Every esctest2 failure that stands, and where it is written down
+
+**The suite runs twice, and the difference is the point.**
+`checks.ptterm-esctest` runs it on a pty that ptterm owns, so what it
+judges is the emulator alone. `checks.pymux-esctest` runs it in a pane,
+so what it judges is the emulator and everything pymux puts around it.
+What fails in both belongs to ptterm; what fails only in a pane is the
+pane.
+
+Three tests run in neither. `NOT_OURS` in each driver holds them:
+`test_XtermWinops_IconifyDeiconfiy`, `test_XtermWinops_MoveToXY` and
+`test_XtermWinops_MoveToXY_Defaults` ask where the window is and
+whether it is iconified. Neither a widget nor a pane has one, and no
+decision follows from the answer, so the question does not apply. A
+pattern there that matches no test fails the check, and so does a name
+that is left out and recorded as a failure as well.
+
+### On a pty of its own: five
+
+`ptterm/tests/esctest-failures.txt` holds the names, and every one of
+them is an entry above. None is an unfixed fault.
+
+| Test | Entry |
+| --- | --- |
+| `DATests.test_DA_0` | 18 |
+| `DATests.test_DA_NoParameter` | 18 |
+| `DECSETTests.test_DECSET_DECNCSM` | 16 |
+| `ManipulateSelectionDataTests.test_ManipulateSelectionData_default` | 19 |
+| `ResetSpecialColorTests.test_ResetSpecialColor_Dynamic` | 14 |
+
+**The check paid for itself twice on the first run.** It answers a
+resize, which no pane can, so it reached two faults that a pane hid.
+RIS left the page at 132 columns (Lillecarl/pymux#42). And it claims
+the window operations of xterm, so the suite ran the title tests it was
+skipping and found that xterm's four title modes were not there at all
+(Lillecarl/pymux#44). Both are fixed, and `test_page_width.py` and
+`test_title_modes.py` hold them.
+
+### In a pane: nine
+
+`pymux/tests/esctest-failures.txt` holds the names. The eight above
+are not all here, because the pane never reaches four of them.
+
+| Test | Entry |
+| --- | --- |
+| `DATests.test_DA_0` | 18 |
+| `DATests.test_DA_NoParameter` | 18 |
+| `DECRQMTests.test_DECRQM_DEC_DECNCSM` | 16 |
+| `DECRQSSTests.test_DECRQSS_DECSLPP` | 13 |
+| `DECSETTests.test_DECSET_Allow80To132` | 16 |
+| `DECSETTests.test_DECSET_DECCOLM` | 16 |
+| `RISTests.test_RIS_ResetDECCOLM` | 16 |
+| `ResetSpecialColorTests.test_ResetSpecialColor_Dynamic` | 14 |
+| `XtermWinopsTests.test_XtermWinops_DECSLPP` | 13 |
+
+Eight of the nine are the same sentence: **a pane is not a window.** It
+has no printer, no locator, no window to move, and its width and height
+come from the layout and not from the program inside it.
+
+**The resize tests cannot pass in a pane, whatever the option says.**
+Entry 13 names `allow-program-resize`, and turning it on changes
+nothing here: `Pymux.resize_pane_for_program` calls
+`Window.change_size_for_pane`, which moves room between panes. The
+suite runs in a window that holds one pane, so there is no sibling to
+take the room from and none to give it. A wider window does not help
+either: the suite asks for 80 columns in its own reset, and a lone pane
+cannot be made narrower than the window it fills.
+
+`ResetSpecialColorTests.test_ResetSpecialColor_Dynamic` is the one
+that is not about the window. Entry 14 has it: the suite writes
+xterm's own default foreground before it asks, and a pane starts from
+a different one.
+
+## Every libvterm assertion that stands, and what it is
+
+`checks.ptterm-vterm` runs libvterm's own 43 test files through
+libvterm's own runner, with `tests/vterm_harness.py` as the program it
+drives. `NOT_OURS` in `tests/drive_with_vterm.py` leaves out 25 of the
+files, each with the reason: libvterm reports every glyph it lays down
+and which rectangle it redrew, and ptterm has neither.
+
+The 18 that run hold 30 answers that differ. They are in
+`tests/vterm-failures.txt`, and each one is one of five things.
+
+**The harness reports what the terminal writes back.** It used to say
+nothing, so every file that reads a reply was left out. Two of them run
+now: `26state_query`, which is the only borrowed file that judges an
+answer rather than a screen, and `64screen_pen`, which was in that
+group by mistake and needs no reply at all.
+
+Lillecarl/pymux#73 was a bug in exactly that half, and nothing measured
+it. `26state_query` measures it now.
+
+**ptterm does not hold it at all, and holding it is a decision.**
+
+| Assertions | What | Issue |
+| --- | --- | --- |
+| `30state_pen` 68, 70 | SGR 10 to 19, the alternate fonts | Lillecarl/pymux#60 |
+| `64screen_pen` 28 | the same alternate fonts, read off a cell | Lillecarl/pymux#60 |
+
+SGR 73 to 75 used to be in that table, at `30state_pen` 118 to 122 and
+`64screen_pen` 41 and 42. ptterm holds the baseline now
+(Lillecarl/pymux#59), so those six assertions pass. The panel agreed
+first: libvterm and WezTerm both raise the glyph, and the four judges
+that hold no baseline abstain.
+
+**ptterm answers a query differently, and each answer has a reason.**
+
+`26state_query` is the only borrowed file that reads what a terminal
+writes back. Eight of its answers differ, and a ninth used to.
+
+The ninth was S8C1T at line 63. ptterm answers it now: `reply_csi`,
+`reply_dcs`, `reply_osc` and `reply_apc` spell every C1 control the
+terminal writes, reading the mode, and the eight bit form goes out as
+the one byte it is and not the two that UTF-8 would make of it
+(Lillecarl/pymux#94).
+
+| Line | What libvterm expects | What ptterm answers | Why |
+| --- | --- | --- | --- |
+| 9 | `CSI ?1;2c` | the extensions a pane has | entry 18 |
+| 14 | `libvterm(0.3)` | `ptterm(0.2)` | the name of this terminal |
+| 29 | `CSI ?10;10R` | `CSI ?10;10;1R` | DECXCPR carries the page, and xterm sends it |
+| 39, 44, 49, 54, 59 | no `0` in front | `0` in front | see below |
+
+**The leading zero is xterm's, and the panel cannot rule on a reply.**
+libvterm answers `1$r1;5;7m` for `CSI 1;5;7 m`. ptterm answers
+`1$r0;1;5;7m`. esctest2 is xterm's own suite and
+`tests/decrqss.py::test_DECRQSS_SGR` asserts `1$r0;1m`, which ptterm
+passes. Two references, and ptterm follows the one that describes
+xterm.
+
+The same lines carry a second difference: libvterm writes a colour of
+the palette as `38:5:56` and ptterm writes `38;5;56`. Both are read the
+same way. `SGR 58` has only the colon form, and ptterm writes that one
+with colons.
+
+**Two of `64screen_pen`'s answers are decisions already written down.**
+
+Lines 45 and 46 are the reverse video that an erase leaves, which is
+entry 21 above: kitty and WezTerm keep it and four judges do not.
+
+Lines 50 and 51 are DECSCNM. libvterm folds the mode into every cell,
+so a cell that was already reverse goes plain. ptterm leaves the cells
+alone, because a rendition belongs to the program that drew it and the
+mode belongs to the screen. That is the same stance as `idx(15)` below.
+
+The widget draws the mode instead. `_Window` paints "reverse" over the
+whole pane, blank cells included, and `create_content` puts a
+"noreverse" on a cell that "SGR 7" already reversed. The two cancel,
+which is the xor libvterm asks for, and the cell keeps what the program
+put in it. The panel has no vote here: it judges cells, and this is a
+rendering choice. `test_the_widget.py` holds the questions
+(Lillecarl/pymux#95).
+
+**The suite is describing a limit of libvterm, and the panel says so.**
+
+`61screen_unicode` 35 and 41 want a cell to hold a base character and
+five combining marks and no more. `VTERM_MAX_CHARS_PER_CELL` is a fixed
+array in a C struct, and nobody else has one: kitty, Alacritty, WezTerm,
+xterm.js and Ghostty all keep every mark, and so does ptterm. Five to
+one. Ghostty read as one mark until Lillecarl/pymux#63, which was our
+reader and not Ghostty. `test_the_panel.py` holds that tally.
+
+**The suite runs libvterm without a scrollback, and ptterm always has
+one.**
+
+`69screen_reflow` 74 to 79 make a five row screen hold seven rows of
+text, so two rows scroll away. They then widen it to sixteen columns,
+where the text needs one row less. libvterm expects the text at rows 0
+to 3 and a blank row 4, with the cursor on row 3. ptterm pulls one of
+the two rows back and answers row 4, with the cursor on row 4.
+
+libvterm does what ptterm does when it has a history to read. Its
+`src/screen.c` lays the new screen out from the bottom upwards, and
+lines 676 to 718 then call `sb_popline` for every row still spare at the
+top. Only when that call gives nothing do lines 719 to 732 move the text
+up to row 0 and blank the bottom.
+
+The test file asks for `WANTSCREEN r`, which turns reflow on and leaves
+the scrollback off, and `t/harness.c` line 589 returns 0 from
+`sb_popline` while it is off. So the expected rows are the fallback.
+Give the same harness `WANTSCREEN rb` and the same bytes, and it pops a
+line, backfills row 0, and reports the cursor at `4,2`, which is
+ptterm's answer.
+
+**The panel rules here now, and it is with ptterm.** A judge used to
+take bytes and one size, so a reflow had no vote to read. It takes a
+size to change to as well (Lillecarl/pymux#64), and the reader for
+libvterm turns reflow on and keeps a scrollback for it
+(Lillecarl/pymux#104). The answer to the "Shell wrapped prompt
+behaviour" case of the same file:
+
+| judge | row 0 after the widening |
+| --- | --- |
+| ptterm | `PROMPT GOES HERE` |
+| Alacritty | `PROMPT GOES HERE` |
+| Ghostty | `PROMPT GOES HERE` |
+| WezTerm | `PROMPT GOES HERE` |
+| xterm.js | `PROMPT GOES HERE` |
+| libvterm | `S HERE`, the popped row unwrapped |
+| kitty | `> `, and a blank row at the bottom |
+
+**Six judges fill the freed row from the top, and kitty is alone.**
+libvterm is with ptterm about where the row comes from, which is the
+question this case asks. It differs on one thing only, the one the
+paragraph below names: it copies the popped row cell for cell and does
+not wrap it again.
+
+The expectation in the test file is a seventh answer, and it is nobody's
+behaviour. It is what the harness does with the scrollback off, where
+`sb_popline` gives nothing back and the text moves up instead.
+
+`test_the_panel.py::test_where_a_shell_prompt_lands_when_a_window_gets_wider`
+holds the tally, and `test_reflow_history.py` holds the case.
+
+One difference is ptterm's to keep. libvterm copies a popped line cell
+for cell (`src/screen.c` line 684) and does not rewrap it, so an
+embedder with a history sees `S HERE` on row 0 and not the whole prompt.
+ptterm unwraps the history and wraps it again at the new width, which is
+what kitty and WezTerm do.
+
+**The suite is describing its own rendering decision, and ptterm keeps
+the parts apart on purpose.**
+
+`30state_pen` 111 and 114 want `\e[1;37m` to report `idx(15)`, colour
+fifteen. ptterm reports `idx(7)` with bold set, which is what the
+program asked for. libvterm's own harness turns the fold on with
+`vterm_state_set_bold_highbright`, so the number the suite expects is
+what libvterm's embedder chose to draw and not what the program wrote.
+
+ptterm keeps the bold and the colour apart so that the renderer can
+decide, and a terminal that draws bold plus colour seven as bright will
+still do so. Whether the server should carry enough to make that call
+per client is Lillecarl/pymux#53.
+
+**The DEC line attributes are not implemented, and that is a decision.**
+"ESC # 3", "ESC # 4", "ESC # 5" and "ESC # 6" draw a line at twice the
+width or twice the height on a VT100. ptterm reads each of them and
+draws the line the plain way, so `67screen_dbl_wh` and `28state_dbl_wh`
+fail and `vterm-failures.txt` records what they cost.
+
+The vote is five to two the other way from most of this file. kitty,
+Ghostty and Alacritty implement none of the four; xterm and libvterm
+do; esctest has no test for any of them, and no recorded program in
+this repository sends one. The feature cost 119 references across four
+packages and a patch to prompt-toolkit that nothing else needed.
+Lillecarl/pymux#141 holds the reading, and the decision was the user's.
+
+The line holds every column it was given, which is what a terminal that
+ignores the attribute does. libvterm alone halves a double width line,
+and kitty, WezTerm, Alacritty, Ghostty and xterm.js all keep it whole;
+`test_the_panel.py` holds that vote.
+
+DECALN filled the screen with a plain `Char`, which reads as a cell
+nobody wrote, so eight assertions in `90vttest_01-movement-1` saw an
+empty frame where the E's should be. ptterm `9e6b697b` builds them out
+of `_CHAR_CACHE` like every other draw.
+
+HPB and VPB (`CSI Ps j` and `CSI Ps k`) reached no handler, so the
+cursor stayed where it was. `stream.py` names both now and gives them to
+the handlers of CUB and CUU, which is the arithmetic libvterm uses.
+Three of the six judges carry the pair and all three land in the same
+place; the other three do not carry it at all.
+`test_the_panel.py` holds that tally and `test_cursor_margins.py` holds
+the bounds.
+
+A reflow took the blanks off the end of every line by reading the
+character, so it could not tell a space a program wrote from the blank
+an erase leaves. The space after a shell prompt went away on every
+resize. `_reflow` asks whether the cell is a `TerminalChar` now, which
+is the same distinction the alignment screen needed.
+
+An erase that cleared the end of a line left the continuation mark on
+the line below it, so a resize joined two lines that nothing wrapped
+between. `erase_in_line` takes the mark off now.
+`test_continuation.py` holds it, and libvterm is the only oracle there
+is: no judge on the panel reports the mark, and it shows from outside
+only through a resize.
+
+## Not compared yet
+
+- A hyperlink (OSC 8) belongs to a cell. ptterm carries the target and
+  the id now, in the style of the cell, but no judge on the panel can
+  see either: `kitty_oracle.Cell` has no field for a link, and it takes
+  the link off the style before a comparison. So the sequence has no
+  vote, and Alacritty's reference tests are the only judge of it.
+  `test_hyperlinks.py` covers it against the screen instead. Every
+  emulator on the panel models a link, so the seat is fillable:
+  Lillecarl/pymux#76.
+- Sixel and the graphics protocol of kitty. Both draw pixels, which
+  asks for a comparison of images and not of cells.
+
+## Open, found by the hunt and not fixed
+
+- An erased cell holds a space in ptterm and nothing in kitty, so a
+  combining mark that lands on one hangs on the space here and goes
+  away there. libvterm gives a third answer: it hangs the mark on the
+  character that the erase was meant to take away. Three emulators,
+  three answers, so there is nothing to follow. The hunt leaves the
+  marks out; `test_combining_marks` covers them by hand.
+
+- Giving the alternate screen back under a name other than the one that
+  took it, with the cursor waiting to wrap:
+  `\x1b[?1049h\x1b[14G00000你你你\x1b[?47l0`. The verdict is a split.
+  kitty, WezTerm, Ghostty and xterm.js agree with each other and differ
+  from ptterm in two cells; Alacritty and libvterm differ in ten, for
+  the reason entry 2 gives. Lillecarl/pymux#35 holds it.
+
+Run it again to find more. Each one needs a decision about whether to
+follow kitty or xterm before it becomes a fix.

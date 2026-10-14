@@ -1,0 +1,830 @@
+"""
+What the widget hands to prompt_toolkit, and what prompt_toolkit draws.
+
+Every other suite here reads the screen. `panel.py` takes
+`screen.line_offset` and walks `data_buffer` itself, and so does every
+unit test. That is the model, and it is right; it is not what a person
+sees.
+
+Between the two sits a projection: `_TerminalControl.create_content`
+turns a `Screen` into a `UIContent`, and `_Window` picks the rows
+of it that the pane shows. Nothing tested that, and a fault lived there.
+An erase with no background drops the row it clears, so "CSI 1000 M"
+near the top of a full screen took every row below it out of the
+buffer. The widget reported the height of the buffer, prompt_toolkit
+read a document shorter than the window, and it scrolled back to the
+top. Lines that had left the screen came back.
+
+Only Alacritty's reference tests found it, through pymux, at the far
+end of a pty. This file asks the same questions here.
+
+**These tests render.** They put the window on a real
+`prompt_toolkit.layout.screen.Screen` and read the cells back, so the
+answer is what prompt_toolkit draws and not what this file thinks it
+would draw. A scroll that prompt_toolkit clamps is a scroll this file
+sees clamped.
+
+Lillecarl/pymux#84 asked for this.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from no_backend import NoBackend
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.application.dummy import DummyApplication
+from prompt_toolkit.enums import EditingMode
+from prompt_toolkit.keys import Keys
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Point, Screen, WritePosition
+from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
+from prompt_toolkit.selection import SelectionType
+from prompt_toolkit.styles import Style
+from prompt_toolkit.token import KeepWhitespace
+from pyte import escape
+from pyte.cells import PLAIN_APPEARANCE, Cell
+from pyte.modes import PrivateMode
+from pyte.sequences import Csi, Sharp, announce, csi, reset_mode, set_mode, sharp
+
+from ptterm.terminal import _ARROWS_PER_WHEEL_STEP, Terminal, _TerminalControl, _Window
+
+#: `measure_instructions.py` builds the same widget to measure what the
+#: projection costs, so the stub lives beside both.
+_NoBackend = NoBackend
+
+
+def rendered(data: str, lines: int = 8, columns: int = 12) -> Screen:
+    "Put `data` through the widget and give back what prompt_toolkit drew."
+    control = _TerminalControl(backend=_NoBackend())
+    window = _Window(terminal_control=control, content=control, wrap_lines=False)
+
+    # The size reaches the screen the way a render does, and then the
+    # program writes. A write before the size lands on a screen of no
+    # columns, which is not the question here.
+    control.create_content(columns, lines)
+    control.stream.feed(data)
+
+    screen = Screen(default_char=None, initial_width=columns, initial_height=lines)
+    with set_app(DummyApplication()):
+        # `erase_bg` is what production passes: the renderer calls the
+        # layout with `False`, so a window that fills nothing leaves
+        # its empty cells transparent. A `True` here would fill the
+        # pane the way production never does, and hide exactly the
+        # faults this file exists to find.
+        window.write_to_screen(
+            screen,
+            MouseHandlers(),
+            WritePosition(xpos=0, ypos=0, width=columns, height=lines),
+            "",
+            True,
+            None,
+        )
+
+    return screen
+
+
+def drawn(data: str, lines: int = 8, columns: int = 12):
+    """
+    Put `data` through the widget and read back the rows that a person
+    would see, top to bottom.
+    """
+    screen = rendered(data, lines, columns)
+    rows = []
+    for y in range(lines):
+        row = screen.data_buffer[y]
+        rows.append("".join(row[x].char for x in range(columns)).rstrip())
+    return rows
+
+
+def reversed_at(data: str, lines: int = 8, columns: int = 12):
+    """
+    Which cells prompt_toolkit draws reversed, as a row of booleans each.
+
+    `drawn` reads the characters. This reads the style of the same
+    cells, and it resolves the style the way a renderer does, so a
+    "reverse" that a later "noreverse" cancels comes back false.
+    """
+    screen = rendered(data, lines, columns)
+    style = Style([])
+    return [
+        [style.get_attrs_for_style_str(screen.data_buffer[y][x].style).reverse for x in range(columns)]
+        for y in range(lines)
+    ]
+
+
+def test_reverse_video_turns_a_cell_that_a_program_wrote():
+    '"CSI ? 5 h" is DECSCNM: the whole screen goes the other way.'
+    assert reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "hi")[0][:2] == [
+        True,
+        True,
+    ]
+
+
+def test_reverse_video_turns_the_rest_of_the_row_as_well():
+    """
+    The screen is more than the cells a program wrote. A row that ends
+    after two characters is reversed to the right edge of the pane.
+    """
+    assert reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "hi")[0] == [True] * 12
+
+
+def test_reverse_video_turns_a_row_that_holds_nothing():
+    "An empty row is part of the screen, so it turns too."
+    assert reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "hi")[4] == [True] * 12
+
+
+def test_reverse_video_cancels_a_reverse_that_a_program_set():
+    """
+    DECSCNM xors. A cell that "SGR 7" already reversed goes plain, and
+    the cell beside it goes reversed. libvterm's `64screen_pen` asks
+    this at lines 50 and 51.
+    """
+    assert reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "a" + csi(escape.SGR, 7) + "b")[0][:2] == [True, False]
+
+
+def test_a_cell_that_a_program_reversed_stays_reversed_without_the_mode():
+    "The cancelling happens only while DECSCNM is on."
+    assert reversed_at("a" + csi(escape.SGR, 7) + "b")[0][:2] == [False, True]
+
+
+def test_reverse_video_goes_away_again():
+    '"CSI ? 5 l" puts the screen back.'
+    assert (
+        reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "hi" + reset_mode(PrivateMode.REVERSE_VIDEO))[0]
+        == [False] * 12
+    )
+
+
+class _FocusedLayout:
+    "A layout that says this control has the focus, and nothing else."
+
+    def __init__(self, control) -> None:
+        self.current_control = control
+
+    def has_focus(self, _control) -> bool:
+        return True
+
+
+def clicked(
+    modes: str,
+    lines: int = 8,
+    columns: int = 12,
+    x: int = 2,
+    y: int = 1,
+    may_type=None,
+) -> bytes:
+    """
+    The bytes a mouse press writes back, after `modes` turns a mouse
+    protocol on.
+
+    The answer is read off the wire, the way the backend encodes it: an
+    eight bit control is one byte and not the two that UTF-8 would make
+    of it.
+    """
+    written = []
+    control = _TerminalControl(backend=_NoBackend(), may_type=may_type)
+    control.create_content(columns, lines)
+    control.process.write_input = written.append
+    control.screen.write_process_input = written.append
+    control.stream.feed(modes)
+
+    app = DummyApplication()
+    app.layout = _FocusedLayout(control)
+    with set_app(app):
+        control.mouse_handler(
+            MouseEvent(
+                position=Point(x=x, y=y),
+                event_type=MouseEventType.MOUSE_DOWN,
+                button=MouseButton.LEFT,
+                modifiers=frozenset(),
+            )
+        )
+    return "".join(written).encode("utf-8", "surrogateescape")
+
+
+def test_a_click_below_the_written_rows_reaches_the_program_at_its_cell():
+    "Through the window, not the control: the window maps the click. Lillecarl/pymux#654."
+    written = []
+    terminal = Terminal(backend=_NoBackend())
+    control = terminal.terminal_control
+    control.create_content(12, 8)
+    control.process.write_input = written.append
+    control.screen.write_process_input = written.append
+    control.stream.feed(set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE) + "ready\r\n")
+
+    app = DummyApplication()
+    app.layout = _FocusedLayout(control)
+    screen = Screen(default_char=None, initial_width=12, initial_height=8)
+    handlers = MouseHandlers()
+    with set_app(app):
+        terminal.terminal_window.write_to_screen(
+            screen, handlers, WritePosition(xpos=2, ypos=1, width=12, height=8), "", False, None
+        )
+        handlers.mouse_handlers[1 + 6][2 + 9](
+            MouseEvent(
+                position=Point(x=2 + 9, y=1 + 6),
+                event_type=MouseEventType.MOUSE_DOWN,
+                button=MouseButton.LEFT,
+                modifiers=frozenset(),
+            )
+        )
+    assert "".join(written) == "\x1b[<0;10;7M"
+
+
+# ----------------------------------------------------------------------
+# What the embedder refuses.
+#
+# `may_type` answers whether the person at this keyboard may drive the
+# pane. pymux says no for a client that attached with `attach-session
+# -r`, and then the keys, a paste and the mouse all have to stop here:
+# the widget holds the only three writes a person reaches, and it is
+# asked once per event so an embedder with two people answers for
+# whichever of them this one came from. Lillecarl/pymux#467.
+
+
+def _written_while(may_type, *, paste: str | None = None) -> list:
+    """
+    What one key press, or one paste, writes to the program.
+
+    The event is built here rather than driven through a key processor:
+    the binding reads `data` off the press and nothing else, and a
+    processor would need an application and a layout to reach it.
+    """
+    written = []
+    control = _TerminalControl(backend=_NoBackend(), may_type=may_type)
+    control.create_content(12, 8)
+    control.process.write_input = written.append
+
+    if paste is None:
+        key, event = Keys.Any, SimpleNamespace(key_sequence=[SimpleNamespace(data="a")])
+    else:
+        key, event = Keys.BracketedPaste, SimpleNamespace(data=paste)
+
+    # By the keys it was added under, and not `get_bindings_for_keys`:
+    # an `Any` binding matches every question that method is asked, so
+    # the paste one is never the first answer.
+    for binding in control.get_key_bindings().bindings:
+        if binding.keys == (key,):
+            binding.handler(event)
+    return written
+
+
+def test_a_key_reaches_the_program_when_nobody_refuses_it():
+    "No `may_type` at all is the plain widget, and it types."
+    assert _written_while(None) == ["a"]
+
+
+def test_a_key_reaches_the_program_when_the_embedder_allows_it():
+    assert _written_while(lambda: True) == ["a"]
+
+
+def test_a_key_the_embedder_refuses_writes_nothing():
+    assert _written_while(lambda: False) == []
+
+
+def test_a_paste_the_embedder_refuses_writes_nothing():
+    "A paste is one write of many characters, so it needs its own guard."
+    assert _written_while(lambda: True, paste="hi") != []
+    assert _written_while(lambda: False, paste="hi") == []
+
+
+def test_a_mouse_report_the_embedder_refuses_writes_nothing():
+    """
+    The mouse is typing too: a report goes to the program on the same
+    stream a key does.
+    """
+    modes = set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE)
+    assert clicked(modes, may_type=lambda: False) == b""
+
+
+def test_a_wheel_the_embedder_refuses_opens_no_copy_mode():
+    """
+    The whole mouse goes, and not the report alone. The wheel over a
+    pane whose program wants no mouse opens copy mode, which stops the
+    live screen for every viewer of that pane -- so a person who may
+    not type may not do it either.
+    """
+    terminal = Terminal(backend=_NoBackend(), may_type=lambda: False)
+    control = terminal.terminal_control
+    control.create_content(12, 8)
+
+    app = DummyApplication()
+    app.layout = _FocusedLayout(control)
+    with set_app(app):
+        control.mouse_handler(
+            MouseEvent(
+                position=Point(x=0, y=0),
+                event_type=MouseEventType.SCROLL_UP,
+                button=MouseButton.NONE,
+                modifiers=frozenset(),
+            )
+        )
+
+    assert terminal.is_copying is False
+
+
+# ----------------------------------------------------------------------
+# The wheel on the alternate screen is arrows. Lillecarl/pymux#422.
+
+ALTERNATE = set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+STEP = _ARROWS_PER_WHEEL_STEP
+
+
+def wheeled(modes: str, kind=MouseEventType.SCROLL_UP, may_type=None):
+    "Return (what one wheel step wrote to the program, is copy mode open)."
+    terminal = Terminal(backend=_NoBackend(), may_type=may_type)
+    control = terminal.terminal_control
+    control.create_content(12, 8)
+    written = []
+    control.process.write_input = written.append
+    control.screen.write_process_input = written.append
+    control.stream.feed(modes)
+
+    app = DummyApplication()
+    # A real layout, because copy mode moves the focus into it.
+    app.layout = Layout(terminal.container, focused_element=control)
+    with set_app(app):
+        control.mouse_handler(
+            MouseEvent(
+                position=Point(x=0, y=0),
+                event_type=kind,
+                button=MouseButton.NONE,
+                modifiers=frozenset(),
+            )
+        )
+    return "".join(written), terminal.is_copying
+
+
+def test_the_wheel_up_is_arrows_up():
+    assert wheeled(ALTERNATE) == ("\x1b[A" * STEP, False)
+
+
+def test_the_wheel_down_is_arrows_down():
+    assert wheeled(ALTERNATE, MouseEventType.SCROLL_DOWN) == ("\x1b[B" * STEP, False)
+
+
+def test_the_arrows_are_spelled_the_way_decckm_says():
+    modes = ALTERNATE + set_mode(PrivateMode.APPLICATION_CURSOR_KEYS)
+    assert wheeled(modes) == ("\x1bOA" * STEP, False)
+
+
+def test_a_program_that_turned_it_off_gets_copy_mode():
+    modes = ALTERNATE + reset_mode(PrivateMode.ALTERNATE_SCROLL)
+    assert wheeled(modes) == ("", True)
+
+
+def test_the_first_screen_gets_copy_mode_and_no_arrows():
+    "It has a history, and the wheel reads it."
+    assert wheeled("") == ("", True)
+
+
+def test_a_program_that_asked_for_the_mouse_gets_the_report():
+    modes = ALTERNATE + set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE)
+    assert wheeled(modes) == ("\x1b[<64;1;1M", False)
+
+
+def test_arrows_the_embedder_refuses_are_not_written():
+    assert wheeled(ALTERNATE, may_type=lambda: False) == ("", False)
+
+
+def copy_mode_reversed_at(data: str, lines: int = 4, columns: int = 8):
+    """
+    Enter copy mode after `data`, and say which cells are drawn
+    reversed.
+
+    Copy mode draws through a second window, so this renders the whole
+    widget rather than the pane alone. The floats are left out, so the
+    position indicator in the corner is not in the picture; it carries
+    a class of its own and is not the question here.
+
+    The caller has to be a coroutine: the copy buffer starts a
+    background task, and prompt_toolkit reads the running loop for it.
+    """
+    terminal = Terminal(backend=_NoBackend())
+    control = terminal.terminal_control
+    control.create_content(columns, lines)
+    control.stream.feed(data)
+
+    app = DummyApplication()
+    app.layout = Layout(terminal.container)
+    screen = Screen(default_char=None, initial_width=columns, initial_height=lines)
+    with set_app(app):
+        terminal.enter_copy_mode()
+        terminal.container.write_to_screen(
+            screen,
+            MouseHandlers(),
+            WritePosition(xpos=0, ypos=0, width=columns, height=lines),
+            "",
+            False,
+            None,
+        )
+
+    style = Style([])
+    return [
+        [style.get_attrs_for_style_str(screen.data_buffer[y][x].style).reverse for x in range(columns)]
+        for y in range(lines)
+    ]
+
+
+async def test_copy_mode_keeps_full_width_lines_on_one_row():
+    columns, lines = 8, 6
+    terminal = Terminal(backend=_NoBackend())
+    control = terminal.terminal_control
+    control.create_content(columns, lines)
+    control.stream.feed("abcdefgh\r\nABCDEFGH\r\nlast")
+
+    app = DummyApplication()
+    app.layout = Layout(terminal.container)
+    screen = Screen(default_char=None, initial_width=columns, initial_height=lines)
+    with set_app(app):
+        terminal.enter_copy_mode()
+        terminal.container.write_to_screen(
+            screen,
+            MouseHandlers(),
+            WritePosition(xpos=0, ypos=0, width=columns, height=lines),
+            "",
+            False,
+            None,
+        )
+
+    rows = ["".join(screen.data_buffer[y][x].char for x in range(columns)).rstrip() for y in range(lines)]
+    assert rows[:3] == ["abcdefgh", "ABCDEFGH", "last"]
+
+
+async def test_copy_mode_a_line_selection_adds_no_row():
+    """
+    A vi line selection reaches the newline, and a processor that draws
+    the newline as a cell grows the line past the pane. A full-width
+    line grew a blank row under it. Lillecarl/pymux#483.
+    """
+    columns, lines = 8, 6
+    terminal = Terminal(backend=_NoBackend())
+    control = terminal.terminal_control
+    control.create_content(columns, lines)
+    control.stream.feed("abcdefgh\r\nABCDEFGH\r\n12345678\r\nlast")
+
+    app = DummyApplication()
+    app.editing_mode = EditingMode.VI
+    app.layout = Layout(terminal.container)
+    screen = Screen(default_char=None, initial_width=columns, initial_height=lines)
+    with set_app(app):
+        terminal.enter_copy_mode()
+        buffer = terminal.copy_buffer
+        buffer.cursor_position = 0
+        buffer.start_selection()
+        buffer.selection_state.type = SelectionType.LINES
+        buffer.cursor_position = 17
+        terminal.container.write_to_screen(
+            screen,
+            MouseHandlers(),
+            WritePosition(xpos=0, ypos=0, width=columns, height=lines),
+            "",
+            False,
+            None,
+        )
+
+    rows = ["".join(screen.data_buffer[y][x].char for x in range(columns)).rstrip() for y in range(lines)]
+    assert rows[:4] == ["abcdefgh", "ABCDEFGH", "12345678", "last"]
+
+
+async def test_copy_mode_draws_the_reverse_video_of_the_pane():
+    """
+    Copy mode shows the same screen, stopped. A screen that changes
+    appearance when the user scrolls it is a screen nobody can trust.
+    """
+    assert copy_mode_reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "hi")[0] == [True] * 8
+
+
+async def test_copy_mode_cancels_a_reverse_that_a_program_set():
+    "DECSCNM xors here as well."
+    assert copy_mode_reversed_at(set_mode(PrivateMode.REVERSE_VIDEO) + "a" + csi(escape.SGR, 7) + "b")[0][:2] == [
+        True,
+        False,
+    ]
+
+
+async def test_copy_mode_draws_no_reverse_without_the_mode():
+    assert copy_mode_reversed_at("hi")[0] == [False] * 8
+
+
+def test_the_sgr_mouse_report_reaches_the_program():
+    assert clicked(set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE)) == b"\x1b[<0;3;2M"
+
+
+def test_the_sgr_mouse_report_takes_eight_bit_controls():
+    "It is a control the terminal sends, so S8C1T reaches it."
+    assert (
+        clicked(announce(escape.S8C1T) + set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE))
+        == b"\x9b<0;3;2M"
+    )
+
+
+def test_the_urxvt_mouse_report_takes_eight_bit_controls():
+    assert (
+        clicked(announce(escape.S8C1T) + set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.URXVT_MOUSE))
+        == b"\x9b32;3;2M"
+    )
+
+
+def test_the_old_mouse_report_takes_eight_bit_controls():
+    assert clicked(announce(escape.S8C1T) + set_mode(PrivateMode.MOUSE_REPORTING)) == b"\x9bM \x23\x22"
+
+
+#: What turns the X10 report on, with nothing after it. The three tests
+#: below are about the coordinates, so they leave S8C1T alone.
+_X10 = set_mode(PrivateMode.MOUSE_REPORTING)
+
+
+def test_the_old_mouse_report_writes_one_byte_for_a_column_under_128():
+    "Column 94 becomes `chr(127)`, the last one UTF-8 spells as itself."
+    assert clicked(_X10, columns=300, x=94) == b"\x1b[M \x7f\x22"
+
+
+def test_the_old_mouse_report_writes_one_byte_for_a_column_over_128():
+    """
+    Column 95 becomes `chr(128)`, which UTF-8 writes as two bytes.
+
+    The program then read the first of them as the column and the
+    second as the row. Lillecarl/pymux#139.
+    """
+    answer = clicked(_X10, columns=300, x=95)
+    assert answer == b"\x1b[M \x80\x22"
+    assert len(answer) == 6
+
+
+def test_the_old_mouse_report_reaches_past_column_96():
+    "It stopped at 96, which is narrower than a great many panes."
+    assert clicked(_X10, columns=300, x=200) == b"\x1b[M \xe9\x22"
+
+
+def test_the_old_mouse_report_says_nothing_past_its_own_limit():
+    "A coordinate byte holds `223 + 32`, and kitty stops there too."
+    assert clicked(_X10, columns=300, x=223) == b""
+
+
+#: Twelve lines on a screen of eight, so four scroll away.
+FILLED = "\r\n".join("line%d" % number for number in range(1, 13))
+
+
+def test_the_widget_draws_the_screen():
+    assert drawn("hello\r\nworld")[:2] == ["hello", "world"]
+
+
+def test_the_widget_draws_the_bottom_of_a_screen_that_scrolled():
+    "Four lines left the top, and they do not come back."
+    assert drawn(FILLED) == [
+        "line5",
+        "line6",
+        "line7",
+        "line8",
+        "line9",
+        "line10",
+        "line11",
+        "line12",
+    ]
+
+
+def test_a_delete_of_every_line_below_the_cursor_keeps_the_history_away():
+    """
+    "CSI 1000 M" near the top of a full screen takes every row below it
+    out of the buffer, because an erase with no background drops the
+    row it clears.
+
+    The screen still occupies those rows. Without this, prompt_toolkit
+    reads a document shorter than the window, scrolls back to the top
+    rather than past the end, and four lines that had left the screen
+    come back.
+    """
+    rows = drawn(FILLED + csi(escape.CUP, 3) + csi(escape.DL, 1000))
+    assert rows == ["line5", "line6", "", "", "", "", "", ""]
+
+
+def test_an_erase_to_the_bottom_keeps_the_history_away():
+    '"CSI J" drops the same rows, and the answer is the same.'
+    rows = drawn(FILLED + csi(escape.CUP, 3) + csi(escape.ED))
+    assert rows == ["line5", "line6", "", "", "", "", "", ""]
+
+
+def test_a_scroll_up_of_the_whole_screen_keeps_the_history_away():
+    '"CSI 1000 S" empties the screen and leaves the history behind it.'
+    assert drawn(FILLED + csi(Csi.SU, 1000)) == [""] * 8
+
+
+def test_the_line_count_covers_the_screen_and_not_the_buffer():
+    """
+    The count `create_content` reports is what the screen occupies.
+
+    This is the contract that keeps prompt_toolkit from scrolling back:
+    it does not scroll past the end of the document, so the document has
+    to reach the bottom of the window.
+    """
+    control = _TerminalControl(backend=_NoBackend())
+    control.create_content(12, 8)
+    control.stream.feed(FILLED + csi(escape.CUP, 3) + csi(escape.DL, 1000))
+
+    screen = control.screen
+    content = control.create_content(12, 8)
+    assert content.line_count >= screen.line_offset + screen.lines
+    assert content.line_count == screen.max_y + 1
+
+
+def test_the_cursor_is_drawn_where_a_program_is_told_it_stands():
+    """
+    prompt_toolkit places a cursor by the characters before it, and a
+    double width character takes one cell of the document and two
+    columns of the screen.
+    """
+    control = _TerminalControl(backend=_NoBackend())
+    control.create_content(12, 8)
+    control.stream.feed("中中x")
+    content = control.create_content(12, 8)
+    assert content.cursor_position.x == 3
+
+
+def test_the_cursor_does_not_leave_the_line_while_it_waits_to_wrap():
+    """
+    A character in the last column leaves the cursor one column
+    further, and that column is not on the line. prompt_toolkit answers
+    a cursor outside the line by scrolling sideways, and then every row
+    of the pane is drawn one column to the left.
+    """
+    control = _TerminalControl(backend=_NoBackend())
+    control.create_content(4, 3)
+    control.stream.feed("abcd")
+    content = control.create_content(4, 3)
+    assert content.cursor_position.x == 3
+
+
+def test_a_placeholder_of_an_image_never_reaches_the_screen():
+    """
+    A unicode placeholder stands for a cell of an image, and the
+    embedder draws the image. A terminal that does not know the
+    character paints a box, and the marks that carry the row and the
+    column pile up on it.
+    """
+    from pyte.placeholders import PLACEHOLDER
+
+    assert drawn(PLACEHOLDER + "x")[0] == " x"
+
+
+def test_a_control_character_in_a_cell_is_drawn_as_a_blank():
+    """
+    The parser eats these, so one in a cell is a fault somewhere else.
+    It must not reach the terminal of the user, which would read it as
+    a control of its own.
+    """
+    control = _TerminalControl(backend=_NoBackend())
+    control.create_content(6, 3)
+    # A `Cell` holds what it is given, so the cell is written here. The
+    # guard in `visible_char` is what keeps it off the terminal.
+    control.screen.page.data_buffer[0][0] = Cell("\x01", PLAIN_APPEARANCE)
+    content = control.create_content(6, 3)
+    assert "".join(text for _, text in content.get_line(0))[0] == " "
+
+
+def test_a_no_break_space_reaches_the_screen_as_it_stands():
+    """
+    prompt_toolkit draws a no-break space as an underlined yellow
+    space, so that a reader of a widget can see one. A pane is not a
+    widget: "tree" draws its indentation with them, and every emulator
+    keeps them.
+    """
+    assert drawn("a\xa0b")[0] == "a\xa0b"
+
+
+# ----------------------------------------------------------------------
+# A blank that a program wrote.
+#
+# The renderer drops whitespace without style at the end of a row, so
+# that a person who copies the output gets no trailing spaces. A pane
+# cannot take that guess: a space a program wrote is content, and a
+# terminal that reads its own screen back has to find the column.
+# `KeepWhitespace` on the cell is how the widget says so.
+# Lillecarl/pymux#61.
+
+
+def keeps_a_blank_at(data: str, lines: int = 8, columns: int = 12):
+    "Which cells ask the renderer to keep them, as a row of booleans each."
+    screen = rendered(data, lines, columns)
+    return [[KeepWhitespace in screen.data_buffer[y][x].style for x in range(columns)] for y in range(lines)]
+
+
+def test_a_space_that_a_program_wrote_asks_to_stay():
+    "A written blank mid-row is drawn because the row goes on, not by a mark."
+    assert keeps_a_blank_at("a b")[0][:4] == [False, False, False, False]
+
+
+def test_a_trailing_space_that_a_program_wrote_asks_to_stay():
+    "The last run keeps its trailing blanks, which the trim reads."
+    assert keeps_a_blank_at("ab ")[0][:4] == [False, False, True, False]
+
+
+def test_a_cell_an_erase_left_asks_for_nothing():
+    "An erased cell and a cell nobody touched are the same to a renderer."
+    assert keeps_a_blank_at("abc\r" + csi(escape.EL))[0][:3] == [False, False, False]
+
+
+def test_a_cell_nobody_wrote_asks_for_nothing():
+    assert keeps_a_blank_at("a")[0][1:3] == [False, False]
+
+
+def test_the_stand_in_for_a_cell_of_an_image_asks_to_stay():
+    "The cell is drawn as a blank, and the image covers it."
+    from pyte.placeholders import PLACEHOLDER
+
+    assert keeps_a_blank_at(PLACEHOLDER)[0][0] is True
+
+
+def test_the_first_render_sizes_the_pane_before_it_starts_the_program():
+    """
+    A render sets the size and then starts the program, so the child
+    forks onto a pty of the size it will really have.
+
+    `Process.start` put 120 by 24 on it first, and the pty resized one
+    frame later. A program that drew before the resize reached it drew
+    at the wrong width, and that is a race: the child writes as soon as
+    it is forked.
+    """
+    backend = _NoBackend()
+    control = _TerminalControl(backend=backend)
+    control.create_content(12, 8)
+    assert (control.screen.columns, control.screen.lines) == (12, 8)
+    assert backend.sizes == [(12, 8)]
+
+
+# ----------------------------------------------------------------------
+# The DEC line attributes, which a pane draws the plain way.
+#
+# "ESC # 6" draws a line twice as wide on a VT100. kitty, Ghostty and
+# Alacritty implement none of the four, and a pane does not either:
+# it reads the sequence, drops it, and draws every column of the line.
+# Lillecarl/pymux#141.
+
+
+@pytest.mark.parametrize(
+    "sequence",
+    [
+        sharp(Sharp.DECDHL_TOP),
+        sharp(Sharp.DECDHL_BOTTOM),
+        sharp(Sharp.DECSWL),
+        sharp(Sharp.DECDWL),
+    ],
+)
+def test_the_sequence_costs_the_row_no_column(sequence):
+    assert drawn(sequence + "abcde")[0] == "abcde"
+
+
+# ----------------------------------------------------------------------
+# A click focuses, and the embedder selects. Lillecarl/pymux#527.
+
+
+def _two_panes():
+    """
+    Two terminals in one layout, the second one focused, and the calls
+    the first one's mouse hook drew.
+    """
+    first = Terminal(backend=_NoBackend())
+    second = Terminal(backend=_NoBackend())
+    calls = []
+    first.terminal_control.on_mouse_focus = lambda: calls.append(1)
+    layout = Layout(
+        HSplit([Window(content=first.terminal_control), Window(content=second.terminal_control)]),
+        focused_element=second.terminal_control,
+    )
+    app = DummyApplication()
+    app.layout = layout
+    return first, second, calls, app
+
+
+def _click(kind):
+    return MouseEvent(position=Point(x=0, y=0), event_type=kind, button=MouseButton.LEFT, modifiers=frozenset())
+
+
+def test_a_press_in_an_unfocused_pane_selects_nothing():
+    "The press lands the focus on the release, the way the clock does."
+    first, second, calls, app = _two_panes()
+    with set_app(app):
+        first.terminal_control.mouse_handler(_click(MouseEventType.MOUSE_DOWN))
+    assert app.layout.current_control is second.terminal_control
+    assert calls == []
+
+
+def test_a_click_in_an_unfocused_pane_focuses_it_and_tells_the_embedder():
+    first, second, calls, app = _two_panes()
+    with set_app(app):
+        first.terminal_control.mouse_handler(_click(MouseEventType.MOUSE_UP))
+    assert app.layout.current_control is first.terminal_control
+    assert calls == [1]
+
+
+def test_a_click_with_no_hook_set_focuses_all_the_same():
+    "A standalone widget, or an embedder with one pane, keeps the focus."
+    first, second, calls, app = _two_panes()
+    first.terminal_control.on_mouse_focus = None
+    with set_app(app):
+        first.terminal_control.mouse_handler(_click(MouseEventType.MOUSE_UP))
+    assert app.layout.current_control is first.terminal_control

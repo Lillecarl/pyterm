@@ -1,0 +1,292 @@
+# What ptterm is and what it needs. `setup.py` used to say this, and a build
+# read it by running it. Nix reads this file instead, at evaluation time, so
+# the dependency list here is the one the package is built from and there is
+# no second copy in a `.nix` file to fall out of step. Lillecarl/pymux#319.
+[project]
+name = "ptterm"
+version = "0.1"
+description = "Terminal emulator for prompt_toolkit."
+readme = "README.rst"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+# The floor is 3.14 everywhere but prompt-toolkit.
+requires-python = ">=3.14"
+authors = [{ name = "Jonathan Slenders" }]
+dependencies = [
+    "prompt_toolkit>=3.0.52,<3.1.0",
+    # The screen, the parser and everything under them. That was in this
+    # repository, and it left because `txterm` needs it and must not take
+    # prompt_toolkit on behind it. Lillecarl/pymux#11.
+    "pyte>=0.5.1",
+    # The layer that runs a program on a pty. It used to be
+    # `ptterm.process` and `ptterm.backends`, and it left for the same
+    # reason. Lillecarl/pymux#85.
+    "ptyhost",
+]
+
+[project.optional-dependencies]
+# What a check installs, beside what ptterm itself needs. anyio carries the
+# pytest plugin that runs a coroutine test, and hypothesis drives the hunt
+# for deviations against kitty.
+#
+# The six emulators the panel compares against are not here. None of them is
+# a Python distribution this could name: each arrives as a program or a
+# shared library, through an environment variable that `nix/checks.nix`
+# sets.
+test = [
+    "pytest",
+    "pytest-xdist",
+    "anyio",
+    "hypothesis",
+]
+
+[project.urls]
+Homepage = "https://github.com/prompt-toolkit/ptterm"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ptterm"]
+
+[tool.pytest.ini_options]
+# Run a coroutine test, with no mark on it.
+#
+# Without this, pytest fails an "async def test" with "async def
+# functions are not natively supported". So the cost is loud, and it is
+# that no async test in this repository can run at all.
+#
+# anyio's plugin runs one on every backend it finds. Only asyncio is
+# here, so each test runs once.
+#
+# `testSources` in `default.nix` carries this file to the suite. A
+# setting the check cannot read is a setting that holds by hand and not
+# where it counts.
+anyio_mode = "auto"
+
+[tool.ruff]
+# Mirror of the `ruff.toml` beside the umbrella: the build sandbox
+# sees only this tree, so discovery from a file under it must end
+# here. Keep the two in step; the why lives up there.
+#
+# The floor is 3.14, like the umbrella's.
+target-version = "py314"
+# Pinned: a ruff upgrade must never silently reflow the tree.
+line-length = 120
+
+[tool.ruff.lint]
+# Mirror of the umbrella `ruff.toml`, rule for rule: the build
+# sandbox sees only this tree, so discovery from a file under it
+# must end here. Change the rules in both places. Every rule here
+# autofixes cleanly through the editor pipeline, and the gate below
+# holds what the pipeline leaves behind.
+#
+# UP037 unquotes an annotation once the future import makes it lazy.
+# I001 sorts the imports the pipeline already organizes. UP006,
+# UP007 and UP045 spell the modern syntax the floor already runs.
+# UP009, UP015, UP024 and UP033 are four trivial modernizations.
+# F401 drops the imports nothing reads. RUF100 drops the `noqa`
+# comments nothing needs. RUF023 sorts the slots. PIE790, PIE800
+# and PIE808 drop three kinds of dead weight.
+#
+# Strings: `%` stays where it is. New code prefers f-strings, and a
+# `%` a touch already rewrites may ride along, but there is no bulk
+# migration: UP031 has no autofix, and its thousand sites are a
+# manual, trap-laden rewrite (a tuple on the right of `%` formats
+# its elements, an f-string its repr). UP031 and UP032 stay off for
+# the same reason.
+#
+# FA100 is absent: on this floor it fires only where a rewrite needs
+# the import, and its fix is unsafe, so the editor never applies it.
+# The presence of the import is held per package by its own gate.
+# TC001-TC003 are deferred: should a runtime reader ever need a
+# name, that name keeps a runtime import through the
+# `runtime-evaluated-*` exemptions, per symbol.
+#
+# This stands down the broader set that was here (E, W, the rest of
+# F, C, T, Q and the rest of UP): one style for the collection, held
+# by the gate below rather than by the editor alone.
+#
+# UP035 moves the typing names to `collections.abc`.
+# RUF022 sorts `__all__`.
+# RET501, RET502, RET505 and RET506 flatten what follows return
+# and raise: no `else` after either, and no bare `return None`.
+# PT006 names parametrize cases with tuples, not strings.
+# RUF005 unpacks where concatenation builds.
+# SIM105 folds try-except-pass into `contextlib.suppress`.
+# SIM108 writes the short if-else as a ternary.
+# ISC004 parenthesizes the implicit concatenation.
+#
+# The small safe ones ride together, a hunk or two each: B009 and
+# B010 spell attribute access plainly, E713 writes `not in`, FURB105
+# drops the empty `print`, FURB110 writes the `or`, FURB167 names
+# the regex flag long, FURB188 cuts the prefix, ISC003 joins the
+# split string, PLR0402 writes the from-import, PLR2044 drops the
+# empty comment, PTH201 drops the current-directory spell, RSE102
+# drops the parens on a bare raise, UP032 writes f-strings for
+# `.format` (not `%`: UP031 stays off for the tuple trap), UP041
+# names `TimeoutError`, UP043 drops the default type args. RUF021
+# stays off: preview-only in this ruff, so its one pair of parens
+# rides without the rule.
+#
+# C408 writes the literal for the builtin call, E731 writes the
+# `def` for the lambda, B007 underscores the unused loop name (one
+# noqa where the index leaves the loop), RUF007 walks pairs with
+# `pairwise`, RUF015 takes the first with `next`, RUF036 moves
+# `None` to the end of the union.
+select = [
+    "B007",
+    "B009",
+    "B010",
+    "B035",
+    "C408",
+    "E713",
+    "E731",
+    "F401",
+    "FURB105",
+    "FURB110",
+    "FURB116",
+    "FURB122",
+    "FURB129",
+    "FURB132",
+    "FURB136",
+    "FURB157",
+    "FURB161",
+    "FURB162",
+    "FURB163",
+    "FURB164",
+    "FURB166",
+    "FURB167",
+    "FURB168",
+    "FURB169",
+    "FURB171",
+    "FURB177",
+    "FURB181",
+    "FURB187",
+    "FURB188",
+    "I001",
+    "ISC001",
+    "ISC002",
+    "ISC003",
+    "ISC004",
+    "PIE790",
+    "PIE794",
+    "PIE796",
+    "PIE800",
+    "PIE804",
+    "PIE807",
+    "PIE808",
+    "PLR0402",
+    "PLR2044",
+    "PT006",
+    "PTH201",
+    "RET501",
+    "RET502",
+    "RET505",
+    "RET506",
+    "RET507",
+    "RET508",
+    "RSE102",
+    "RUF002",
+    "RUF003",
+    "RUF005",
+    "RUF007",
+    "RUF008",
+    "RUF009",
+    "RUF010",
+    "RUF013",
+    "RUF015",
+    "RUF016",
+    "RUF017",
+    "RUF018",
+    "RUF019",
+    "RUF020",
+    "RUF022",
+    "RUF023",
+    "RUF024",
+    "RUF026",
+    "RUF028",
+    "RUF030",
+    "RUF032",
+    "RUF033",
+    "RUF034",
+    "RUF036",
+    "RUF037",
+    "RUF040",
+    "RUF041",
+    "RUF043",
+    "RUF046",
+    "RUF048",
+    "RUF049",
+    "RUF051",
+    "RUF053",
+    "RUF057",
+    "RUF058",
+    "RUF060",
+    "RUF061",
+    "RUF063",
+    "RUF064",
+    "RUF068",
+    "RUF100",
+    "RUF101",
+    "RUF102",
+    "RUF103",
+    "RUF104",
+    "RUF200",
+    "SIM105",
+    "SIM108",
+    "UP001",
+    "UP003",
+    "UP004",
+    "UP005",
+    "UP006",
+    "UP007",
+    "UP008",
+    "UP009",
+    "UP010",
+    "UP011",
+    "UP012",
+    "UP013",
+    "UP014",
+    "UP015",
+    "UP017",
+    "UP018",
+    "UP019",
+    "UP020",
+    "UP021",
+    "UP022",
+    "UP023",
+    "UP024",
+    "UP025",
+    "UP026",
+    "UP028",
+    "UP029",
+    "UP032",
+    "UP033",
+    "UP034",
+    "UP035",
+    "UP036",
+    "UP037",
+    "UP039",
+    "UP040",
+    "UP041",
+    "UP042",
+    "UP043",
+    "UP044",
+    "UP045",
+    "UP046",
+    "UP047",
+    "UP049",
+    "UP050",
+]
+
+
+[tool.ruff.lint.isort]
+# ptterm is the widget; prompt_toolkit and pyte are distributions of
+# their own, installed like any other dependency. Named so the
+# grouping never follows PYTHONPATH: measured on pymux, an installed
+# sibling sorts one way in the dev shell and the other in the
+# sandbox.
+known-first-party = ["ptterm"]
+known-third-party = ["prompt_toolkit", "pyte"]

@@ -1,0 +1,357 @@
+"""
+How prompt_toolkit spells what a cell carries.
+
+A screen holds an `Appearance`: the rendition that SGR set, and the
+hyperlink that "OSC 8" opened. Both are a model, and neither is a
+spelling. What a renderer writes for them is the renderer's own
+answer, and this file is prompt_toolkit's.
+
+A second front end has a second answer. Textual draws through Rich, so
+it builds a `rich.style.Style` from the same object and reads no word
+written here (Lillecarl/pymux#82). Nothing in this file is shared with
+it, which is the reason it is a file of its own.
+
+The two halves of a cell are here: `style_of` for what it looks like,
+and `visible_char` for what is drawn. `ptterm/terminal.py` calls both
+once per cell of a frame, and `ptterm/preview.py` calls them for a
+drawing of a pane that a person is not working in, so the style answer
+is remembered. A screen makes one appearance per SGR sequence, and a
+frame draws thousands of cells carrying a handful of them.
+"""
+
+from __future__ import annotations
+
+import base64
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
+from prompt_toolkit.layout.screen import Char
+from prompt_toolkit.token import KeepWhitespace
+from pyte.cells import PLAIN_APPEARANCE, appearance_of
+from pyte.colors import DEFAULT_COLOR, SgrColor
+from pyte.placeholders import PLACEHOLDER, runs_in_line, spelled
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from prompt_toolkit.formatted_text import StyleAndTextTuples
+    from pyte.cells import Appearance
+    from pyte.runs import Run
+
+__all__ = (
+    "DEFAULT_COLOR_NAME",
+    "PALETTE_NAMES",
+    "UNDERLINE_WORDS",
+    "drawn_as",
+    "fragments_of_runs",
+    "placeholder_cells",
+    "run_style",
+    "style_of",
+    "style_word",
+    "visible_char",
+)
+
+#: The names that prompt_toolkit gives the first sixteen colours of the
+#: palette, in the order that "CSI 38 ; 5 ; n m" numbers them.
+PALETTE_NAMES: list[str] = [
+    "ansiblack",
+    "ansired",
+    "ansigreen",
+    "ansiyellow",
+    "ansiblue",
+    "ansimagenta",
+    "ansicyan",
+    "ansigray",
+    "ansibrightblack",
+    "ansibrightred",
+    "ansibrightgreen",
+    "ansibrightyellow",
+    "ansibrightblue",
+    "ansibrightmagenta",
+    "ansibrightcyan",
+    "ansiwhite",
+]
+
+#: What prompt_toolkit calls the colour of the terminal itself.
+DEFAULT_COLOR_NAME = "ansidefault"
+
+
+def style_word(color: SgrColor) -> str:
+    """
+    The word that prompt_toolkit reads for one colour.
+
+    Every word opens with "#", which tells prompt_toolkit to take the
+    colour as it stands rather than to look it up in a style sheet.
+
+    A number of the palette stays a number here as well: it becomes
+    "#ansired" or "#ansi234", and prompt_toolkit writes the SGR code
+    back out, so the terminal of the user paints it from its own theme.
+    A colour that a program named itself becomes "#rrggbb", because no
+    theme has an opinion about that one.
+
+    The number has to be one the palette holds. `sgr_color` is the only
+    thing that makes one and it refuses the rest, so a number that is
+    not there is a fault in this repository and not a program's doing.
+    prompt_toolkit reads "#ansi256" as a style class it cannot find.
+    """
+    if color.rgb is not None:
+        return "#%02x%02x%02x" % color.rgb
+    if color.index is None:
+        return "#" + DEFAULT_COLOR_NAME
+    if color.index < len(PALETTE_NAMES):
+        return "#" + PALETTE_NAMES[color.index]
+    return "#ansi%d" % color.index
+
+
+#: The word that prompt_toolkit reads for each shape of underline.
+UNDERLINE_WORDS: dict[str, str] = {
+    "": "underline",
+    "double": "underdouble",
+    "curly": "undercurl",
+    "dotted": "underdotted",
+    "dashed": "underdashed",
+}
+
+
+def _encoded(text: str) -> str:
+    """
+    One piece of a hyperlink, as it travels in a style string.
+
+    prompt_toolkit splits a style string on whitespace, and a target or
+    an id can hold anything, so both travel as base64.
+    """
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def _spelled(appearance: Appearance) -> str:
+    """
+    The prompt_toolkit style string that draws one cell.
+
+    `style_of` is this function with the answers remembered. Nothing
+    calls this one directly.
+    """
+    rendition = appearance.rendition
+    style = ""
+
+    # "SGR 39" and "SGR 49" ask for the terminal's own colour, which is
+    # what a cell with no colour draws. Spelled, it would beat the pane's
+    # background: pymux paints that with its theme, and every cell after
+    # an "SGR 49" showed the terminal's colour in the middle of the theme's.
+    # Lillecarl/pymux#582.
+    if rendition.color and rendition.color != DEFAULT_COLOR:
+        style += "%s " % style_word(rendition.color)
+    if rendition.bgcolor and rendition.bgcolor != DEFAULT_COLOR:
+        style += "bg:%s " % style_word(rendition.bgcolor)
+    if rendition.bold:
+        style += "bold "
+    if rendition.dim:
+        style += "dim "
+    if rendition.italic:
+        style += "italic "
+    if rendition.underline:
+        style += UNDERLINE_WORDS[rendition.underline_style or ""] + " "
+        # The colour of a line that nobody draws would travel with
+        # every cell for nothing.
+        if rendition.underline_color:
+            style += "ul:%s " % style_word(rendition.underline_color)
+    if rendition.blink:
+        style += "blink "
+    if rendition.reverse:
+        style += "reverse "
+    if rendition.hidden:
+        style += "hidden "
+    if rendition.strike:
+        style += "strike "
+    if rendition.baseline:
+        style += rendition.baseline + " "
+
+    if appearance.hyperlink:
+        style += "[hyperlink:%s] " % _encoded(appearance.hyperlink)
+        if appearance.hyperlink_id:
+            style += "[hyperlink-id:%s] " % _encoded(appearance.hyperlink_id)
+
+    return style
+
+
+#: The prompt_toolkit style string that draws one cell.
+#:
+#: A frame asks this once per cell, so it is the hot path of drawing,
+#: and a screen holds a handful of appearances. `lru_cache` answers a
+#: hit without running any bytecode at all, which a dictionary of our
+#: own cannot: that one costs a Python call for every cell, and
+#: `checks.ptterm-instructions` measured the difference at seven points
+#: of a frame.
+#:
+#: The size holds every appearance that a screen can hand out, so it is
+#: read off the cache that hands them out rather than written again
+#: here. A key of this cache is an `Appearance`, and `pyte.cells` keeps
+#: only that many of those alive.
+style_of = lru_cache(maxsize=appearance_of.size)(_spelled)
+
+
+#: The characters that must not reach the terminal of the user as they
+#: stand. prompt_toolkit lists them because it draws them for a person
+#: who is typing; the reason here is different, and so is the answer.
+#: The non-breaking space is left out: it is a character to draw, not a
+#: control to keep out.
+NOT_FOR_A_SCREEN = frozenset(Char.display_mappings) - {"\xa0"}
+
+
+def visible_char(char: str) -> str:
+    """
+    What to draw for a cell.
+
+    A unicode placeholder stands for a cell of an image, and the
+    embedder draws that image itself. The character must not reach the
+    screen: a terminal that does not know it paints a box, and the
+    combining characters that carry the row and the column pile up on
+    top of it. A space keeps the cell, and the image covers it.
+
+    A control character is drawn as a blank. It should never be in a
+    cell at all, because the parser consumes those, and one that is
+    there must not reach the terminal of the user: that terminal would
+    read it as a control of its own and the screen after it is anybody's
+    guess. prompt_toolkit draws "^@" in blue for the same characters,
+    which is a thing to look at rather than a thing to be safe.
+
+    A non-breaking space goes through as it stands. It is a printable
+    character that a program wrote on purpose, and the content of this
+    control says `apply_display_mappings=False`, which is what stops
+    prompt_toolkit from marking it up.
+    """
+    if char.startswith(PLACEHOLDER):
+        return " "
+    if char in NOT_FOR_A_SCREEN:
+        return " "
+    return char
+
+
+def _run_style(appearance: Appearance, reverse_video: bool, keep: bool) -> str:
+    style = style_of(appearance)
+
+    if reverse_video and appearance.rendition.reverse:
+        style += " noreverse"
+    if keep:
+        style += " " + KeepWhitespace
+
+    return style
+
+
+#: The style string for a run of one appearance.
+#:
+#: `keep` says a blank this styles carries `KeepWhitespace`: the
+#: renderer drops a blank at the end of a row when nothing styles
+#: it, so that a person who copies the output gets no trailing
+#: spaces. That guess is wrong for a pane: a space a program wrote
+#: is content, and a terminal that reads its own screen back has to
+#: find the column.
+#:
+#: Answered once per way of styling rather than once per run: a
+#: frame styles the same appearances row after row, so all but the
+#: first sighting of one is answered in C and runs no bytecode.
+run_style = lru_cache(maxsize=1024)(_run_style)
+
+
+def _drawn_as(char: str, appearance: Appearance, reverse_video: bool, written: bool) -> tuple[str, str]:
+    """
+    The style and the character that one cell draws with.
+    """
+    shown = visible_char(char)
+
+    return run_style(appearance, reverse_video, shown == " " and written), shown
+
+
+#: How a cell draws, answered once per way of drawing rather than once
+#: per cell.
+#:
+#: **A frame asks this for every cell, and a screen holds a handful of
+#: answers.** The arguments are what a cell is made of, and both parts
+#: are interned -- `pyte.cells` hands out one `Appearance` per way of
+#: drawing, and CPython caches a string's hash -- so a hit costs one
+#: lookup in C and runs no bytecode at all. Without it every cell paid
+#: three Python calls and two string concatenations: `fragment`,
+#: `visible_char` and `style_of`, which together were a quarter of a
+#: frame of moving output at 400x150. Lillecarl/pymux#434.
+#:
+#: The size is a whole wide screen and then some. 400x150 is sixty
+#: thousand cells, so a cache this big answers every cell of one
+#: without evicting an answer it is about to be asked for again.
+drawn_as = lru_cache(maxsize=64 * 1024)(_drawn_as)
+
+
+def placeholder_cells(row, columns: int, number: int, outer_id: Callable[[int], int]) -> dict[int, tuple[str, str]]:
+    """
+    The image cells of one row as an outer terminal that reads unicode
+    placeholders draws them: by column, the style to add and the text.
+
+    `outer_id` gives the id that terminal knows the image by. It has to
+    fit the 24 bits of a colour. Every cell names its row and column,
+    because the cell that a mark was left out after may be scrolled
+    away. Lillecarl/pymux#600.
+    """
+    cells: dict[int, tuple[str, str]] = {}
+    for run in runs_in_line(row, columns, number):
+        colour = " fg:#%06x" % outer_id(run.image_id)
+        for offset in range(run.columns):
+            text = spelled(run.image_row, run.image_column + offset)
+            if text:
+                cells[run.column + offset] = (colour, text)
+    return cells
+
+
+def fragments_of_runs(
+    runs: list[Run],
+    end: int,
+    reverse_video: bool,
+    images: Callable[[], dict[int, tuple[str, str]]] | None = None,
+) -> StyleAndTextTuples:
+    """
+    One row built from runs: one fragment per run.
+
+    A run of one appearance is one piece of text in one style, and a
+    gap between two runs holds cells nobody wrote, so it draws blanks.
+    A blank a program wrote keeps only its trailing column, anywhere
+    else the mark changes no attribute.
+
+    `images` gives `placeholder_cells` for the row. With it, a cell of
+    an image keeps its placeholder; without, it draws a space. It is
+    asked only when the row holds one, which most rows do not.
+    """
+    # What an unwritten column draws: the blank nobody wrote.
+    gap = run_style(PLAIN_APPEARANCE, reverse_video, False)
+
+    cells = None
+    fragments: StyleAndTextTuples = []
+    at = 0
+    last = len(runs) - 1
+    for index, run in enumerate(runs):
+        if run.start > at:
+            fragments.append((gap, " " * (run.start - at)))
+        if run.plain:
+            fragments.append(
+                (
+                    run_style(
+                        run.appearance,
+                        reverse_video,
+                        run.blank and run.written and index == last,
+                    ),
+                    run.text,
+                )
+            )
+        else:
+            # A cell that draws as something else stands on its own
+            # run, and is mapped the way one cell at a time always
+            # was: a wide character, a control, a cell of an image.
+            fragment = drawn_as(run.text, run.appearance, reverse_video, run.written)
+            if images is not None and run.text.startswith(PLACEHOLDER):
+                if cells is None:
+                    cells = images()
+                cell = cells.get(run.start)
+                if cell is not None:
+                    fragment = (fragment[0] + cell[0], cell[1])
+            fragments.append(fragment)
+        at = run.end
+    if at < end:
+        fragments.append((gap, " " * (end - at)))
+
+    return fragments

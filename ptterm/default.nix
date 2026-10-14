@@ -1,0 +1,156 @@
+# The package this repository builds. The suites that judge it live in
+# `nix/checks.nix`, the emulators they compare against in `nix/judges.nix`, and
+# the conformance suite in `nix/esctest2.nix`. Each declares its own inputs, so
+# nothing that only a test needs is named here.
+#
+# The last two reach `passthru`, because a tool is not a suite and pymux runs
+# the same conformance suite in a pane. Neither reaches the closure of the
+# package: `passthru` names a derivation and does not depend on it.
+#
+# Nothing else belongs in this repository: the dev shell and the collection
+# that assembles this with its siblings live in pyterm.
+#
+# **This is a pyproject.nix builders package, not a nixpkgs one.** The three
+# dependencies are declared once, in `pyproject.toml`, and the renderer reads
+# them; an environment is a virtualenv rather than a PYTHONPATH.
+# Lillecarl/pymux#319.
+{
+  lib,
+  stdenv,
+  python,
+  pyprojectHook,
+  resolveBuildSystem,
+  mkVirtualEnv,
+  mkProject,
+  callPackage,
+  # The linter and formatter that the `ruff` check runs.
+  ruff,
+}:
+let
+  package =
+    (mkProject {
+      root = ./.;
+      inherit python;
+      extra = rendered: {
+        # The tools ride on the package, and the package is what the set
+        # holds, so a sibling reaches them by asking the set for ptterm.
+        # Under nixpkgs this was the same shape; what changed is that a
+        # lifted package would have kept the files and dropped this, which
+        # is why ptterm had to convert before its consumers could stop
+        # taking the nixpkgs copy. Lillecarl/pymux#319.
+        passthru = rendered.passthru // {
+          inherit
+            checks
+            judges
+            esctest2
+            vtermSuite
+            alacrittySuite
+            vttestWalker
+            ;
+        };
+
+        meta = rendered.meta // {
+          description = "Terminal emulator for prompt_toolkit";
+          homepage = "https://github.com/prompt-toolkit/ptterm";
+          license = lib.licenses.bsd3;
+        };
+      };
+    })
+      {
+        inherit stdenv pyprojectHook resolveBuildSystem;
+      };
+
+  # Only the tests, not the whole repository. A copy of everything makes
+  # the test runs rebuild on every unrelated edit.
+  #
+  # These are built here and not under `nix`, because `./.` there is the
+  # `nix` directory and these need the root of the repository.
+  # `pyproject.toml` comes with them. A suite runs pytest in a directory
+  # that holds what this names, so the settings have to be in it: pytest
+  # reads them from the root it finds, and a root with no config file is
+  # a root with no settings. Without it `anyio_mode` is not set in the
+  # sandbox and every coroutine test fails there while passing here.
+  testSources = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./tests
+      ./pyproject.toml
+      # The `ruff` check reads the package, where the suites above
+      # read the installed one and never look here.
+      ./ptterm
+      ./examples
+    ];
+  };
+
+  # What the suites run on: ptterm, everything it declares, and the `test`
+  # extra beside them in the same file.
+  testEnv = mkVirtualEnv "ptterm-test-env" { ptterm = [ "test" ]; };
+
+  # Each judge is built from its own directory alone. Otherwise every change
+  # to a test rebuilds every crate.
+  judgeSources = {
+    rust = builtins.path {
+      path = ./tests/judges;
+      name = "ptterm-judges-source";
+    };
+    rustLock = ./tests/judges/Cargo.lock;
+    c = builtins.path {
+      path = ./tests/judges-c;
+      name = "ptterm-ghostty-judge-source";
+    };
+    js = builtins.path {
+      path = ./tests/judges-js;
+      name = "ptterm-xtermjs-judge-source";
+    };
+  };
+
+  # The other emulators that the panel compares ptterm against. They are
+  # build inputs of a test and reach no closure that runs.
+  judges = callPackage ./nix/judges.nix { inherit judgeSources; };
+
+  # The conformance suite of xterm, which judges a terminal from the inside.
+  # pymux runs the same one in a pane, and takes it from here.
+  esctest2 = callPackage ./nix/esctest2.nix { };
+
+  # The test files of libvterm, and libvterm's own program that answers
+  # them. `ptterm-vterm` uses the first with a harness of ours in place of
+  # the second. pymux takes both from here and puts itself in the middle.
+  vtermSuite = callPackage ./nix/vterm-suite.nix { };
+
+  # The reference tests of Alacritty, and the judge that reads one. pymux
+  # takes both from here and puts itself in the middle, the same way it
+  # does with libvterm's.
+  alacrittySuite = callPackage ./nix/alacritty-suite.nix { };
+
+  # The walker that drives vttest. `checks.vttest` runs it against a pty of
+  # its own, and pymux runs it inside a real terminal, twice: once with a
+  # pane in the chain and once without one. The two pictures are then
+  # subtracted, which is the only way to see what a terminal really paints.
+  #
+  # It is two files and not `testSources`, so an edit to any other test of
+  # this repository does not rebuild the pymux check that photographs it.
+  # The walker adds its own directory to `sys.path` and imports the host
+  # that pairs a screen with a program, so that file comes along. Alone,
+  # the walker raised "No module named 'pty_host'" the moment pymux ran
+  # it, and the check has not run since. Lillecarl/pymux#149.
+  vttestWalker = lib.fileset.toSource {
+    root = ./tests;
+    fileset = lib.fileset.unions [
+      ./tests/drive_with_vttest.py
+      ./tests/pty_host.py
+    ];
+  };
+
+  checks = callPackage ./nix/checks.nix {
+    inherit
+      testEnv
+      testSources
+      judges
+      esctest2
+      vtermSuite
+      alacrittySuite
+      ruff
+      ;
+  };
+in
+package

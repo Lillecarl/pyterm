@@ -1,0 +1,352 @@
+//! Read a screen back from other terminal emulators.
+//!
+//! Two modern emulators run here, each with a screen model of its own:
+//! WezTerm and Alacritty. The same bytes go into both and the cells
+//! come back out, in the shape that `kitty_oracle` uses on the python
+//! side.
+//!
+//! One request is one line of JSON on standard input:
+//!
+//! ```json
+//! {"data": "hello", "lines": 6, "columns": 20, "resize": [4, 40]}
+//! ```
+//!
+//! `resize` is optional. It is the size to take after the data, and the
+//! screen that comes back is that size. What its rows hold is what the
+//! reflow of that emulator made of them.
+//!
+//! One answer is one line of JSON on standard output, holding a grid
+//! for every emulator. A cell is an array, to keep the answer small:
+//!
+//! ```json
+//! [char, fg, bg, bold, italic, underline, reverse, underline_color,
+//!  hyperlink, hyperlink_name, baseline]
+//! ```
+//!
+//! `baseline` is where the glyph sits: 0 on the line, 1 raised
+//! ("SGR 73"), 2 lowered ("SGR 74"). Alacritty holds none of that and
+//! always answers 0.
+//!
+//! A colour is `null` for the default, `["index", n]` for a number of
+//! the palette or `["rgb", r, g, b]`. The python side resolves a
+//! number above fifteen, so that every judge resolves it the same way.
+//!
+//! `hyperlink` is the target of an "OSC 8", and `hyperlink_name` is
+//! what this emulator calls that one link. The two names do not compare
+//! across emulators, so the python side turns each into a number of the
+//! screen and compares the shape: which runs of cells are one link.
+//!
+//! The process stays open and answers one request after another,
+//! because the hunt asks tens of thousands of times.
+
+use std::io::{self, BufRead, Write};
+use std::sync::Arc;
+
+use serde_json::{json, Value};
+
+/// How many rows of history every judge keeps. `kitty_oracle.HISTORY`
+/// holds the same number and says why: a widening pulls rows back, and
+/// a judge with no history answers "blank" and agrees with every other
+/// judge that has none.
+const HISTORY: usize = 100;
+
+/// The size a screen takes, in cells. The first pair is where the data
+/// was written and the second, when there is one, is what the screen
+/// was resized to before it was read.
+fn sizes_of(request: &Value) -> ((usize, usize), Option<(usize, usize)>) {
+    let lines = request["lines"].as_u64().unwrap_or(6) as usize;
+    let columns = request["columns"].as_u64().unwrap_or(20) as usize;
+    let resize = request["resize"].as_array().and_then(|pair| {
+        let rows = pair.first()?.as_u64()? as usize;
+        let cols = pair.get(1)?.as_u64()? as usize;
+        if rows == 0 || cols == 0 {
+            return None;
+        }
+        Some((rows, cols))
+    });
+    ((lines, columns), resize)
+}
+
+// ---------------------------------------------------------------------
+// WezTerm.
+
+use wezterm_term::color::{ColorAttribute, ColorPalette};
+use wezterm_term::{Intensity, Terminal, TerminalConfiguration, TerminalSize, VerticalAlign};
+
+#[derive(Debug)]
+struct WezConfig;
+
+impl TerminalConfiguration for WezConfig {
+    fn color_palette(&self) -> ColorPalette {
+        ColorPalette::default()
+    }
+}
+
+fn wez_color(color: ColorAttribute) -> Value {
+    match color {
+        ColorAttribute::Default => Value::Null,
+        ColorAttribute::PaletteIndex(index) => json!(["index", index]),
+        ColorAttribute::TrueColorWithPaletteFallback(rgb, _)
+        | ColorAttribute::TrueColorWithDefaultFallback(rgb) => {
+            let (red, green, blue, _alpha) = rgb.to_srgb_u8();
+            json!(["rgb", red, green, blue])
+        }
+    }
+}
+
+fn wez_size(lines: usize, columns: usize) -> TerminalSize {
+    TerminalSize {
+        rows: lines,
+        cols: columns,
+        pixel_width: columns * 10,
+        pixel_height: lines * 20,
+        dpi: 96,
+    }
+}
+
+fn wezterm_screen(
+    data: &str,
+    lines: usize,
+    columns: usize,
+    resize: Option<(usize, usize)>,
+) -> Value {
+    let mut terminal = Terminal::new(
+        wez_size(lines, columns),
+        Arc::new(WezConfig),
+        "ptterm-judges",
+        "0.1.0",
+        Box::new(Vec::new()),
+    );
+    terminal.advance_bytes(data.as_bytes());
+
+    let (lines, columns) = match resize {
+        None => (lines, columns),
+        Some((rows, cols)) => {
+            terminal.resize(wez_size(rows, cols));
+            (rows, cols)
+        }
+    };
+
+    let screen = terminal.screen_mut();
+    let mut rows = Vec::with_capacity(lines);
+    for y in 0..lines {
+        let mut row = Vec::with_capacity(columns);
+        for x in 0..columns {
+            row.push(match screen.get_cell(x, y as i64) {
+                None => {
+                    json!([" ", null, null, false, false, 0, false, null, null, null, 0])
+                }
+                Some(cell) => {
+                    let attrs = cell.attrs();
+                    let text = cell.str();
+                    let underline = attrs.underline() as u8;
+                    // WezTerm holds the link itself and mints no name
+                    // for it, so the target and the parameters together
+                    // are what it calls one link.
+                    let link = attrs.hyperlink();
+                    json!([
+                        if text.is_empty() { " " } else { text },
+                        wez_color(attrs.foreground()),
+                        wez_color(attrs.background()),
+                        attrs.intensity() == Intensity::Bold,
+                        attrs.italic(),
+                        underline,
+                        attrs.reverse(),
+                        // The colour of a line that nobody draws is
+                        // not visible, so it does not travel.
+                        if underline == 0 {
+                            Value::Null
+                        } else {
+                            wez_color(attrs.underline_color())
+                        },
+                        match link {
+                            None => Value::Null,
+                            Some(link) => json!(link.uri()),
+                        },
+                        match link {
+                            None => Value::Null,
+                            Some(link) => json!(format!(
+                                "{}\u{0}{}",
+                                link.params().get("id").map(String::as_str).unwrap_or(""),
+                                link.uri()
+                            )),
+                        },
+                        match attrs.vertical_align() {
+                            VerticalAlign::SuperScript => 1,
+                            VerticalAlign::SubScript => 2,
+                            _ => 0,
+                        },
+                    ])
+                }
+            });
+        }
+        rows.push(Value::Array(row));
+    }
+    Value::Array(rows)
+}
+
+// ---------------------------------------------------------------------
+// Alacritty.
+
+use alacritty_terminal::event::VoidListener;
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line, Point};
+use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::vte::ansi::{Color, Processor};
+
+struct Size {
+    lines: usize,
+    columns: usize,
+}
+
+impl Dimensions for Size {
+    fn total_lines(&self) -> usize {
+        self.lines
+    }
+    fn screen_lines(&self) -> usize {
+        self.lines
+    }
+    fn columns(&self) -> usize {
+        self.columns
+    }
+}
+
+fn alacritty_color(color: Color) -> Value {
+    match color {
+        Color::Spec(rgb) => json!(["rgb", rgb.r, rgb.g, rgb.b]),
+        Color::Indexed(index) => json!(["index", index]),
+        Color::Named(named) => {
+            let index = named as usize;
+            if index < 16 {
+                json!(["index", index])
+            } else {
+                // The foreground, the background and the cursor are
+                // the colour of the terminal, which is the default.
+                Value::Null
+            }
+        }
+    }
+}
+
+fn alacritty_underline(flags: Flags) -> u8 {
+    if flags.contains(Flags::DOUBLE_UNDERLINE) {
+        2
+    } else if flags.contains(Flags::UNDERCURL) {
+        3
+    } else if flags.contains(Flags::DOTTED_UNDERLINE) {
+        4
+    } else if flags.contains(Flags::DASHED_UNDERLINE) {
+        5
+    } else if flags.contains(Flags::UNDERLINE) {
+        1
+    } else {
+        0
+    }
+}
+
+fn alacritty_screen(
+    data: &str,
+    lines: usize,
+    columns: usize,
+    resize: Option<(usize, usize)>,
+) -> Value {
+    let size = Size { lines, columns };
+    let config = Config {
+        scrolling_history: HISTORY,
+        ..Config::default()
+    };
+    let mut term = Term::new(config, &size, VoidListener);
+    let mut processor: Processor = Processor::new();
+    processor.advance(&mut term, data.as_bytes());
+
+    let (lines, columns) = match resize {
+        None => (lines, columns),
+        Some((rows, cols)) => {
+            term.resize(Size {
+                lines: rows,
+                columns: cols,
+            });
+            (rows, cols)
+        }
+    };
+
+    let grid = term.grid();
+    let mut rows = Vec::with_capacity(lines);
+    for y in 0..lines {
+        let mut row = Vec::with_capacity(columns);
+        for x in 0..columns {
+            let cell = &grid[Point::new(Line(y as i32), Column(x))];
+            let underline = alacritty_underline(cell.flags);
+            // Alacritty mints a name for a link that the program left
+            // without an id, out of a counter of the process. So the
+            // name is not the same twice and only its shape travels.
+            let link = cell.hyperlink();
+            row.push(json!([
+                // The second half of a double width character holds no
+                // character of its own.
+                //
+                // Alacritty keeps a mark of no width beside the cell
+                // and not in it. Reading `c` alone drops every
+                // combining mark, and the judge then says a screen
+                // holds no mark when it holds one.
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    " ".to_string()
+                } else {
+                    let mut text = cell.c.to_string();
+                    if let Some(marks) = cell.zerowidth() {
+                        text.extend(marks.iter());
+                    }
+                    text
+                },
+                alacritty_color(cell.fg),
+                alacritty_color(cell.bg),
+                cell.flags.contains(Flags::BOLD),
+                cell.flags.contains(Flags::ITALIC),
+                underline,
+                cell.flags.contains(Flags::INVERSE),
+                if underline == 0 {
+                    Value::Null
+                } else {
+                    cell.underline_color().map_or(Value::Null, alacritty_color)
+                },
+                match &link {
+                    None => Value::Null,
+                    Some(link) => json!(link.uri()),
+                },
+                match &link {
+                    None => Value::Null,
+                    Some(link) => json!(format!("{}\u{0}{}", link.id(), link.uri())),
+                },
+                // Alacritty has no "SGR 73": every glyph sits on the
+                // line, and the projection drops this for it.
+                0,
+            ]));
+        }
+        rows.push(Value::Array(row));
+    }
+    Value::Array(rows)
+}
+
+// ---------------------------------------------------------------------
+
+fn main() {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    for line in stdin.lock().lines() {
+        let line = line.expect("a line of standard input");
+        if line.trim().is_empty() {
+            continue;
+        }
+        let request: Value = serde_json::from_str(&line).expect("a request of JSON");
+        let data = request["data"].as_str().unwrap_or("");
+        let ((lines, columns), resize) = sizes_of(&request);
+
+        let answer = json!({
+            "wezterm": wezterm_screen(data, lines, columns, resize),
+            "alacritty": alacritty_screen(data, lines, columns, resize),
+        });
+        writeln!(stdout, "{}", answer).expect("an answer on standard output");
+        stdout.flush().expect("a flush");
+    }
+}

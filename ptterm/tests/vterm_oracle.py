@@ -1,0 +1,381 @@
+"""
+Compare the screen of ptterm against libvterm.
+
+libvterm is the emulator that Vim and Neovim carry, and it draws the
+terminal window of every editor that embeds them. It has no display of
+its own, so the same bytes go into it and the cells come back out.
+
+It is the second opinion. kitty is the terminal that pymux runs inside;
+libvterm leans towards xterm. Where the two agree and ptterm differs,
+ptterm is wrong and nobody has to decide anything. Where the two
+disagree, the difference is a real choice, which is what
+`test_known_deviations.py` holds.
+
+`PTTERM_LIBVTERM` names the shared library. The tests skip when it is
+not set.
+
+The shape of a cell, and the readers that turn a screen into cells,
+live in `kitty_oracle`. This adds one more reader.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+
+from kitty_oracle import HISTORY, Cell, as_seen, as_text, ptterm_cells
+
+__all__ = [
+    "libvterm_is_available",
+    "three_way",
+    "vterm_cells",
+    "vterm_differences",
+]
+
+#: How many code points libvterm keeps in one cell.
+MAX_CHARS_PER_CELL = 6
+
+#: The bits of `VTermColor.type`.
+_COLOR_INDEXED = 0x01
+_COLOR_DEFAULT_FG = 0x02
+_COLOR_DEFAULT_BG = 0x04
+
+#: What libvterm puts in the second half of a double width character.
+_WIDE_CHARACTER_FILLER = 0xFFFFFFFF
+
+
+class _Attrs(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_uint, width)
+        for name, width in [
+            ("bold", 1),
+            ("underline", 2),
+            ("italic", 1),
+            ("blink", 1),
+            ("reverse", 1),
+            ("conceal", 1),
+            ("strike", 1),
+            ("font", 4),
+            ("dwl", 1),
+            ("dhl", 2),
+            ("small", 1),
+            ("baseline", 2),
+        ]
+    ]
+
+
+class _Color(ctypes.Structure):
+    "The tagged union of libvterm, read as its four bytes."
+
+    _fields_ = [
+        ("type", ctypes.c_uint8),
+        ("first", ctypes.c_uint8),
+        ("second", ctypes.c_uint8),
+        ("third", ctypes.c_uint8),
+    ]
+
+
+class _Cell(ctypes.Structure):
+    _fields_ = [
+        ("chars", ctypes.c_uint32 * MAX_CHARS_PER_CELL),
+        ("width", ctypes.c_char),
+        ("attrs", _Attrs),
+        ("fg", _Color),
+        ("bg", _Color),
+    ]
+
+
+class _Pos(ctypes.Structure):
+    _fields_ = [("row", ctypes.c_int), ("col", ctypes.c_int)]
+
+
+#: The three callbacks that carry a scrollback, and the shape of the
+#: struct they sit in. libvterm keeps no history of its own: it hands a
+#: row that leaves the top to `sb_pushline` and asks `sb_popline` for
+#: one back when a reflow frees a row. `vterm.h` lines 534 to 544 give
+#: the order, and the six before them are not set.
+_PushLine = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(_Cell), ctypes.c_void_p)
+_PopLine = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(_Cell), ctypes.c_void_p)
+_Clear = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+
+
+class _ScreenCallbacks(ctypes.Structure):
+    _fields_ = [
+        ("damage", ctypes.c_void_p),
+        ("moverect", ctypes.c_void_p),
+        ("movecursor", ctypes.c_void_p),
+        ("settermprop", ctypes.c_void_p),
+        ("bell", ctypes.c_void_p),
+        ("resize", ctypes.c_void_p),
+        ("sb_pushline", _PushLine),
+        ("sb_popline", _PopLine),
+        ("sb_clear", _Clear),
+    ]
+
+
+class _Scrollback:
+    """
+    The history that libvterm does not keep.
+
+    A row arrives as a pointer to cells that libvterm owns and reuses,
+    so it is copied out at once. It goes back the same way: into cells
+    that libvterm owns, padded with blanks when the screen is wider now
+    than the row was.
+
+    The three callbacks are held here as well. ctypes collects a
+    callback that nothing refers to, and libvterm would then call into
+    memory that is gone.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.rows: list = []
+        self.callbacks = _ScreenCallbacks(
+            sb_pushline=_PushLine(self._push),
+            sb_popline=_PopLine(self._pop),
+            sb_clear=_Clear(self._clear),
+        )
+
+    def _push(self, columns, cells, user) -> int:
+        row = (_Cell * columns)()
+        ctypes.memmove(row, cells, ctypes.sizeof(_Cell) * columns)
+        self.rows.append(row)
+        del self.rows[: max(0, len(self.rows) - self.limit)]
+        return 1
+
+    def _pop(self, columns, cells, user) -> int:
+        if not self.rows:
+            return 0
+        row = self.rows.pop()
+        held = min(columns, len(row))
+        ctypes.memmove(cells, row, ctypes.sizeof(_Cell) * held)
+        for column in range(held, columns):
+            cells[column].chars[0] = 0
+            # A blank cell is one column wide. A width of zero is the
+            # second half of a wide character, which this is not.
+            cells[column].width = b"\x01"
+        return 1
+
+    def _clear(self, user) -> int:
+        self.rows.clear()
+        return 1
+
+
+_library = None
+
+
+def libvterm_is_available() -> bool:
+    "True when `PTTERM_LIBVTERM` names a library that loads."
+    global _library
+    if _library is not None:
+        return True
+    path = os.environ.get("PTTERM_LIBVTERM")
+    if not path:
+        return False
+    try:
+        library = ctypes.CDLL(path)
+    except OSError:
+        return False
+
+    library.vterm_new.restype = ctypes.c_void_p
+    library.vterm_new.argtypes = [ctypes.c_int, ctypes.c_int]
+    library.vterm_free.argtypes = [ctypes.c_void_p]
+    library.vterm_set_utf8.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    library.vterm_set_size.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    library.vterm_obtain_screen.restype = ctypes.c_void_p
+    library.vterm_obtain_screen.argtypes = [ctypes.c_void_p]
+    library.vterm_screen_reset.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    library.vterm_screen_enable_altscreen.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    library.vterm_screen_enable_reflow.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+    library.vterm_screen_set_callbacks.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_ScreenCallbacks),
+        ctypes.c_void_p,
+    ]
+    library.vterm_input_write.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_size_t,
+    ]
+    library.vterm_screen_get_cell.argtypes = [
+        ctypes.c_void_p,
+        _Pos,
+        ctypes.POINTER(_Cell),
+    ]
+    _library = library
+    return True
+
+
+def _color(value: _Color, background: bool) -> tuple | None:
+    """
+    The colour that libvterm holds, in the form that `kitty_oracle`
+    uses.
+
+    `None` is the default colour. A number keeps its number, at every
+    value, because the terminal of the user paints the palette from
+    its own theme.
+    """
+    default = _COLOR_DEFAULT_BG if background else _COLOR_DEFAULT_FG
+    if value.type & default:
+        return None
+    if value.type & _COLOR_INDEXED:
+        return ("index", value.first)
+    return ("rgb", value.first, value.second, value.third)
+
+
+def vterm_cells(data: str, lines: int, columns: int, resize: tuple[int, int] | None = None) -> list[list[Cell]]:
+    """
+    Feed `data` to libvterm and read the screen back.
+
+    `resize` is a new size to take after the data.
+
+    **libvterm keeps no history of its own, so this reader keeps one for
+    it.** A scrollback lives in whoever embeds libvterm, behind the
+    `sb_pushline` and `sb_popline` callbacks. Without them a row that
+    leaves the top is gone and a widening that would pull one back finds
+    nothing, which is not what libvterm does. It is what its own suite
+    harness does with the scrollback off, and the expectations in
+    `69screen_reflow.test` are that fallback. Lillecarl/pymux#104.
+
+    Reflow is off by default as well, and `vterm_screen_enable_reflow`
+    turns it on. Its suite asks for both with `WANTSCREEN rb`.
+    """
+    assert libvterm_is_available(), "PTTERM_LIBVTERM names no library"
+    library = _library
+
+    term = library.vterm_new(lines, columns)
+    try:
+        library.vterm_set_utf8(term, 1)
+        screen = library.vterm_obtain_screen(term)
+        # libvterm keeps the alternate screen off until it is asked
+        # for. Without this it draws everything on one screen and says
+        # nothing useful about "?1049" and its two older names.
+        library.vterm_screen_enable_altscreen(screen, 1)
+        library.vterm_screen_enable_reflow(screen, True)
+        scrollback = _Scrollback(HISTORY)
+        library.vterm_screen_set_callbacks(screen, ctypes.byref(scrollback.callbacks), None)
+        library.vterm_screen_reset(screen, 1)
+        raw = data.encode("utf-8")
+        library.vterm_input_write(term, raw, len(raw))
+        if resize is not None:
+            lines, columns = resize
+            library.vterm_set_size(term, lines, columns)
+
+        rows = []
+        for y in range(lines):
+            cells = []
+            for x in range(columns):
+                cell = _Cell()
+                library.vterm_screen_get_cell(screen, _Pos(y, x), ctypes.byref(cell))
+                text = "".join(chr(point) for point in cell.chars if point and point != _WIDE_CHARACTER_FILLER)
+                cells.append(
+                    Cell(
+                        char=text or " ",
+                        fg=_color(cell.fg, background=False),
+                        bg=_color(cell.bg, background=True),
+                        bold=bool(cell.attrs.bold),
+                        italic=bool(cell.attrs.italic),
+                        # The three shapes of libvterm are the first
+                        # three that kitty numbers. It carries no
+                        # colour for the line itself.
+                        underline=int(cell.attrs.underline),
+                        reverse=bool(cell.attrs.reverse),
+                        # "SGR 73" and "SGR 74". libvterm carries a
+                        # `small` bit beside this one, and it is the
+                        # same answer: a raised or a lowered glyph is
+                        # the small one.
+                        baseline=int(cell.attrs.baseline),
+                    )
+                )
+            rows.append(cells)
+        return rows
+    finally:
+        library.vterm_free(term)
+
+
+#: What libvterm draws for a shape that it does not know. It has
+#: three, so a dotted and a dashed line both come out single.
+_SHAPES_OF_LIBVTERM = {4: 1, 5: 1}
+
+
+def _as_libvterm_sees(cell: Cell) -> Cell:
+    """
+    The cell with everything dropped that libvterm cannot hold.
+
+    It knows a single, a double and a curly line, and it paints the
+    line like the text. It holds no hyperlink at all: `vterm.h` names
+    none. A comparison that keeps more than that reports a limit of the
+    reference as a difference.
+    """
+    return cell._replace(
+        underline=_SHAPES_OF_LIBVTERM.get(cell.underline, cell.underline),
+        underline_color=None,
+        hyperlink=None,
+        hyperlink_id=None,
+    )
+
+
+def _keeper(strict: bool, blank_style: bool):
+    if strict:
+        return _as_libvterm_sees
+    if blank_style:
+        return lambda cell: _as_libvterm_sees(as_seen(cell))
+    return lambda cell: _as_libvterm_sees(as_text(cell))
+
+
+def vterm_differences(
+    data: str,
+    lines: int = 6,
+    columns: int = 20,
+    strict: bool = False,
+    blank_style: bool = True,
+) -> list[str]:
+    "Every cell where ptterm and libvterm do not agree, as readable lines."
+    ours = ptterm_cells(data, lines, columns)
+    theirs = vterm_cells(data, lines, columns)
+    keep = _keeper(strict, blank_style)
+
+    reported = []
+    for y in range(lines):
+        for x in range(columns):
+            mine, other = keep(ours[y][x]), keep(theirs[y][x])
+            if mine != other:
+                reported.append("cell %d,%d: ptterm %r, libvterm %r" % (y, x, mine, other))
+    return reported
+
+
+def three_way(
+    data: str,
+    lines: int = 6,
+    columns: int = 20,
+    strict: bool = False,
+    blank_style: bool = True,
+) -> str:
+    """
+    What the three screens say about one program.
+
+    - "agree": all three draw the same thing.
+    - "ptterm-wrong": kitty and libvterm agree with each other and not
+      with ptterm. Nobody has to decide anything; this is a bug.
+    - "split": the two others disagree, so the difference is a choice.
+
+    A vote is worth more than a comparison: it tells a deviation that
+    has to be fixed apart from one that has to be decided.
+    """
+    from kitty_oracle import kitty_cells, kitty_is_available
+
+    # The check is what puts the package of kitty on the path.
+    assert kitty_is_available(), "PTTERM_KITTY names no kitty"
+
+    keep = _keeper(strict, blank_style)
+    ours = ptterm_cells(data, lines, columns)
+    kitty = kitty_cells(data, lines, columns)
+    vterm = vterm_cells(data, lines, columns)
+
+    def rows(screen):
+        return [[keep(cell) for cell in row] for row in screen]
+
+    ours, kitty, vterm = rows(ours), rows(kitty), rows(vterm)
+    if kitty != vterm:
+        return "split"
+    return "agree" if ours == kitty else "ptterm-wrong"
