@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pysmithay"
+version = "0.1.0"
+description = "A headless Wayland compositor, built on Smithay, that hands each window's pixels to Python"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest", "pywayland"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "pysmithay._native"
+features = ["pyo3/extension-module"]
