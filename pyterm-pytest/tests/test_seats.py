@@ -1,0 +1,519 @@
+"""
+The seats' own promises, apart from the waits they run.
+"""
+
+import os
+import socket
+import struct
+import subprocess
+import threading
+
+import pytest
+
+from pyterm_pytest import seats as the_seats
+from pyterm_pytest.seats import (
+    COULD_NOT_RUN,
+    PICTURE_TIMEOUT,
+    SEATS,
+    Seat,
+    TheSeatIsGone,
+    WaylandSeat,
+    XSeat,
+    kiosk_configuration,
+    open_the_seats,
+    why_the_display_refuses,
+    with_no_answer,
+)
+
+
+def test_every_seat_read_the_fence():
+    "Both seats hold a display server whose clipboard a client can watch."
+
+    for name, seat_class in SEATS.items():
+        assert seat_class.reads_fence, "%s cannot read a fence" % (name,)
+
+
+def test_the_base_cannot():
+    "And the guard that refuses a token is the base's shape."
+
+    assert Seat.reads_fence is False
+
+
+class Fine(Seat):
+    name = "fine"
+
+    def trouble(self):
+        return ""
+
+
+class Gone(Seat):
+    name = "gone"
+
+    def trouble(self):
+        return "the X server of the gone seat ended with -11"
+
+
+def test_a_seat_that_can_be_drawn_on_raises_nothing():
+    Fine().still_there()
+
+
+def test_a_seat_that_is_gone_says_so_and_says_why():
+    with pytest.raises(TheSeatIsGone) as raised:
+        Gone().still_there()
+    assert "ended with -11" in str(raised.value)
+
+
+def test_a_run_with_no_answer_does_not_end_with_zero_or_one():
+    """
+    Zero is a pass and one is any error, and `pyte/nix/suite.nix` has
+    to tell "could not run" from both: it keeps the first two and
+    throws this one away. Lillecarl/pymux#216.
+    """
+    assert with_no_answer("the seat would not start") == COULD_NOT_RUN
+    assert COULD_NOT_RUN not in (0, 1, 2)
+    # `timeout` and the shell own 124 to 127, and a signal is 128 up.
+    assert COULD_NOT_RUN < 124
+
+
+class Terminal:
+    def __init__(self, seat):
+        self.seat = seat
+
+
+def test_a_seat_that_will_not_start_is_not_a_verdict(monkeypatch):
+    "The failure is the seat's, not whatever the display server said."
+
+    class WillNot(Seat):
+        def start(self, work):
+            raise OSError("no such file: Xvfb")
+
+    monkeypatch.setitem(SEATS, "x", WillNot)
+    with pytest.raises(TheSeatIsGone) as raised:
+        open_the_seats([Terminal("x")], work=None)
+    assert "would not start" in str(raised.value)
+    assert "Xvfb" in str(raised.value)
+
+
+class _AnXServer:
+    "As much of an Xvfb as `XSeat.start` uses, and its argv."
+
+    argv = None
+
+    def __init__(self, argv, pass_fds=(), stdout=None, stderr=None, **_rest):
+        _AnXServer.argv = list(argv)
+        stdout.close()
+        os.write(pass_fds[0], b"7\n")
+
+    def poll(self):
+        return None
+
+
+def test_the_x_seat_asks_its_server_not_to_reset(monkeypatch, tmp_path):
+    """
+    The seat's own tools connect and leave before the terminal is in,
+    so the client count reaches zero. An X server with no clients
+    resets, which closes the sockets it listens on and opens them
+    again, and a terminal that starts inside that window is refused:
+    "Can't open display".
+
+    Measured, with an Xvfb of each kind and 24 busy processes beside
+    it: 67 of 300 client departures refused the client that came next,
+    and 0 of 300 with `-noreset`. Lillecarl/pymux#431.
+    """
+    monkeypatch.setattr(the_seats.subprocess, "Popen", _AnXServer)
+
+    number, _, _ = XSeat().start(tmp_path)._serve(tmp_path)
+
+    assert "-noreset" in _AnXServer.argv
+    # The number the server chose, and not one this ever assumes.
+    assert number == ":7"
+
+
+# ----------------------------------------------------------------------
+# Whether a display will serve a client.
+#
+# The servers here are abstract sockets and nothing else. An abstract
+# name is unbound the moment its socket closes and leaves no file
+# behind, so a test that ends in the middle leaves the next run a clean
+# machine. That is why none of these needs an Xvfb.
+
+
+def _a_display_nobody_serves():
+    "A display number that no server on this machine has taken."
+    for number in range(90, 120):
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.bind("\0/tmp/.X11-unix/X%d" % number)
+        except OSError:
+            continue
+        finally:
+            probe.close()
+        return number
+    raise AssertionError("every display from 90 to 119 is taken")
+
+
+def a_server_that_answers(answer):
+    "A front door that reads the setup request and answers this."
+    number = _a_display_nobody_serves()
+    door = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    door.bind("\0/tmp/.X11-unix/X%d" % number)
+    door.listen(4)
+
+    def serve():
+        while True:
+            try:
+                client, _ = door.accept()
+            except OSError:
+                return
+            with client:
+                client.recv(12)
+                client.sendall(answer)
+
+    threading.Thread(target=serve, daemon=True).start()
+    return ":%d" % number, door
+
+
+#: What a server sends a client it will serve: protocol 11.0, and no
+#: data after the header.
+SERVED = struct.pack("<BxHHH", 1, 11, 0, 0)
+
+
+def refusal(reason):
+    "What a server sends a client it will not serve, and why."
+    padded = reason + b"\0" * (-len(reason) % 4)
+    return (
+        struct.pack("<BBHHH", 0, len(reason), 11, 0, len(padded) // 4) + padded
+    )
+
+
+def test_a_display_nothing_answers_says_so():
+    assert "nothing answers display" in why_the_display_refuses(
+        ":%d" % _a_display_nobody_serves()
+    )
+
+
+def test_a_display_that_serves_a_client_is_no_trouble():
+    "Or every red run would read as a seat that is gone, and none would count."
+    number, door = a_server_that_answers(SERVED)
+    try:
+        assert why_the_display_refuses(number) == ""
+    finally:
+        door.close()
+
+
+def test_a_display_that_refuses_gives_the_reason_the_server_gave():
+    """
+    The server's own words are the only thing that says why, and
+    nothing else in a run holds them. "Maximum number of clients
+    reached" is one of them. Lillecarl/pymux#431.
+    """
+    number, door = a_server_that_answers(
+        refusal(b"Maximum number of clients reached")
+    )
+    try:
+        said = why_the_display_refuses(number)
+    finally:
+        door.close()
+    assert "Maximum number of clients reached" in said
+
+
+class _Running:
+    "An Xvfb that has not ended."
+
+    returncode = None
+
+    def poll(self):
+        return None
+
+
+def test_a_server_that_runs_and_cannot_be_reached_is_a_seat_that_is_gone(tmp_path):
+    """
+    The trouble of this seat was the exit code of the process alone. A
+    display that refuses every client while its server runs read as
+    healthy, so the terminal's "Can't open display" became a verdict on
+    a picture and a red run of it stayed in the store.
+    Lillecarl/pymux#431.
+    """
+    seat = XSeat()
+    seat._process = _Running()
+    seat._log = tmp_path / "xvfb.log"
+    seat.number = ":%d" % _a_display_nobody_serves()
+
+    with pytest.raises(TheSeatIsGone) as raised:
+        seat.still_there()
+    assert "nothing answers display" in str(raised.value)
+
+
+def test_a_server_that_runs_and_serves_is_not(tmp_path):
+    seat = XSeat()
+    seat._process = _Running()
+    seat._log = tmp_path / "xvfb.log"
+    seat.number, door = a_server_that_answers(SERVED)
+    try:
+        seat.still_there()
+    finally:
+        door.close()
+
+
+def test_the_wayland_seat_starts_no_x_server():
+    """
+    wlroots opens an X display as soon as the compositor starts, before
+    it has a client for it, so every picture took a display number and
+    gave it back. The X seat's server is on the other side of that
+    search. Nothing on this seat speaks X: foot and kitty are Wayland
+    only and `_open` passes an empty DISPLAY. Lillecarl/pymux#432.
+    """
+    assert "xwayland disable" in kiosk_configuration("/tmp/run.sh")
+
+
+def test_the_x_seat_keeps_its_server_log(tmp_path):
+    """
+    A kept terminal's server serves many pictures, so its log is
+    beside the run and not in the room of any one picture -- and the
+    sandbox throws the run's own directory away. A run whose answer is
+    "could not draw" has to carry the reason with it.
+    Lillecarl/pymux#433.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    seat = XSeat().start(work)
+    (work / "xvfb-1.log").write_text("the server said this\n")
+
+    out = tmp_path / "out"
+    seat.keep_the_log(out)
+
+    assert (out / "xvfb-1.log").read_text() == "the server said this\n"
+
+
+def test_a_seat_with_no_server_of_its_own_keeps_nothing(tmp_path):
+    "The wayland seat writes its compositor's log into the picture's room."
+    out = tmp_path / "out"
+    Seat().keep_the_log(out)
+    assert not out.exists()
+
+
+class _Ended:
+    "A terminal that is not there any more."
+
+    returncode = 1
+
+    def poll(self):
+        return 1
+
+
+def test_a_seat_that_is_gone_is_not_a_runtime_error():
+    """
+    Every driver wraps a picture in `except RuntimeError` to put the
+    logs of the room beside the reason. A seat that is gone caught
+    there comes out as a verdict on the picture, which is the one thing
+    it is not. Lillecarl/pymux#431.
+    """
+    assert not issubclass(TheSeatIsGone, RuntimeError)
+
+
+def test_a_terminal_that_never_opened_the_display_fails_the_seat(tmp_path):
+    """
+    A terminal that could not open the display drew nothing, so there
+    is no picture to judge. The window a refusal opens is short --
+    0.305s at its worst, measured -- so the display answers again by
+    the time anything asks it, and what the terminal said is what
+    stays. Lillecarl/pymux#431.
+    """
+    seat = XSeat()
+    seat.number = ":0"
+    log = tmp_path / "bare.log"
+    log.write_bytes(b"xterm: Xt error: Can't open display: :0\n")
+
+    with pytest.raises(TheSeatIsGone) as raised:
+        seat._wait_for_the_window("XTerm", _Ended(), log)
+    assert "never reached display :0" in str(raised.value)
+
+
+def test_a_window_that_never_appears_asks_the_display(monkeypatch, tmp_path):
+    """
+    `xdotool search` answers with an empty list whether the display
+    refused it or the window is not there yet, so a seat that went away
+    during a picture read as a window that was slow.
+    """
+    monkeypatch.setattr(the_seats, "APPEAR_TIMEOUT", 0.0)
+    seat = XSeat()
+    seat._process = _Running()
+    seat._log = tmp_path / "xvfb.log"
+    seat.number = ":%d" % _a_display_nobody_serves()
+
+    with pytest.raises(TheSeatIsGone):
+        seat._wait_for_the_window("XTerm", _Running(), tmp_path / "bare.log")
+
+
+def test_a_terminal_that_died_of_something_else_is_still_a_verdict(tmp_path):
+    "A terminal that reached the display and then died is the run's answer."
+    seat = XSeat()
+    seat.number = ":0"
+    log = tmp_path / "bare.log"
+    log.write_bytes(b"xterm: cannot load font 'nonesuch'\n")
+
+    with pytest.raises(RuntimeError) as raised:
+        seat._wait_for_the_window("XTerm", _Ended(), log)
+    assert "ended before it drew anything" in str(raised.value)
+
+
+# ----------------------------------------------------------------------
+# A screenshot that never came.
+#
+# `import` does not fail on a window that has gone. It waits, and the
+# budget is the only thing that ends the wait: measured, twelve calls
+# of twelve waited until they were cut off, while a live window under
+# three times as much load as the machine has cores answered in 0.85s
+# at worst. So the question a timed out screenshot has to answer is
+# whether the window is still there. Lillecarl/pymux#462.
+
+
+class _NothingAnswers:
+    "A `subprocess.run` where `import` hangs and xdotool answers."
+
+    def __init__(self, window_is_there):
+        self.window_is_there = window_is_there
+
+    def __call__(self, argv, **_rest):
+        if argv[0] == "import":
+            raise subprocess.TimeoutExpired(argv, PICTURE_TIMEOUT)
+        assert argv[0] == "xdotool", argv
+        return subprocess.CompletedProcess(
+            argv, 0 if self.window_is_there else 1, b"", b""
+        )
+
+
+def _a_seat_on_a_display_that_serves(tmp_path):
+    "An X seat whose server is up and answering, and that server."
+    seat = XSeat()
+    seat._process = _Running()
+    seat._log = tmp_path / "xvfb.log"
+    seat.number, door = a_server_that_answers(SERVED)
+    return seat, door
+
+
+def test_a_picture_that_never_came_says_the_window_has_gone(monkeypatch, tmp_path):
+    """
+    The bare `TimeoutExpired` named the file it was writing and nothing
+    else, so two runs a week apart looked like two slow machines rather
+    than one fixture ending inside its own burst.
+    """
+    seat, door = _a_seat_on_a_display_that_serves(tmp_path)
+    monkeypatch.setattr(the_seats.subprocess, "run", _NothingAnswers(False))
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            seat._take(seat.number, "4194316", tmp_path / "bare.7.png")
+    finally:
+        door.close()
+
+    said = str(raised.value)
+    assert "4194316" in said
+    assert "has gone" in said
+
+
+def test_a_picture_that_never_came_says_so_when_the_window_stayed(
+    monkeypatch, tmp_path
+):
+    "A window that is still there is a different fault, and says so."
+    seat, door = _a_seat_on_a_display_that_serves(tmp_path)
+    monkeypatch.setattr(the_seats.subprocess, "run", _NothingAnswers(True))
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            seat._take(seat.number, "4194316", tmp_path / "bare.7.png")
+    finally:
+        door.close()
+
+    assert "is still there" in str(raised.value)
+
+
+def test_a_picture_that_never_came_is_a_runtime_error(monkeypatch, tmp_path):
+    """
+    Every driver wraps a picture in `except RuntimeError` to put the
+    logs of the room beside the reason. `TimeoutExpired` is not one, so
+    the reason came out bare. Lillecarl/pymux#462.
+    """
+    seat, door = _a_seat_on_a_display_that_serves(tmp_path)
+    monkeypatch.setattr(the_seats.subprocess, "run", _NothingAnswers(False))
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            seat._take(seat.number, "4194316", tmp_path / "bare.7.png")
+    finally:
+        door.close()
+
+    assert not isinstance(raised.value, subprocess.TimeoutExpired)
+
+
+def test_a_picture_that_never_came_asks_the_display_first(monkeypatch, tmp_path):
+    """
+    A display that went away takes every picture after it, and that is
+    not a verdict on any of them. Lillecarl/pymux#216.
+    """
+    seat = XSeat()
+    seat._process = _Running()
+    seat._log = tmp_path / "xvfb.log"
+    seat.number = ":%d" % _a_display_nobody_serves()
+    monkeypatch.setattr(the_seats.subprocess, "run", _NothingAnswers(True))
+
+    with pytest.raises(TheSeatIsGone):
+        seat._take(seat.number, "4194316", tmp_path / "bare.7.png")
+
+
+# ----------------------------------------------------------------------
+# The wayland seat's own screenshot.
+#
+# `grim` takes the whole output, so there is no window to ask about --
+# the question is whether the compositor is still there to take it
+# from. Lillecarl/pymux#477.
+
+
+class _AGrimThatHangs:
+    "A `subprocess.run` where grim never answers."
+
+    def __call__(self, argv, **_rest):
+        assert argv[0] == "grim", argv
+        raise subprocess.TimeoutExpired(argv, PICTURE_TIMEOUT)
+
+
+def test_a_picture_of_an_output_that_never_came_is_a_runtime_error(
+    monkeypatch, tmp_path
+):
+    seat = WaylandSeat()
+    seat._compositor = _Running()
+    monkeypatch.setattr(the_seats.subprocess, "run", _AGrimThatHangs())
+
+    with pytest.raises(RuntimeError) as raised:
+        seat._take(tmp_path, "wayland-1", tmp_path / "bare.png")
+
+    said = str(raised.value)
+    assert "is still running" in said
+    assert "has gone from the room" in said
+
+
+def test_a_compositor_that_ended_is_a_seat_that_is_gone(monkeypatch, tmp_path):
+    "Every picture after it fails the same way, so it is not a verdict."
+    seat = WaylandSeat()
+    seat._compositor = _Ended()
+    monkeypatch.setattr(the_seats.subprocess, "run", _AGrimThatHangs())
+
+    with pytest.raises(TheSeatIsGone) as raised:
+        seat._take(tmp_path, "wayland-1", tmp_path / "bare.png")
+    assert "ended with 1" in str(raised.value)
+
+
+def test_a_seat_between_pictures_has_no_compositor_to_complain_about():
+    "One compositor serves one picture, so between them there is none."
+    assert WaylandSeat().trouble() == ""
+
+
+def test_one_seat_is_opened_for_the_terminals_that_share_it(monkeypatch):
+    started = []
+
+    class Counting(Seat):
+        def start(self, work):
+            started.append(work)
+            return self
+
+    monkeypatch.setitem(SEATS, "x", Counting)
+    seats = open_the_seats([Terminal("x"), Terminal("x")], work="here")
+    assert list(seats) == ["x"]
+    assert started == ["here"]
