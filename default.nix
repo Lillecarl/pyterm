@@ -534,6 +534,10 @@ in
 rec {
   inherit pkgs sources aimock;
 
+  # Writes each source's flake.lock from this one, and checks them before an
+  # export. Lillecarl/pymux#670.
+  lock-subtrees = pkgs.callPackage ./pkgs/lock-subtrees { };
+
 
   # The collection's package scopes, one per interpreter: the same
   # seven sources and the same venvs, built on each python the
