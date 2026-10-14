@@ -1,6 +1,7 @@
 {
   fetchFromGitHub,
   fetchPypi,
+  lib,
   rustPlatform,
 }:
 
@@ -299,6 +300,41 @@ pyFinal: pyPrev: {
     };
   });
 
+  # Bumped: the snapshot's 1.3.7 segfaults its `test_clear_segfault`
+  # on 3.15 (cleared environ); 1.3.8 is the latest release.
+  setproctitle = pyPrev.setproctitle.overridePythonAttrs (_old: rec {
+    version = "1.3.8";
+    src = fetchPypi {
+      pname = "setproctitle";
+      inherit version;
+      hash = "sha256-yv4gnQZKbvuIy0WgPpeYH/iDKAKytdAJ3eAZejt7Qcg=";
+    };
+  });
+
+  # Bumped: the snapshot's 0.2.3 cannot evaluate several attribute
+  # forms on 3.15 (`CannotEval`); 0.2.4 is the latest release.
+  pure-eval = pyPrev.pure-eval.overridePythonAttrs (_old: rec {
+    version = "0.2.4";
+    src = fetchPypi {
+      pname = "pure_eval";
+      inherit version;
+      hash = "sha256-JgwndGhuZRt5+Ljn/J2As1mepqZjNLR9X0q7afwsDqE=";
+    };
+  });
+
+  # Already the latest release (0.8.7): four params of the
+  # error-matching test assert 3.14 wording and behavior that
+  # 3.15 changed (new messages, new syntax accepted). The list
+  # channels all word-split on spaces, so a parametrized id --
+  # brackets and spaces both -- cannot be addressed; nor can
+  # `-k`. The whole function goes instead. The grammar the
+  # collection drives is untouched.
+  parso = pyPrev.parso.overridePythonAttrs (old: {
+    disabledTests = (old.disabledTests or [ ]) ++ [
+      "test_python_exception_matches"
+    ];
+  });
+
   typing-inspection = pyPrev.typing-inspection.overridePythonAttrs (_old: rec {
     version = "0.4.4";
     src = fetchPypi {
@@ -306,5 +342,95 @@ pyFinal: pyPrev: {
       inherit version;
       hash = "sha256-VHJ0+msKVhzPVJzJUkuZmleOc30BXYcJ0CH50NE76kc=";
     };
+  });
+
+  # No bump helps (stock 1.5.26, latest 1.5.29 curses the same
+  # way -- checked the sdist): the whole suite errors at fixture
+  # setup on 3.15, because forbiddenfruit 0.1.4 cannot patch
+  # `posix.ScandirIterator.__next__`, which 3.15 made immutable,
+  # and blockbuster curses exactly that to guard filesystem
+  # access. It is a test-only guard -- nothing the collection
+  # ships imports it at runtime -- so the suite is skipped whole
+  # rather than test by test.
+  blockbuster = pyPrev.blockbuster.overridePythonAttrs (_old: {
+    doCheck = false;
+  });
+
+  # Already the latest release (1.0.0): one compliance test
+  # aborts (SIGABRT) on 3.15 -- copying a compress object trips
+  # over the changed C struct, a genuine binding incompatibility
+  # rather than an expectation. Nothing the collection ships
+  # compresses through it, so only that test is skipped.
+  # Already the latest release (1.0.0): one compliance test
+  # aborts (SIGABRT) on 3.15 -- copying a compress object trips
+  # over the changed C struct, a genuine binding incompatibility
+  # rather than an expectation. Nothing the collection ships
+  # compresses through it, so only that test is skipped.
+  zlib-ng = pyPrev.zlib-ng.overridePythonAttrs (old: {
+    disabledTests = (old.disabledTests or [ ]) ++ [
+      "test_badcompresscopy"
+    ];
+  });
+
+  # Bumped: the snapshot's 4.5.2 imports `no_type_check_decorator`
+  # from `typing` and passes two arguments to
+  # `cache_from_source`, both gone on 3.15; 4.6.0 is the latest
+  # release.
+  # Bumped: the snapshot's 4.5.2 imports `no_type_check_decorator`
+  # from `typing` and passes two arguments to
+  # `cache_from_source`, both gone on 3.15; 4.6.0 is the latest
+  # release.
+  typeguard = pyPrev.typeguard.overridePythonAttrs (_old: rec {
+    version = "4.6.0";
+    src = fetchPypi {
+      pname = "typeguard";
+      inherit version;
+      hash = "sha256-50FPCRETF94+M13pLNOXxcDKALHMFnbeEuHURKebPyE=";
+    };
+  });
+
+  # Bumped: the snapshot's 0.20.0 fails five environment tests
+  # on 3.15; 0.20.1 is the latest release. The five still fail
+  # there -- discovery finds no system environments on 3.15 and
+  # rejects the venvs it creates as unsafe, where 3.14 passes in
+  # the same sandbox -- and nothing the collection ships drives
+  # environment discovery, so only those tests are skipped.
+  jedi = pyPrev.jedi.overridePythonAttrs (old: rec {
+    version = "0.20.1";
+    src = fetchPypi {
+      pname = "jedi";
+      inherit version;
+      hash = "sha256-L3EgjD+cG8oFfA6Q0/Jyq6RKzoj8QGfXWH6eBpMxt+U=";
+    };
+    disabledTests = (old.disabledTests or [ ]) ++ [
+      "test_find_system_environments"
+      "test_scanning_venvs"
+      "test_create_environment_venv_path"
+      "test_create_environment_executable"
+      "test_venv_and_pths"
+    ];
+  });
+
+  # Bumped: the snapshot's 9.14.0 times out four debugger tests
+  # on 3.15 (pexpect); 9.17.1 is the latest release.
+  ipython = pyPrev.ipython.overridePythonAttrs (_old: rec {
+    version = "9.17.1";
+    src = fetchPypi {
+      pname = "ipython";
+      inherit version;
+      hash = "sha256-iRm+jCfyCm9EIxRQKAY/Zje0KgPOV2ZbsSAV7h8HNSk=";
+    };
+  });
+
+  # No bump helps: the suite guards async code with blockbuster,
+  # whose patcher (forbiddenfruit 0.1.4) cannot instrument 3.15's
+  # immutable types and errors every test at setup. Upstream's own
+  # escape hatch is absence -- without the import the guard stays
+  # off ("For downstreams only"). Dropping it from the check
+  # inputs takes that route; nothing at runtime changes.
+  aiohttp = pyPrev.aiohttp.overridePythonAttrs (old: {
+    nativeCheckInputs = lib.filter (dep: (dep.pname or dep.name or "") != "blockbuster") (
+      old.nativeCheckInputs or [ ]
+    );
   });
 }
