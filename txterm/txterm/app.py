@@ -70,7 +70,6 @@ class TerminalApp(App):
 def main() -> None:
     "Run one program in one terminal. `txterm <command>`."
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(prog="txterm", description="Run one program in one terminal.")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="The program to run.")
