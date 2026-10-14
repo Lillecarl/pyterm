@@ -273,10 +273,9 @@ in
     Lillecarl/pymux#320.
 
     `packages` is for a project whose backend is not hatchling and so has no
-    `[tool.hatch.build.targets.wheel]` to read: pyte is flit and
-    prompt-toolkit is setuptools with a `src` layout. Naming it is better
-    than guessing from the project name, which would be right for one of
-    them and wrong for the other.
+    `[tool.hatch.build.targets.wheel]` to read: prompt-toolkit is
+    setuptools with a `src` layout. Naming it is better than guessing from
+    the project name.
 
     Type: mkProject :: AttrSet -> (AttrSet -> derivation)
   */
