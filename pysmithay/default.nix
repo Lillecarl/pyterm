@@ -25,4 +25,5 @@ in
   inherit (pyterm) pysmithay shell;
   default = pyterm.pysmithay;
   checks = pyterm.pysmithay.checks;
+  pages = pyterm.pages.pysmithay;
 }

@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       # The sources are in the tree, and flake.lock pins nixpkgs and
       # prompt-toolkit, so the runner needs no channel.
@@ -27,9 +27,11 @@ jobs:
         timeout-minutes: 10
       - uses: cachix/install-nix-action@master
         timeout-minutes: 15
-      - name: Build the galleries and the page around them
-        run: nix build --file . site -o site --print-build-logs
-        timeout-minutes: 110
+      # Every source's docs, and not the galleries: pymux's repository
+      # builds those. Lillecarl/pymux#671.
+      - name: Build the site
+        run: nix build --file . pages.pyterm -o site --print-build-logs
+        timeout-minutes: 50
       - uses: actions/configure-pages@v5
         with:
           # The repo has no Pages set by hand; the run asks for it, so

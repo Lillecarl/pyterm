@@ -516,6 +516,16 @@ let
         inherit (set.txterm) meta;
       };
 
+      # A source's package with every extra it declares, `docs` among
+      # them, which its site is built in: autodoc imports what it
+      # documents, optional modules too.
+      docsEnv =
+        name:
+        set.mkVirtualEnv "${name}-docs" {
+          ${name} = lib.attrNames
+            (lib.importTOML (sources.${name} + "/pyproject.toml")).project.optional-dependencies;
+        };
+
       # The python of the dev shell: the same virtualenv the suites run
       # on, so what works by hand and what works in the sandbox are the
       # same thing.
@@ -675,13 +685,112 @@ rec {
     };
   };
 
-  # The site: the galleries of everything pymux draws, laid out for a
-  # person to read in a browser. The picture checks are galleries
-  # already -- runs whose output is a tree of pictures beside their
-  # logs -- and this is the page around them: one section per check.
-  # The GitHub Action deploys it, so the pictures are read without a
-  # checkout of the collection.
-  site = pkgs.callPackage ./nix/site.nix {
+  # Each source's docs site, and pyterm's own, which is the README with
+  # a link to each source's. Lillecarl/pymux#671.
+  docs =
+    let
+      build = pkgs.callPackage ./nix/docs { };
+      textOf =
+        src:
+        lib.fileset.toSource {
+          root = src;
+          fileset = lib.fileset.unions (
+            builtins.filter builtins.pathExists [
+              (src + "/README.rst")
+              (src + "/README.md")
+              (src + "/CHANGES")
+              (src + "/docs")
+            ]
+          );
+        };
+      source =
+        name: modules:
+        build {
+          inherit name modules;
+          src = textOf sources.${name};
+          python = default.docsEnv name;
+          links = lib.optional (name == "pymux") picturesLink;
+        };
+      picturesLink = {
+        title = "The pictures";
+        url = "https://lillecarl.github.io/pymux/pictures/";
+      };
+    in
+    {
+      # pyte's own `docs/` names what its API reference holds.
+      pyte = source "pyte" [ ];
+      ptyhost = source "ptyhost" [ "ptyhost" ];
+      ptterm = source "ptterm" [ "ptterm" ];
+      txterm = source "txterm" [ "txterm" ];
+      pymux = source "pymux" [ "pymux" ];
+      pysmithay = source "pysmithay" [ "pysmithay" ];
+      pyterm-pytest = source "pyterm-pytest" [ "pyterm_pytest" ];
+      pyterm = build {
+        name = "pyterm";
+        src = textOf ./.;
+        python = pkgs.python3.withPackages (p: [
+          p.sphinx
+          p.myst-parser
+          p.furo
+        ]);
+        links =
+          map (name: {
+            title = name;
+            url = "https://lillecarl.github.io/pyterm/${name}/";
+          }) sourceNames
+          ++ [ picturesLink ];
+      };
+    };
+
+  # What a repository's Pages workflow deploys. A source's is its docs;
+  # pymux's has the galleries under `pictures/` as well. pyterm's is its
+  # own docs with each source's under `<name>/`, and never the
+  # galleries: they take half an hour, so only pymux's repository builds
+  # them.
+  pages =
+    lib.genAttrs sourceNames (name: docs.${name})
+    // {
+      pymux = pkgs.symlinkJoin {
+        name = "pymux-pages";
+        paths = [
+          docs.pymux
+          (pkgs.linkFarm "pymux-pictures" [
+            {
+              name = "pictures";
+              path = pictures;
+            }
+          ])
+        ];
+      };
+      pyterm = pkgs.symlinkJoin {
+        name = "pyterm-pages";
+        paths = [
+          docs.pyterm
+          (pkgs.linkFarm "pyterm-sources" (
+            map (name: {
+              inherit name;
+              path = docs.${name};
+            }) sourceNames
+          ))
+        ];
+      };
+    };
+
+  sourceNames = [
+    "pyte"
+    "ptyhost"
+    "ptterm"
+    "txterm"
+    "pymux"
+    "pysmithay"
+    "pyterm-pytest"
+  ];
+
+  # The galleries of everything pymux draws, laid out for a person to
+  # read in a browser. The picture checks are galleries already -- runs
+  # whose output is a tree of pictures beside their logs -- and this is
+  # the page around them: one section per check.
+  pictures = pkgs.callPackage ./nix/pictures.nix {
     sections = [
       {
         name = "panes";

@@ -25,4 +25,5 @@ in
   inherit (pyterm) txterm shell;
   default = pyterm.txterm;
   checks = pyterm.txterm.checks;
+  pages = pyterm.pages.txterm;
 }

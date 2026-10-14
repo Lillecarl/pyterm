@@ -30,6 +30,11 @@ source always had. Commit here and only here: a push straight to a source's
 repository is not brought back, and the next export refuses to overwrite
 it. Lillecarl/pymux#667.
 
+A source's repository runs one workflow, `<source>/.github/workflows/pages.yml`,
+which deploys its docs site (`pages`). pymux's site holds the galleries,
+which take half an hour, and pyterm's site never builds them. Tests run only
+here. Lillecarl/pymux#671.
+
 **prompt-toolkit is the exception.** It is not in this repository, because
 every patch there has to be one upstream could take. `flake.lock` pins it,
 and a checkout at `./prompt-toolkit`, which git ignores, takes the place of

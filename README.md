@@ -1138,6 +1138,25 @@ refuses a lock that names a commit with anything but locks changed since,
 and `--verify` requires that each exported tree builds the derivation pyterm
 builds for it here.
 
+### The docs sites
+
+Each repository publishes a docs site on GitHub Pages:
+`lillecarl.github.io/<source>/`. `nix build --file . pages.<source>` builds
+it here. It is the source's README, its `docs/`, and an API reference, made
+with Sphinx by `nix/docs`. pyte keeps its own `docs/index.rst`.
+Lillecarl/pymux#671.
+
+The galleries of every picture check, `pictures`, take half an hour, so only
+pymux's site holds them, under `pictures/`. A source's
+`<source>/.github/workflows/pages.yml` goes out with the export, so each
+source's own repository builds and deploys its site. That is the one
+workflow a source's repository runs. The tests run here.
+
+pyterm's site, `pages.pyterm`, is this README with each source's docs under
+`<source>/`. It links to pymux's galleries and never builds them.
+
+### Running the export by hand
+
 Both run by hand, from a checkout with the whole history:
 
     nix run --file . lock-subtrees                    # lock to HEAD, and commit

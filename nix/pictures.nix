@@ -1,4 +1,4 @@
-# The site: the galleries of everything pymux draws, laid out for a
+# The galleries of everything pymux draws, laid out for a
 # person to read in a browser.
 #
 # The picture checks are galleries already -- runs whose output is a
@@ -25,6 +25,6 @@ stdenvNoCC.mkDerivation {
 
   buildCommand = ''
     mkdir -p "$out"
-    python3 ${./site.py} "$out"
+    python3 ${./pictures.py} "$out"
   '';
 }

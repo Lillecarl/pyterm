@@ -145,9 +145,16 @@ stdenv.mkDerivation {
 
   passthru = {
     dependencies = { };
-    optional-dependencies.test = {
-      pytest = [ ];
-      pywayland = [ ];
+    optional-dependencies = {
+      docs = {
+        sphinx = [ ];
+        myst-parser = [ ];
+        furo = [ ];
+      };
+      test = {
+        pytest = [ ];
+        pywayland = [ ];
+      };
     };
     inherit checks;
   };

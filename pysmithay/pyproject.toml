@@ -11,6 +11,9 @@ license = "MIT"
 dependencies = []
 
 [project.optional-dependencies]
+# What the docs site builds with: Sphinx, MyST for the markdown, and
+# the theme. pyterm's `nix/docs/` reads it.
+docs = ["sphinx", "myst-parser", "furo"]
 test = ["pytest", "pywayland"]
 
 [tool.maturin]
