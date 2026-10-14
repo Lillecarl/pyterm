@@ -1,0 +1,258 @@
+"""
+The three ways a program saves the cursor, and brings it back.
+
+DECSC ("ESC 7") and DECRC ("ESC 8") are the pair of the DEC terminals.
+SCOSC ("CSI s") and SCORC ("CSI u") are the pair of the SCO console.
+Private mode 1048 is the same pair written as a mode: a set saves and a
+reset restores.
+
+All three save the same thing, and all three read the same savepoint.
+A save through one and a restore through another works, which is what
+xterm does.
+
+"CSI s" carries two meanings. While private mode 69 is set it is
+DECSLRM and names the columns of the scrolling region. `left_right`
+covers that side; this file covers the other one.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from pyte import escape
+from pyte.colors import SgrColor
+from pyte.modes import PrivateMode
+from pyte.screen import Screen
+from pyte.sequences import Csi, csi, esc, reset_mode, set_mode
+from pyte.streams import Stream
+
+#: The three ways to save, and to bring back what was saved.
+PAIRS = [
+    (esc(escape.DECSC), esc(escape.DECRC)),
+    (csi(Csi.DECSLRM), csi(Csi.KITTY_KEYBOARD)),
+    (set_mode(PrivateMode.SAVE_CURSOR), reset_mode(PrivateMode.SAVE_CURSOR)),
+]
+
+
+def _screen(lines=6, columns=20):
+    screen = Screen(lines, columns, write_process_input=lambda data: None)
+    stream = Stream(screen)
+    return screen, stream
+
+
+def _position(screen):
+    return screen.pt_cursor_position.x, screen.pt_cursor_position.y
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_restore_brings_the_place_back(save, restore):
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 3, 5) + save + csi(escape.CUP, 1, 1) + restore)
+    assert _position(screen) == (4, 2)
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_restore_brings_the_rendition_back(save, restore):
+    screen, stream = _screen()
+    stream.feed(csi(escape.SGR, 31) + save + csi(escape.SGR, 0) + restore + "x")
+    cell = screen.page.data_buffer[0][0]
+    assert cell.appearance.rendition.color == SgrColor(index=1)
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_restore_brings_the_mark_of_decsca_back(save, restore):
+    screen, stream = _screen()
+    stream.feed(csi(Csi.DECSCA, 1) + save + csi(Csi.DECSCA, 0) + restore)
+    stream.feed("a" + csi(Csi.DECSERA, 1, 1, 1, 1))
+    assert screen.page.data_buffer[0][0].char == "a"
+
+
+def test_one_pair_saves_and_another_pair_restores():
+    "A terminal holds one savepoint, not three."
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 4, 7) + esc(escape.DECSC) + csi(escape.CUP, 1, 1) + csi(Csi.KITTY_KEYBOARD))
+    assert _position(screen) == (6, 3)
+
+
+def test_a_second_restore_gives_the_same_answer():
+    screen, stream = _screen()
+    stream.feed(
+        csi(escape.CUP, 3, 5)
+        + csi(Csi.DECSLRM)
+        + csi(escape.CUP, 1, 1)
+        + csi(Csi.KITTY_KEYBOARD)
+        + csi(escape.CUP, 1, 1)
+        + csi(Csi.KITTY_KEYBOARD)
+    )
+    assert _position(screen) == (4, 2)
+
+
+def test_the_columns_of_a_region_win_while_the_mode_is_set():
+    """
+    "CSI s" is DECSLRM while private mode 69 is set, and SCOSC without
+    it. The mode decides, and nothing else can.
+    """
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 3, 5) + set_mode(PrivateMode.LEFT_RIGHT_MARGIN) + csi(Csi.DECSLRM, 2, 9))
+    assert screen.horizontal_margins == (1, 8)
+    # DECSLRM homes the cursor, and saved nothing on the way.
+    assert _position(screen) == (0, 0)
+
+
+def test_a_plain_csi_u_is_not_the_keyboard_protocol():
+    """
+    The kitty keyboard protocol writes "CSI > u", "CSI < u", "CSI = u"
+    and "CSI ? u". A plain "CSI u" carries no marker, so it is SCORC.
+    """
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 2, 3) + csi(Csi.DECSLRM) + csi(escape.CUP, 5, 5) + csi(Csi.KITTY_KEYBOARD))
+    assert _position(screen) == (2, 1)
+    assert screen.kitty_keyboard_flags == 0
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_restore_takes_origin_mode_off_again(save, restore):
+    """
+    Origin mode comes back the way it was saved, both ways.
+
+    A save with the mode off has to take the mode off again. Only
+    setting it back leaves a mode on that the program turned off.
+    """
+    screen, stream = _screen()
+    stream.feed(save + (csi(escape.DECSTBM, 2, 5) + set_mode(PrivateMode.ORIGIN)) + restore)
+    stream.feed(csi(escape.CUP, 1, 1) + "X")
+    assert screen.data_buffer[0][0].char == "X"
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_restore_leaves_the_wrap_alone(save, restore):
+    """
+    DECAWM is not part of the saved cursor.
+
+    xterm does not bring the wrap back on a restore, and its own suite
+    asks for that. A save with the wrap on, a reset and a restore
+    leaves the wrap off.
+    """
+    screen, stream = _screen(lines=4, columns=8)
+    stream.feed(set_mode(PrivateMode.AUTOWRAP) + save + reset_mode(PrivateMode.AUTOWRAP) + restore)
+    stream.feed(csi(escape.CUP, 1, 7) + "abcd")
+    assert screen.pt_cursor_position.y == 0
+
+
+#: The two older alternate screens. Neither saves the cursor; "?1049"
+#: does, and the live cursor is tested on its own.
+OLDER_ALTERNATE_MODES = ["47", "1047"]
+
+
+@pytest.mark.parametrize("mode", OLDER_ALTERNATE_MODES)
+def test_the_older_alternate_modes_leave_the_cursor_alone(mode):
+    """
+    Taking the alternate screen with "?47" or "?1047" does not move
+    the cursor.
+
+    xterm leaves it, and so do WezTerm, Alacritty, libvterm, Ghostty
+    and xterm.js. Only kitty puts it home, which
+    `tests/test_known_deviations.py` records.
+    """
+    screen, stream = _screen(lines=4, columns=8)
+    stream.feed("\x1b[2;3H\x1b[?%sh" % mode)
+    assert (screen.pt_cursor_position.y, screen.pt_cursor_position.x) == (1, 2)
+
+
+@pytest.mark.parametrize("mode", OLDER_ALTERNATE_MODES)
+def test_the_cursor_stays_on_a_second_visit(mode):
+    "A screen that comes back a second time does not move the cursor either."
+    screen, stream = _screen(lines=4, columns=8)
+    stream.feed("\x1b[?%sh\x1b[?%sl\x1b[2;3H\x1b[?%sh" % (mode, mode, mode))
+    assert (screen.pt_cursor_position.y, screen.pt_cursor_position.x) == (1, 2)
+
+
+def test_the_mode_that_saves_the_cursor_leaves_it_where_it_stands():
+    """
+    "?1049" saves the cursor and leaves the live one alone.
+
+    It used to send it home, on the argument that a program using the
+    pair never has to know where it stood in between. Alacritty,
+    Ghostty, libvterm and xterm.js leave it, and xterm describes the
+    mode as a save, a switch and a clear with no move.
+    Lillecarl/pymux#34.
+    """
+    screen, stream = _screen(lines=4, columns=8)
+    stream.feed(csi(escape.CUP, 2, 3) + set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR))
+    assert (screen.pt_cursor_position.y, screen.pt_cursor_position.x) == (1, 2)
+
+    # Moving on the alternate screen does not touch the save.
+    stream.feed(csi(escape.CUP, 1, 1))
+    stream.feed(reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR))
+    assert (screen.pt_cursor_position.y, screen.pt_cursor_position.x) == (1, 2)
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_reset_forgets_the_saved_cursor(save, restore):
+    """
+    RIS ("ESC c") is the power-up state, and a terminal that has just
+    been turned on remembers no cursor. So a restore after it goes
+    home.
+
+    Alacritty, Ghostty, kitty and xterm.js agree. libvterm and WezTerm
+    keep the save, and they keep it through DECSTR as well, so neither
+    of them draws the line where pyte drew it: DECSTR emptied the
+    list and RIS did not, which is the wrong way round.
+    """
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 3, 5) + save + esc(escape.RIS) + restore)
+    assert _position(screen) == (0, 0)
+
+
+@pytest.mark.parametrize(("save", "restore"), PAIRS)
+def test_a_soft_reset_forgets_it_too(save, restore):
+    "DECSTR is the weaker reset, and it has always emptied the list."
+    screen, stream = _screen()
+    stream.feed(csi(escape.CUP, 3, 5) + save + csi(Csi.DECSTR) + restore)
+    assert _position(screen) == (0, 0)
+
+
+def test_the_alternate_screen_keeps_what_it_saved():
+    """
+    A save made on the alternate screen is still there the next time a
+    program takes that screen.
+
+    "?1049h" clears the content and leaves the saved cursor alone.
+    xterm keeps one saved cursor per screen for the life of the
+    terminal, and the whole panel gives this one back: kitty, WezTerm,
+    Alacritty, libvterm, Ghostty and xterm.js all put the cursor at
+    row 3, column 5. pyte sent it home.
+    """
+    screen, stream = _screen(lines=6, columns=10)
+    stream.feed(
+        set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + csi(escape.CUP, 3, 5)
+        + esc(escape.DECSC)
+        + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + esc(escape.DECRC)
+    )
+    assert _position(screen) == (4, 2)
+
+
+def test_the_alternate_screen_saves_its_charsets_as_well():
+    "The character sets come back with it, the same way ESC 8 brings them."
+    screen, stream = _screen(lines=6, columns=10)
+    stream.feed("\x1b(0\x1b[?1049h\x1b7\x1b[?1049l\x1b(B\x1b[?1049h\x1b8xyz")
+    row = screen.page.data_buffer[0]
+    assert "".join(row[column].char for column in range(3)) == "│≤≥"
+
+
+def test_a_save_on_the_alternate_screen_leaves_the_first_one_alone():
+    "The two screens hold two savepoints, so neither one reads the other."
+    screen, stream = _screen(lines=6, columns=10)
+    stream.feed(
+        csi(escape.CUP, 2, 2)
+        + esc(escape.DECSC)
+        + set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + csi(escape.CUP, 4, 7)
+        + esc(escape.DECSC)
+        + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR)
+        + esc(escape.DECRC)
+    )
+    assert _position(screen) == (1, 1)

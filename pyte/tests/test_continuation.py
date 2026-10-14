@@ -1,0 +1,302 @@
+"""
+The mark that says a line continues the one above it.
+
+A line that a wrap started is a continuation. The mark decides what a
+resize joins back together, so a mark that is wrong is a screen that is
+wrong from the next resize onwards.
+
+An erase that clears the end of a line ends the wrap out of it: nothing
+wrapped away any more, so the line below is a line of its own.
+
+libvterm's `32state_flow.test` is the only thing that asks. No judge on
+the panel reports the mark, and it is visible from the outside only
+through a resize. Lillecarl/pymux#58.
+"""
+
+from __future__ import annotations
+
+from pyte import escape
+from pyte.modes import PrivateMode
+from pyte.screen import Screen
+from pyte.sequences import Csi, csi, reset_mode, set_mode
+from pyte.streams import Stream
+
+COLUMNS = 8
+
+
+def _screen(data, lines=4, columns=COLUMNS):
+    screen = Screen(lines, columns, write_process_input=lambda answer: None)
+    Stream(screen).feed(data)
+    return screen
+
+
+def _continues(screen, row: int) -> bool:
+    "Whether this row of the screen continues the one above it."
+    return screen.is_wrapped(screen.line_offset + row)
+
+
+def _any_row_is_wrapped(screen) -> bool:
+    "Whether any row of the buffer carries the mark."
+    return any(line.wrapped for line in screen.page.data_buffer.values())
+
+
+def test_text_that_spills_over_marks_the_line_below():
+    assert _continues(_screen("a" * 12), 1)
+
+
+def test_a_line_feed_marks_nothing():
+    screen = _screen("a" * 8 + "\r\n" + "b" * 4)
+    assert not _continues(screen, 1)
+
+
+def test_erasing_to_the_end_of_the_line_ends_the_wrap():
+    "The text that wrapped away is gone, so nothing wrapped."
+    screen = _screen("a" * 12 + csi(escape.CUP, 1, 5) + csi(escape.EL))
+    assert not _continues(screen, 1)
+
+
+def test_erasing_the_whole_line_ends_the_wrap():
+    screen = _screen("a" * 12 + csi(escape.CUP, 1, 5) + csi(escape.EL, 2))
+    assert not _continues(screen, 1)
+
+
+def test_erasing_up_to_the_cursor_leaves_the_wrap():
+    "Text is still there to have wrapped, so the mark stands."
+    screen = _screen("a" * 12 + csi(escape.CUP, 1, 5) + csi(escape.EL, 1))
+    assert _continues(screen, 1)
+
+
+def test_an_erase_on_another_line_leaves_the_wrap():
+    screen = _screen("a" * 12 + csi(escape.CUP, 2, 3) + csi(escape.EL))
+    assert _continues(screen, 1)
+
+
+#: `"a" * 20` at eight columns fills rows 0 and 1 and puts four
+#: characters on row 2, so rows 1 and 2 both carry the mark.
+
+
+def test_erasing_the_display_to_the_end_ends_every_wrap():
+    "ED 0 from the top empties every row, so no row continues one."
+    screen = _screen("a" * 20 + csi(escape.CUP, 1, 1) + csi(escape.ED))
+    assert not _any_row_is_wrapped(screen)
+
+
+def test_erasing_the_whole_display_ends_every_wrap():
+    screen = _screen("a" * 20 + csi(escape.ED, 2))
+    assert not _any_row_is_wrapped(screen)
+
+
+def test_erasing_the_display_up_to_the_cursor_ends_the_wrap_under_it():
+    """
+    ED 1 empties the rows above the cursor, so the row the cursor
+    stands on continues nothing.
+
+    Nothing else says it. The range of whole rows stops above the
+    cursor, and the erase of the cursor's own row runs to the cursor
+    and not to the last column, which is the only thing `EL` reads.
+    libvterm answers `?lineinfo` with no mark here.
+    Lillecarl/pymux#142.
+    """
+    screen = _screen("a" * 20 + csi(escape.CUP, 3, 3) + csi(escape.ED, 1))
+    assert not _continues(screen, 2)
+
+
+def test_erasing_the_display_up_to_a_cursor_on_the_first_row_keeps_the_wrap():
+    """
+    ED 1 with the cursor on the first row empties no whole row.
+
+    It erases the first row up to the cursor, which leaves the last
+    column of it, so text is still there to have wrapped and the row
+    below still continues it.
+    """
+    screen = _screen("a" * 20 + csi(escape.CUP, 1, 3) + csi(escape.ED, 1))
+    assert _continues(screen, 1)
+
+
+def test_a_rectangle_erase_leaves_the_marks():
+    """
+    DECERA empties the rows and leaves every mark where it was.
+
+    xterm does the same: `ScrnFillRectangle` holds no `LineClrWrapped`,
+    while `ClearRight` and `ClearBufRows` both hold one. libvterm has
+    no opinion, because it has no case for the sequence. So a rectangle
+    can leave a row that holds nothing and still says it continues the
+    row above. Lillecarl/pymux#142.
+    """
+    screen = _screen("a" * 20 + csi(Csi.DECERA, 0, 0, 0, 0))
+    assert _continues(screen, 1)
+    assert _continues(screen, 2)
+
+
+# ----------------------------------------------------------------------
+# A move that brings blank rows in. Lillecarl/pymux#179.
+
+
+def test_a_scroll_down_ends_the_wrap_under_the_blank_row():
+    """
+    SD puts a blank row at the top of the region and pushes the rows
+    down. The row that lands under the blank one continued a line the
+    scroll has taken away, so it continues nothing now.
+
+    The region starts in the middle of the line, which is what makes
+    the mark stale. A region that takes the whole line moves the row
+    that starts it as well, and that row carries no mark to begin
+    with.
+
+    Without this the buffer said two things at once. `Page.unwrap`
+    reads the mark, so it joined the blank row and the rows under it
+    into one line, while `_first_row_to_lay_out` reads a row the buffer
+    does not hold as a line of its own. A resize answered with the
+    second reading, and a blank line appeared out of nothing.
+    Lillecarl/pymux#179.
+    """
+    screen = _screen("a" * 32 + csi(escape.DECSTBM, 2, 4) + csi(Csi.SD))
+
+    assert _continues(screen, 1) is False
+    assert not _continues(screen, 2)
+    assert _continues(screen, 3)
+
+
+def test_a_scroll_up_ends_the_wrap_under_the_blank_row():
+    """
+    SU brings its blank rows in at the bottom of the region, so the
+    row under the region is the one that continued a line the scroll
+    took away.
+
+    The row at the top of the region loses its mark as well, and for
+    the other reason: the row it continued is one the scroll dropped.
+    Lillecarl/pymux#188 below says why that is not the same question.
+    """
+    screen = _screen("a" * 32 + csi(escape.DECSTBM, 2, 3) + (csi(escape.CUP, 3, 1) + csi(Csi.SU)))
+
+    assert not _continues(screen, 3)
+
+
+def test_a_region_at_the_top_ends_the_wrap_under_its_blank_row():
+    """
+    The same question for the region that slides the screen instead.
+
+    That path moves no row of the region and writes the blank one at
+    the bottom of it by hand, so it has to take the mark off the row
+    below by hand too. Lillecarl/pymux#423.
+    """
+    screen = _screen("a" * 32 + csi(escape.DECSTBM, 1, 3) + csi(escape.CUP, 3, 1) + csi(Csi.SU))
+
+    # The row the scroll blanked, and the fixed row under it.
+    assert not _continues(screen, 2)
+    assert not _continues(screen, 3)
+
+
+# ----------------------------------------------------------------------
+# A move that drops the row a line continued. Lillecarl/pymux#188.
+
+
+def test_a_scroll_up_inside_a_region_ends_the_wrap_on_its_top_row():
+    """
+    A region below the first row drops the rows that leave it, so the
+    row that lands at the top continues a row that is gone.
+
+    Four rows of "a" over eight columns, and the last three scrolled up
+    by one. Row one holds what row two held, and the row it continued
+    went with the scroll. Nothing is above it now.
+
+    **xterm keeps the mark here and that is right for xterm**, which
+    never lays a screen out again: `ScrnDeleteLine` moves the
+    `LineData` pointers and clears nothing. `Page.unwrap` does read the
+    mark, so keeping it joins two lines a program wrote apart. kitty,
+    WezTerm and Alacritty keep them apart, and the vote is recorded in
+    `ptterm/tests/test_a_scroll_and_the_wrap_mark.py`, which is where a
+    resize can see the mark at all.
+    """
+    screen = _screen("a" * 32 + csi(escape.DECSTBM, 2, 4) + csi(Csi.SU))
+
+    assert not _continues(screen, 1)
+    assert _continues(screen, 2)
+
+
+def test_a_scroll_up_that_keeps_the_history_keeps_the_mark():
+    """
+    A region that starts at the first row, or none at all, puts the row
+    that leaves into the history, where it is still there to continue.
+
+    So the row at the top of the screen keeps its mark. This is the
+    opposite answer to the one above, and it is the same rule: the mark
+    goes when the row it names goes. Lillecarl/pymux#423.
+    """
+    screen = _screen("a" * 32 + csi(Csi.SU))
+
+    assert _continues(screen, 0)
+    assert screen.is_wrapped(screen.line_offset - 1) is False
+    assert _continues(screen, 1)
+    assert _continues(screen, 2)
+
+
+def test_deleting_lines_ends_the_wrap_on_the_row_that_moves_up():
+    """
+    DL moves the rows under the cursor up and drops the ones it
+    deletes, so the row that lands on the cursor's own row continues
+    a row that has gone.
+    """
+    screen = _screen("a" * 32 + csi(escape.CUP, 2, 1) + csi(escape.DL))
+
+    assert not _continues(screen, 1)
+    assert _continues(screen, 2)
+
+
+def test_the_rows_under_it_keep_their_marks():
+    """
+    Only the row at the top of the region loses one.
+
+    The rows under it continue rows that are still there, so a line
+    that survives a scroll whole is still one line. Without this the
+    fix above would take a wrapped line apart every time it moved.
+    """
+    screen = _screen("a" * 32 + csi(escape.DECSTBM, 2, 4) + csi(Csi.SU))
+
+    assert [_continues(screen, row) for row in range(4)] == [
+        False,
+        False,
+        True,
+        False,
+    ]
+
+
+def test_inserting_a_line_ends_the_wrap_under_it():
+    "IL brings a blank row in the same way, at the cursor."
+    screen = _screen("a" * 20 + csi(escape.CUP, 2, 1) + csi(escape.IL))
+
+    assert not _continues(screen, 2)
+    assert _continues(screen, 3)
+
+
+def test_a_scroll_that_moves_a_whole_line_keeps_the_mark():
+    """
+    The rows of one line move together, so nothing about them
+    changed. Only the row that lands under a blank one loses its mark.
+    """
+    screen = _screen("a" * 20 + csi(Csi.SD))
+
+    assert not _continues(screen, 1)
+    assert _continues(screen, 2)
+    assert _continues(screen, 3)
+
+
+def test_the_alternate_screen_gives_the_mark_back():
+    """
+    A visit to the other screen leaves the first one as it was.
+
+    The marks belong to the lines of one screen, so they travel with
+    the buffer. Without that, the first screen comes back with no mark
+    on it, and the next resize joins two lines that nothing wrapped
+    between.
+    """
+    screen = _screen(
+        "a" * 12
+        + (set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR) + reset_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR))
+    )
+    assert _continues(screen, 1)
+
+
+def test_the_alternate_screen_starts_with_no_mark():
+    screen = _screen("a" * 12 + set_mode(PrivateMode.ALTERNATE_SCREEN_WITH_CURSOR))
+    assert not _any_row_is_wrapped(screen)

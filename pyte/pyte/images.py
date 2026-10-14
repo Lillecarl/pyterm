@@ -1,0 +1,856 @@
+"""
+Kitty graphics protocol state for a terminal pane.
+
+Implements the parts of the terminal side of the protocol that do not
+require a pixel renderer: parsing the control data of graphics
+commands, storing transmitted images and their placements, and
+reserving the cells that a placement covers. The actual pixel output
+is up to the application that renders the screen (for pymux: the
+multiplexer, which re-emits images to clients that support the
+protocol).
+
+Not implemented yet: animation (actions ``f``, ``a`` and ``c``),
+scrolling placements along with the text, the file- and shared-memory
+transmission media, and z-index handling beyond storing the value.
+"""
+
+from __future__ import annotations
+
+import base64
+import zlib
+from enum import IntEnum
+from typing import ClassVar
+
+from . import sixel as sixel_module
+from .keep import Keep
+
+__all__ = [
+    "ASSUMED_CELL_HEIGHT",
+    "ASSUMED_CELL_WIDTH",
+    "GraphicsError",
+    "GraphicsImage",
+    "GraphicsPlacement",
+    "GraphicsState",
+    "PixelFormat",
+    "parse_control_data",
+]
+
+
+class PixelFormat(IntEnum):
+    """
+    What the "f" key of a graphics command says the payload holds.
+
+    kitty's `docs/graphics-protocol.rst` names three: "``f=32`` (the
+    default) indicates 32-bit RGBA data and ``f=24`` indicates 24-bit
+    RGB data and ``f=100`` indicates PNG data".
+
+    The number is the bits a pixel takes, which is why PNG, whose
+    pixels are not laid out at all, is the odd one at a hundred.
+    """
+
+    #: Three bytes a pixel, no alpha.
+    RGB = 24
+
+    #: Four bytes a pixel. The default when a command names no format.
+    RGBA = 32
+
+    #: A whole PNG file, which carries its own size and depth.
+    PNG = 100
+
+    #: Not kitty's: the payload of a sixel DCS sequence, stored by
+    #: `sixel.store_payload` and decoded by whoever draws it. No "f" key
+    #: can name it, because `_transmit` takes only the three above.
+    #: Lillecarl/pymux#575.
+    SIXEL = -6
+
+
+# The cell size a screen carries until somebody tells it one. A
+# screen holds cells and not pixels, so it cannot measure this; what
+# draws it can. `Screen.set_cell_size` is how it is told, and the
+# reservation reads `screen.cell_width` and `screen.cell_height`, never
+# these. Lillecarl/pymux#369.
+ASSUMED_CELL_WIDTH = 10
+ASSUMED_CELL_HEIGHT = 20
+
+# Memory guards. A runaway program must not take the whole machine
+# down: refuse payloads and image storage beyond these limits, the same
+# way kitty bounds its image storage.
+MAX_PENDING_PAYLOAD = 256 * 1024 * 1024  # base64 string of one transmission
+MAX_TOTAL_IMAGE_DATA = 1024 * 1024 * 1024  # decoded bytes of all images
+
+#: The actions that carry image data. A message with one of them,
+#: arriving while a chunked transfer runs, is the next chunk of it.
+TRANSMIT_ACTIONS = frozenset(["t", "T", "q"])
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+class GraphicsError(Exception):
+    """
+    A graphics command failed. The code becomes the response prefix
+    ("EINVAL", "ENOENT", ...).
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class GraphicsImage:
+    "A transmitted image."
+
+    __slots__ = ("data", "format", "height", "number", "width")
+
+    KEEP: ClassVar[dict[str, Keep]] = {name: Keep.SAVED for name in __slots__}
+
+    def __init__(self, format: int, width: int, height: int, data: bytes, number: int = 0) -> None:
+        self.format = format  # A `PixelFormat`.
+        self.width = width  # in pixels
+        self.height = height  # in pixels
+        self.data = data
+        self.number = number  # image number ("I" key), if any
+
+
+class GraphicsPlacement:
+    "A placement of an image on the screen. Coordinates are cells."
+
+    __slots__ = (
+        "asked_for_the_box",
+        "columns",
+        "crop",
+        "image_id",
+        "placement_id",
+        "rows",
+        "virtual",
+        "x",
+        "y",
+        "z",
+    )
+
+    KEEP: ClassVar[dict[str, Keep]] = {name: Keep.SAVED for name in __slots__}
+
+    def __init__(
+        self,
+        image_id: int,
+        placement_id: int,
+        x: int,
+        y: int,
+        columns: int,
+        rows: int,
+        z: int = 0,
+        virtual: bool = False,
+        asked_for_the_box: bool = True,
+        crop: tuple[int, int, int, int] | None = None,
+    ) -> None:
+        self.image_id = image_id
+        self.placement_id = placement_id
+        self.x = x
+        self.y = y
+        self.columns = columns
+        self.rows = rows
+        self.z = z
+        self.virtual = virtual  # "U=1": no cells are occupied
+
+        #: Whether the program named "c" and "r" itself.
+        #:
+        #: **A box the program asked for is a request, and a box the
+        #: terminal worked out is an artefact.** "c=3,r=2" with a two
+        #: pixel image means "draw it over three cells by two", and
+        #: stretching it there is the answer. The same counts reached
+        #: by `ceil(pixels / cell)` mean only "this is the room it
+        #: needs", and stretching the image to fill them is the
+        #: resampling of Lillecarl/pymux#369.
+        #:
+        #: Sixel never names a box, so `add_sixel` clears this.
+        self.asked_for_the_box = asked_for_the_box
+
+        #: A piece of a placement shows part of the image: (column, row,
+        #: columns, rows) says which cell of the whole box it starts at,
+        #: and how many cells the whole box has. None shows the whole.
+        self.crop = crop
+
+    def after_thaw(self) -> None:
+        # A snapshot from a pymux that had no pieces carries no crop.
+        if not hasattr(self, "crop"):
+            self.crop = None
+
+    def piece(self, x: int, y: int, columns: int, rows: int) -> GraphicsPlacement:
+        "The part of this placement on the `columns` by `rows` cells from (x, y)."
+        column, row, box_columns, box_rows = self.crop or (0, 0, self.columns, self.rows)
+        return GraphicsPlacement(
+            self.image_id,
+            self.placement_id,
+            x,
+            y,
+            columns,
+            rows,
+            self.z,
+            self.virtual,
+            self.asked_for_the_box,
+            (column + x - self.x, row + y - self.y, box_columns, box_rows),
+        )
+
+
+def parse_control_data(data: str) -> tuple[dict[str, str], str]:
+    """
+    Split a graphics command into its control data keys and the base64
+    payload. ("a=T,f=24;<payload>".)
+    """
+    if ";" in data:
+        control, payload = data.split(";", 1)
+    else:
+        control, payload = data, ""
+
+    keys: dict[str, str] = {}
+    for part in control.split(","):
+        if not part:
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+        else:
+            key, value = part, ""
+        keys[key] = value
+    return keys, payload
+
+
+def _png_size(data: bytes) -> tuple[int, int]:
+    "Read the width and height from the PNG IHDR chunk."
+    if data[:8] != PNG_SIGNATURE or data[12:16] != b"IHDR" or len(data) < 24:
+        raise GraphicsError("EINVAL", "invalid PNG data")
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    if width <= 0 or height <= 0:
+        raise GraphicsError("EINVAL", "invalid PNG dimensions")
+    return width, height
+
+
+class GraphicsState:
+    """
+    The images and placements of one screen. (The main and the
+    alternate screen each have their own instance; see
+    `Screen.swap_variables`.)
+    """
+
+    #: The half-received image is saved too: it is plain data, and
+    #: dropping it loses an image a program is still sending.
+    KEEP: ClassVar[dict[str, Keep]] = {
+        "images_by_id": Keep.SAVED,
+        "newest_by_number": Keep.SAVED,
+        "placements": Keep.SAVED,
+        "next_image_id": Keep.SAVED,
+        "_pending": Keep.SAVED,
+    }
+
+    def __init__(self) -> None:
+        self.images_by_id: dict[int, GraphicsImage] = {}
+        # The newest image for every image number ("I" key).
+        self.newest_by_number: dict[int, GraphicsImage] = {}
+        self.placements: list[GraphicsPlacement] = []
+        self.next_image_id = 1
+        # An in-flight chunked transmission: (keys, payload-so-far).
+        self._pending: tuple[dict[str, str], str] | None = None
+
+    # ------------------------------------------------------------------
+
+    def handle(self, data: str, screen) -> tuple[str, bool] | None:
+        """
+        Handle a graphics command (the payload of the APC sequence,
+        without the leading "G"). Returns the response body (including
+        the "i=...;" prefix) and whether it reports success, or None
+        when nothing should be sent to the process.
+
+        Like kitty, only commands that carry an image id ("i") or an
+        image number ("I") get a response at all.
+        """
+        keys, payload = parse_control_data(data)
+
+        try:
+            assembled = self._assemble(keys, payload)
+            if assembled is None:
+                return None  # A chunk, and not the last one.
+            keys, payload = assembled
+
+            action = keys.get("a", "t")
+            if action == "t":
+                result = self._transmit(keys, payload, store=True)
+            elif action == "T":
+                result = self._transmit_and_display(keys, payload, screen)
+            elif action == "q":
+                result = self._transmit(keys, payload, store=False)
+            elif action == "p":
+                result = self._put(keys, screen)
+            elif action == "d":
+                result = self._delete(keys, screen)
+            else:
+                # Animation and composition are not implemented.
+                raise GraphicsError("EINVAL", "unsupported action: %r" % action)
+        except GraphicsError as exc:
+            result = (self._prefix(keys) + exc.code + ":" + exc.args[0], False)
+        except ValueError:
+            result = (
+                self._prefix(keys) + "EINVAL:invalid integer value",
+                False,
+            )
+
+        if result is None:
+            return None
+        response, is_ok = result[0], result[1]
+        quiet = keys.get("q", "0")
+        if not (keys.get("i") or keys.get("I")):
+            return None  # Nothing to address a response to.
+        if is_ok and quiet in ("1", "2"):
+            return None  # Suppress OK responses.
+        if not is_ok and quiet == "2":
+            return None  # Suppress error responses.
+        return (response, is_ok)
+
+    @staticmethod
+    def _prefix(keys: dict[str, str]) -> str:
+        parts = []
+        if keys.get("i"):
+            parts.append("i=%s" % keys["i"])
+        if keys.get("I"):
+            parts.append("I=%s" % keys["I"])
+        if keys.get("p"):
+            parts.append("p=%s" % keys["p"])
+        return ",".join(parts) + ";" if parts else ""
+
+    @staticmethod
+    def _int(keys: dict[str, str], key: str, default: int = 0) -> int:
+        value = keys.get(key)
+        if not value:
+            return default
+        return int(value)
+
+    # ------------------------------------------------------------------
+    # Transmission.
+
+    def _assemble(self, keys: dict[str, str], payload: str) -> tuple[dict[str, str], str] | None:
+        """
+        Join the chunks of a chunked transmission ("m=1" on every
+        message but the last). Returns the keys and the whole payload
+        of a finished command, or None while chunks still come.
+
+        The keys of the first message govern the whole transfer: the
+        action, the size, the placement, and who the answer goes to.
+        A later chunk needs to carry nothing but "m" and its own
+        payload, and the last one carries payload as well.
+
+        Like kitty, any transmission that arrives while a transfer
+        runs is the next chunk of it, whether or not it repeats the
+        keys. A placement or a delete passes through untouched.
+        """
+        if self._pending is not None and keys.get("a", "t") in TRANSMIT_ACTIONS:
+            more = keys.get("m", "0")
+            first_keys, first_payload = self._pending
+            self._pending = None
+            if len(first_payload) + len(payload) > MAX_PENDING_PAYLOAD:
+                raise GraphicsError("EINVAL", "too much data")
+            keys, payload = first_keys, first_payload + payload
+            if more != "1":
+                return (keys, payload)
+            self._pending = (keys, payload)
+            return None
+
+        if keys.get("m", "0") == "1":
+            # The first chunk. Nothing happens until the last one.
+            if len(payload) > MAX_PENDING_PAYLOAD:
+                raise GraphicsError("EINVAL", "too much data")
+            self._pending = (dict(keys), payload)
+            return None
+
+        return (keys, payload)
+
+    def _transmit(self, keys: dict[str, str], payload: str, store: bool) -> tuple[str, bool, int | None] | None:
+        """
+        Handle the 't' and 'q' actions. Returns the response, whether
+        it is a success, and the id of the stored image (None for the
+        'q' action and for chunked transmissions still in flight).
+        """
+        if "i" in keys and "I" in keys:
+            raise GraphicsError("EINVAL", "both image id and image number given")
+
+        medium = keys.get("t", "d")
+        if medium != "d":
+            raise GraphicsError("EINVAL", "unsupported transmission medium: %r" % medium)
+
+        image_id: int | None = None
+        try:
+            try:
+                data = base64.b64decode(payload, validate=True)
+            except Exception:
+                raise GraphicsError("EINVAL", "invalid base64 data")
+
+            fmt = self._int(keys, "f", PixelFormat.RGBA)
+            compression = keys.get("o", "")
+            if fmt == PixelFormat.PNG:
+                if compression:
+                    raise GraphicsError("EINVAL", "PNG data cannot be compressed")
+                width, height = _png_size(data)
+            elif fmt in (PixelFormat.RGB, PixelFormat.RGBA):
+                if compression == "z":
+                    try:
+                        data = zlib.decompress(data)
+                    except Exception:
+                        raise GraphicsError("EINVAL", "invalid compressed data")
+                elif compression:
+                    raise GraphicsError("EINVAL", "unknown compression: %r" % compression)
+                width = self._int(keys, "s")
+                height = self._int(keys, "v")
+                if width <= 0 or height <= 0:
+                    raise GraphicsError("EINVAL", "width and height required")
+                expected = width * height * (3 if fmt == PixelFormat.RGB else 4)
+                if len(data) != expected:
+                    raise GraphicsError("EINVAL", "data size does not match width and height")
+            else:
+                raise GraphicsError("EINVAL", "unknown format: %i" % fmt)
+
+            image = GraphicsImage(fmt, width, height, data, number=self._int(keys, "I"))
+            if store and self._total_image_data() + len(data) > MAX_TOTAL_IMAGE_DATA:
+                raise GraphicsError("EINVAL", "image storage quota exceeded")
+            if store:
+                if "i" in keys:
+                    image_id = int(keys["i"])
+                    if image_id <= 0:
+                        raise GraphicsError("EINVAL", "invalid image id")
+                    # Re-transmitting an id replaces the image and all
+                    # its placements. The new data is not displayed
+                    # until a placement is created for it.
+                    self.delete_image_data(image_id)
+                    self.images_by_id[image_id] = image
+                    if image.number:
+                        self.newest_by_number[image.number] = image
+                elif "I" in keys:
+                    # An image number always creates a new image; the
+                    # terminal assigns the id and reports it.
+                    image_id = self._new_image_id()
+                    self.images_by_id[image_id] = image
+                    if image.number:
+                        self.newest_by_number[image.number] = image
+                else:
+                    # Without id or number, the image is stored in the
+                    # id-0 slot and cannot be referenced later. "a=T"
+                    # still places it, so the slot is the id to use.
+                    image_id = 0
+                    self.delete_image_data(0)
+                    self.images_by_id[0] = image
+        except GraphicsError:
+            if self._pending_response_possible(keys):
+                raise
+            return None
+
+        if not store:
+            # The 'q' action: load, but don't store.
+            if "i" in keys or "I" in keys:
+                return (self._prefix(keys) + "OK", True, None)
+            return None
+
+        if "I" in keys:
+            # Report the assigned id together with the image number.
+            return ("i=%i,I=%i;OK" % (image_id, image.number), True, image_id)
+
+        # A transmission without an image id is stored all the same,
+        # under the id-0 slot, and "a=T" places it. `handle` drops the
+        # response, because there is nothing to address it to.
+        return (self._prefix(keys) + "OK", True, image_id)
+
+    @staticmethod
+    def _pending_response_possible(keys: dict[str, str]) -> bool:
+        return bool(keys.get("i") or keys.get("I"))
+
+    def _transmit_and_display(self, keys: dict[str, str], payload: str, screen) -> tuple[str, bool] | None:
+        "Handle the 'T' action: transmit, then place at the cursor."
+        result = self._transmit(keys, payload, store=True)
+        if result is None:
+            return None
+        _response, _is_ok, image_id = result
+        if image_id is None:
+            return None
+        self._put(keys, screen, image_id=image_id)
+        return (_response, True)
+
+    # ------------------------------------------------------------------
+    # Placement.
+
+    def _lookup_image(self, keys: dict[str, str]) -> tuple[int, GraphicsImage]:
+        if "i" in keys and "I" in keys:
+            raise GraphicsError("EINVAL", "both image id and image number given")
+        if "i" in keys:
+            image_id = int(keys["i"])
+            image = self.images_by_id.get(image_id)
+        elif "I" in keys:
+            number = int(keys["I"])
+            image = self.newest_by_number.get(number)
+            image_id = 0
+            for known_id, known in self.images_by_id.items():
+                if known is image:
+                    image_id = known_id
+                    break
+        else:
+            raise GraphicsError("EINVAL", "image id or image number required")
+
+        if image is None:
+            raise GraphicsError("ENOENT", "no such image")
+        return image_id, image
+
+    @staticmethod
+    def _put_prefix(keys: dict[str, str], image_id: int) -> str:
+        parts = ["i=%i" % image_id]
+        if keys.get("p"):
+            parts.append("p=%s" % keys["p"])
+        return ",".join(parts) + ";"
+
+    def _put(self, keys: dict[str, str], screen, image_id: int | None = None) -> tuple[str, bool]:
+        if image_id is None:
+            image_id, _image = self._lookup_image(keys)
+        else:
+            _image = self.images_by_id.get(image_id)
+            if _image is None:
+                raise GraphicsError("ENOENT", "no such image")
+
+        placement_id = self._int(keys, "p")
+        columns = self._int(keys, "c")
+        rows = self._int(keys, "r")
+        asked_for_the_box = columns > 0 or rows > 0
+
+        if columns <= 0 and _image.width:
+            columns = -(-_image.width // screen.cell_width)
+        if rows <= 0 and _image.height:
+            rows = -(-_image.height // screen.cell_height)
+        if columns <= 0 or rows <= 0:
+            raise GraphicsError("EINVAL", "invalid placement size")
+
+        cursor = screen.pt_cursor_position
+        x = cursor.x
+        y = cursor.y
+        z = self._int(keys, "z")
+        virtual = self._int(keys, "U") == 1
+
+        # A placement id replaces an earlier placement of the same
+        # image with the same id.
+        if placement_id:
+            for existing in list(self.placements):
+                if existing.image_id == image_id and existing.placement_id == placement_id:
+                    self._clear_placement_cells(screen, existing)
+                    self.placements.remove(existing)
+
+        placement = GraphicsPlacement(image_id, placement_id, x, y, columns, rows, z, virtual, asked_for_the_box)
+        self.placements.append(placement)
+
+        if not virtual and z >= 0:
+            # Reserve the covered cells. (Images with a negative
+            # z-index are drawn below the text.)
+            self._clear_cells(screen, x, y, columns, rows)
+
+        if not virtual and keys.get("C", "0") != "1":
+            # Move the cursor to the cell right after the image, like
+            # kitty does: same row counting, clamped by the screen.
+            cursor.x += columns
+            if rows:
+                cursor.y += rows - 1
+            screen.max_y = max(screen.max_y, cursor.y)
+            screen.ensure_bounds()
+
+        response = self._put_prefix(keys, image_id) + "OK"
+        return (response, True)
+
+    # ------------------------------------------------------------------
+    # Deletion.
+
+    def _delete(self, keys: dict[str, str], screen) -> tuple[str, bool] | None:
+        specifier = keys.get("d", "a")
+        lower = specifier.lower()
+        free_data = specifier.isupper()
+
+        if lower == "f":
+            # Animation frames are not implemented.
+            return None
+
+        if lower == "a":
+            targets = list(self.placements)
+        elif lower == "i":
+            image_id = self._int(keys, "i")
+            placement_id = self._int(keys, "p")
+            targets = [
+                pl
+                for pl in self.placements
+                if pl.image_id == image_id and (not placement_id or pl.placement_id == placement_id)
+            ]
+        elif lower == "n":
+            number = self._int(keys, "I")
+            image = self.newest_by_number.get(number)
+            targets = [pl for pl in self.placements if image is not None and pl.image_id in self._ids_of(image)]
+        elif lower == "c":
+            cursor = screen.pt_cursor_position
+            targets = [
+                pl
+                for pl in self.placements
+                if pl.x <= cursor.x < pl.x + pl.columns and pl.y <= cursor.y < pl.y + pl.rows
+            ]
+        elif lower in ("p", "q"):
+            x = self._int(keys, "x") - 1
+            y = self._int(keys, "y") - 1
+            targets = [pl for pl in self.placements if pl.x <= x < pl.x + pl.columns and pl.y <= y < pl.y + pl.rows]
+            if lower == "q":
+                z = self._int(keys, "z")
+                targets = [pl for pl in targets if pl.z == z]
+        elif lower == "r":
+            low = self._int(keys, "x")
+            high = self._int(keys, "y")
+            image_ids = [image_id for image_id in self.images_by_id if low <= image_id <= high]
+            targets = [pl for pl in self.placements if pl.image_id in image_ids]
+        else:
+            return None  # Unknown specifier: ignore.
+
+        for placement in targets:
+            self._clear_placement_cells(screen, placement)
+            self.placements.remove(placement)
+
+        if free_data:
+            for image_id in list(self.images_by_id):
+                if not any(pl.image_id == image_id for pl in self.placements):
+                    self.delete_image_data(image_id)
+
+        return None  # Deletes are not acknowledged.
+
+    def _ids_of(self, image: GraphicsImage) -> list[int]:
+        return [image_id for image_id, known in self.images_by_id.items() if known is image]
+
+    def _new_image_id(self) -> int:
+        "An id that no image uses. (For images that the terminal names.)"
+        while self.next_image_id in self.images_by_id:
+            self.next_image_id += 1
+        image_id = self.next_image_id
+        self.next_image_id += 1
+        return image_id
+
+    def _total_image_data(self) -> int:
+        return sum(len(image.data) for image in self.images_by_id.values())
+
+    def delete_image_data(self, image_id: int) -> None:
+        """
+        Remove an image and its placements. (Re-transmitting an image
+        id must delete the old placements; the new data is not
+        displayed until a placement is created.)
+        """
+        self.placements = [pl for pl in self.placements if pl.image_id != image_id]
+        image = self.images_by_id.pop(image_id, None)
+        if image is not None:
+            for number, known in list(self.newest_by_number.items()):
+                if known is image:
+                    del self.newest_by_number[number]
+
+    # ------------------------------------------------------------------
+    # Sixel.
+
+    def add_sixel(self, width: int, height: int, payload: str, screen) -> int | None:
+        """
+        Store a sixel image and place it at the cursor. `width` and
+        `height` are what `sixel.sixel_size` read from `payload`, which
+        is stored undecoded: the cells are reserved now, and the pixels
+        are the drawer's work.
+
+        Sixel has no image ids: every image is new, and the terminal
+        names it. The cursor ends at the left of the row below the
+        image, the way xterm leaves it.
+        """
+        data = sixel_module.store_payload(payload)
+        if self._total_image_data() + len(data) > MAX_TOTAL_IMAGE_DATA:
+            return None
+
+        image_id = self._new_image_id()
+        self.images_by_id[image_id] = GraphicsImage(PixelFormat.SIXEL, width, height, data)
+
+        columns = max(1, -(-width // screen.cell_width))
+        rows = max(1, -(-height // screen.cell_height))
+
+        cursor = screen.pt_cursor_position
+        self.placements.append(
+            GraphicsPlacement(
+                image_id,
+                0,
+                cursor.x,
+                cursor.y,
+                columns,
+                rows,
+                asked_for_the_box=False,  # Sixel names no box.
+            )
+        )
+        self._clear_cells(screen, cursor.x, cursor.y, columns, rows)
+
+        cursor.x = 0
+        cursor.y += rows
+        screen.max_y = max(screen.max_y, cursor.y)
+        screen.ensure_bounds()
+        return image_id
+
+    # ------------------------------------------------------------------
+    # Screen interaction.
+
+    def remove_all_placements(self) -> None:
+        "Remove every placement. (Image data is kept.)"
+        self.placements = []
+
+    def count_the_cells_again(self, screen) -> None:
+        """
+        Work out the cells of every placement again, for a screen whose
+        cell size has changed.
+
+        Only the placements that carry no box of their own: a program
+        that named "c" and "r" asked for cells, and cells do not change
+        when a pixel does. `Screen.set_cell_size` is the caller and
+        says why this counts again rather than dropping.
+        """
+        for placement in self.placements:
+            # A piece has a box that text cut, not one the pixels give.
+            if placement.asked_for_the_box or placement.crop is not None:
+                continue
+            image = self.images_by_id.get(placement.image_id)
+            if image is None or not image.width or not image.height:
+                continue
+
+            columns = max(1, -(-image.width // screen.cell_width))
+            rows = max(1, -(-image.height // screen.cell_height))
+            if (columns, rows) == (placement.columns, placement.rows):
+                continue
+
+            placement.columns = columns
+            placement.rows = rows
+            if not placement.virtual and placement.z >= 0:
+                # The box may have grown, and the cells it reaches now
+                # still hold whatever was under them.
+                self._clear_cells(screen, placement.x, placement.y, columns, rows)
+
+    def cover(self, top: int, bottom: int, left: int, right: int) -> None:
+        """
+        Text or an erase took the cells from column `left` up to
+        `right`, on the rows from `top` to `bottom` (both included).
+
+        A sixel image is part of the cells it lies on, so the part under
+        them goes, and what is left is up to four pieces around the
+        hole. foot cuts it this way (`sixel_overwrite_by_rectangle`),
+        and xterm draws sixel into its cells. yazi takes a preview away
+        by writing spaces over it. Lillecarl/pymux#598.
+
+        A kitty placement lies above the text, and stays.
+        """
+        kept: list[GraphicsPlacement] = []
+        for placement in self.placements:
+            x, y = placement.x, placement.y
+            x_end, y_end = x + placement.columns, y + placement.rows
+            image = self.images_by_id.get(placement.image_id)
+            if (
+                placement.virtual
+                or right <= x
+                or left >= x_end
+                or bottom < y
+                or top >= y_end
+                or image is None
+                or image.format != PixelFormat.SIXEL
+            ):
+                kept.append(placement)
+                continue
+
+            hole_top, hole_bottom = max(top, y), min(bottom + 1, y_end)
+            hole_left, hole_right = max(left, x), min(right, x_end)
+            for piece_left, piece_top, piece_right, piece_bottom in (
+                (x, y, x_end, hole_top),
+                (x, hole_bottom, x_end, y_end),
+                (x, hole_top, hole_left, hole_bottom),
+                (hole_right, hole_top, x_end, hole_bottom),
+            ):
+                if piece_right > piece_left and piece_bottom > piece_top:
+                    kept.append(
+                        placement.piece(piece_left, piece_top, piece_right - piece_left, piece_bottom - piece_top)
+                    )
+        self.placements = kept
+
+    @property
+    def has_virtual_placements(self) -> bool:
+        """
+        True when the pane holds a placement that the unicode
+        placeholders point at. Scanning the screen for them costs
+        nothing while this is False, which is the usual case.
+        """
+        return any(placement.virtual for placement in self.placements)
+
+    def virtual_placement(self, image_id: int, placement_id: int = 0) -> GraphicsPlacement | None:
+        """
+        The virtual placement that a unicode placeholder points at.
+
+        A placeholder that names no placement takes the first one of
+        its image, the way kitty does it.
+        """
+        for placement in self.placements:
+            if not placement.virtual or placement.image_id != image_id:
+                continue
+            if placement_id and placement.placement_id != placement_id:
+                continue
+            return placement
+        return None
+
+    def scroll(self, first_row: int, last_row: int, count: int) -> None:
+        """
+        Follow a scroll of the region from `first_row` to `last_row`
+        (absolute rows of the data buffer, both inclusive). A positive
+        `count` moves the content up by that many rows.
+
+        Placements outside the region keep their position. Placements
+        that the scroll would tear or move out of the region are
+        removed, the same way kitty drops an image that scrolls out.
+        """
+        kept: list[GraphicsPlacement] = []
+        for placement in self.placements:
+            top = placement.y
+            bottom = placement.y + placement.rows - 1
+
+            if bottom < first_row or top > last_row:
+                kept.append(placement)  # Outside the region.
+                continue
+            if top < first_row or bottom > last_row:
+                continue  # Crosses the edge of the region: torn.
+
+            placement.y -= count
+            if placement.y >= first_row and placement.y + placement.rows - 1 <= last_row:
+                kept.append(placement)
+        self.placements = kept
+
+    def prune_above(self, row: int) -> None:
+        "Remove placements that end above `row`. (History was trimmed.)"
+        self.placements = [placement for placement in self.placements if placement.y + placement.rows > row]
+
+    def prune_below(self, row: int) -> None:
+        "Remove placements that start below `row`. (Lines were dropped.)"
+        self.placements = [placement for placement in self.placements if placement.y <= row]
+
+    def clear(self) -> None:
+        "Forget all images and placements. (Full terminal reset.)"
+        self.images_by_id = {}
+        self.newest_by_number = {}
+        self.placements = []
+        self._pending = None
+
+    # Cell helpers. These touch the data buffer of the surrounding
+    # Screen. Deleting a cell key makes the cell blank, the same
+    # way that Screen erases text.
+
+    def _clear_cells(self, screen, x: int, y: int, columns: int, rows: int) -> None:
+        data_buffer = screen.page.data_buffer
+        for row in range(y, y + rows):
+            line = data_buffer.get(row)
+            if line is None:
+                continue
+            for column in range(x, x + columns):
+                if column in line:
+                    del line[column]
+
+    def _clear_placement_cells(self, screen, placement: GraphicsPlacement) -> None:
+        if not placement.virtual and placement.z >= 0:
+            self._clear_cells(
+                screen,
+                placement.x,
+                placement.y,
+                placement.columns,
+                placement.rows,
+            )

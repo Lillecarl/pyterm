@@ -1,0 +1,16 @@
+# python cache
+__pycache__/
+*.pyc
+
+# tool cache
+.pytest_cache/
+.mypy_cache/
+.venv/
+*.lock
+
+# build output
+dist/
+docs/_build/
+
+# The symlinks that `nix build` leaves behind.
+result*

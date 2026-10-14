@@ -1,0 +1,133 @@
+"""
+Tests for the OSC sequences that a pane hands to its embedder.
+
+A pane cannot serve the clipboard, a desktop notification or the shape
+of the pointer. Only the terminal of the user can. The subcommands of
+OSC 1337 name services of the embedder too. Those sequences therefore
+leave the pane through `osc_func`, and the embedder reads them.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from pyte.osc import FORWARDED_OSC, Osc
+from pyte.screen import Screen
+from pyte.sequences import osc
+from pyte.streams import Stream
+
+
+def make_screen():
+    "Return (stream, list of forwarded sequences, list of answers)."
+    forwarded = []
+    answers = []
+    screen = Screen(
+        24,
+        80,
+        write_process_input=answers.append,
+        osc_func=lambda code, param: forwarded.append((code, param)),
+    )
+    stream = Stream(screen)
+    return stream, forwarded, answers
+
+
+def feed(stream, code, param):
+    stream.feed("\x1b]%s;%s\x1b\\" % (code, param))
+
+
+# ----------------------------------------------------------------------
+# What leaves the pane.
+
+
+@pytest.mark.parametrize(
+    ("code", "param"),
+    [
+        ("52", "c;aGVsbG8="),  # Set the clipboard.
+        ("52", "p;"),  # Clear the primary selection.
+        ("99", "i=1:d=0:p=title;Build ready"),  # A notification.
+        ("22", "pointer"),  # The shape of the pointer.
+        ("1337", "OpenURL=:aHR0cHM6Ly9leGFtcGxlLmNvbQ=="),  # Open a browser.
+        ("1337", "File=name=t.png;inline=1:AAAA"),  # An image of iTerm2's kind.
+        ("7", "file://host/home"),  # The working directory, as a file URL.
+        ("133", "A"),  # The shell integration marks of FinalTerm.
+        ("133", "D;0"),  # A command that finished well.
+    ],
+)
+def test_a_sequence_for_the_user_leaves_the_pane(code, param):
+    stream, forwarded, answers = make_screen()
+    feed(stream, code, param)
+    assert forwarded == [(code, param)]
+    assert answers == []  # The pane itself answers nothing.
+
+
+def test_the_forwarded_codes_are_the_ones_of_the_user():
+    "The palette and the title belong to the pane; the rest goes out."
+    assert FORWARDED_OSC == {"22", "52", "99", "1337", "7", "133"}
+
+
+def test_a_clipboard_query_stays_inside_the_pane():
+    "Reading the clipboard of the user is not a right of a pane."
+    stream, forwarded, answers = make_screen()
+    feed(stream, "52", "c;?")
+    feed(stream, "52", "p; ? ")
+    assert forwarded == []
+    assert answers == []
+
+
+def test_a_clipboard_write_that_looks_like_a_query_still_leaves():
+    "A question mark inside the payload is not a query."
+    stream, forwarded, _answers = make_screen()
+    feed(stream, "52", "c;Pz8/")
+    assert forwarded == [("52", "c;Pz8/")]
+
+
+# ----------------------------------------------------------------------
+# What does not leave the pane.
+
+
+@pytest.mark.parametrize(
+    ("code", "param"),
+    [
+        ("4", "1;?"),  # A palette query: the pane answers it.
+        ("11", "?"),  # A background query: the pane answers it.
+        ("21", "background=?"),  # A kitty colour query.
+        ("8", ";https://example.com"),  # A hyperlink.
+        ("777", "notify;title;body"),  # The rxvt notification.
+    ],
+)
+def test_another_sequence_does_not_leave_the_pane(code, param):
+    stream, forwarded, _answers = make_screen()
+    feed(stream, code, param)
+    assert forwarded == []
+
+
+def test_the_title_does_not_leave_the_pane():
+    "The title belongs to the pane. pymux draws it itself."
+    stream, forwarded, _answers = make_screen()
+    stream.feed(osc("0", "a title"))
+    stream.feed(osc("2", "a title"))
+    assert forwarded == []
+
+
+# ----------------------------------------------------------------------
+# A pane without an embedder.
+
+
+def test_a_screen_without_a_function_consumes_the_sequence():
+    "A plain pyte has nowhere to send it, and must not raise."
+    answers = []
+    screen = Screen(24, 80, write_process_input=answers.append)
+    stream = Stream(screen)
+    stream.feed(osc(Osc.CLIPBOARD, "c", "aGVsbG8="))
+    stream.feed(osc(Osc.NOTIFICATION, "i=1", "done"))
+    assert answers == []
+
+
+def test_the_screen_content_survives_a_forwarded_sequence():
+    stream, forwarded, _answers = make_screen()
+    screen = stream.screen
+    stream.feed("before" + osc(Osc.CLIPBOARD, "c", "aGVsbG8=") + "after")
+    line = screen.page.data_buffer[0]
+    text = "".join(line[x].char for x in range(len("beforeafter")))
+    assert text == "beforeafter"
+    assert forwarded == [("52", "c;aGVsbG8=")]

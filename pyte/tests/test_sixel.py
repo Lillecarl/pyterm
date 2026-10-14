@@ -1,0 +1,374 @@
+"""
+Tests for the sixel decoder and for the sixel images that a pane
+stores.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from pyte import escape
+from pyte import sixel as sixel_module
+from pyte.images import PixelFormat
+from pyte.screen import Screen
+from pyte.sequences import apc, csi, decrqss
+from pyte.sixel import DEFAULT_PALETTE, decode_sixel, stored_payload
+from pyte.streams import Stream
+
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+
+# Colour definitions in the RGB system (percentages).
+# Colour definitions on registers that are not the background one.
+DEFINE_RED = "#4;2;100;0;0"
+DEFINE_GREEN = "#5;2;0;100;0"
+RED_ = "#4"
+GREEN_ = "#5"
+
+
+def decode(body, params="0;0;0"):
+    "Decode a sixel body. Returns (width, height, pixel getter)."
+    result = decode_sixel(params + "q" + body)
+    assert result is not None
+    width, height, data = result
+
+    def pixel(x, y):
+        offset = (y * width + x) * 4
+        return tuple(data[offset : offset + 4])
+
+    return width, height, pixel
+
+
+def test_a_payload_without_a_head_is_not_sixel():
+    assert decode_sixel("no head here") is None
+
+
+def test_an_empty_body_has_no_pixels():
+    assert decode_sixel("0;0;0q") is None
+
+
+def test_one_data_character_is_a_column_of_six():
+    # "~" is 0x7e: all six bits set.
+    width, height, pixel = decode(DEFINE_RED + RED_ + "~")
+    assert (width, height) == (1, 6)
+    for y in range(6):
+        assert pixel(0, y) == (*RED, 255)
+
+
+def test_the_bits_select_the_rows():
+    # "A" is 0x41: value 2, so only the second row of the band.
+    width, height, pixel = decode(DEFINE_RED + RED_ + "A")
+    assert (width, height) == (1, 6)
+    assert pixel(0, 0) == (0, 0, 0, 255)  # Background: register 0...
+    assert pixel(0, 1) == (*RED, 255)
+    assert pixel(0, 2) == (0, 0, 0, 255)
+
+
+def test_the_default_palette_is_the_vt340_one():
+    # Register 1 without a definition: DEC blue, 20/20/80 percent.
+    _width, _height, pixel = decode("#1~")
+    assert pixel(0, 0) == DEFAULT_PALETTE[1] + (255,)
+    assert DEFAULT_PALETTE[1] == (51, 51, 204)
+
+
+def test_an_rgb_definition():
+    _width, _height, pixel = decode("#4;2;0;100;0#4~")
+    assert pixel(0, 0) == (*GREEN, 255)
+
+
+def test_an_hls_definition_starts_the_wheel_at_blue():
+    # DEC turns the hue wheel: 0 is blue, 120 is red, 240 is green.
+    for hue, expected in ((0, BLUE), (120, RED), (240, GREEN)):
+        _width, _height, pixel = decode("#4;1;%i;50;100#4~" % hue)
+        assert pixel(0, 0) == (*expected, 255)
+
+
+def test_an_hls_definition_uses_lightness_and_saturation():
+    _width, _height, pixel = decode("#4;1;0;100;100#4~")
+    assert pixel(0, 0) == (255, 255, 255, 255)  # Full lightness: white.
+    _width, _height, pixel = decode("#4;1;0;50;0#4~")
+    assert pixel(0, 0) == (128, 128, 128, 255)  # No saturation: grey.
+
+
+def test_repeat():
+    width, height, pixel = decode(DEFINE_RED + RED_ + "!5~")
+    assert (width, height) == (5, 6)
+    for x in range(5):
+        assert pixel(x, 0) == (*RED, 255)
+
+
+def test_a_repeat_without_a_count_writes_once():
+    width, _height, _pixel = decode("#0!~")
+    assert width == 1
+
+
+def test_carriage_return_paints_over_the_same_band():
+    body = DEFINE_RED + DEFINE_GREEN + "#4!4~$#5!2~"
+    width, height, pixel = decode(body)
+    assert (width, height) == (4, 6)
+    assert pixel(0, 0) == (*GREEN, 255)
+    assert pixel(1, 0) == (*GREEN, 255)
+    assert pixel(2, 0) == (*RED, 255)
+
+
+def test_graphics_new_line_starts_the_next_band():
+    body = DEFINE_RED + DEFINE_GREEN + "#4~-#5~"
+    width, height, pixel = decode(body)
+    assert (width, height) == (1, 12)
+    assert pixel(0, 5) == (*RED, 255)
+    assert pixel(0, 6) == (*GREEN, 255)
+
+
+def test_raster_attributes_extend_the_canvas():
+    width, height, pixel = decode('"1;1;10;20' + DEFINE_RED + RED_ + "~")
+    assert (width, height) == (10, 20)
+    # The body only wrote the first column.
+    assert pixel(0, 0) == (*RED, 255)
+    assert pixel(9, 19) == (0, 0, 0, 255)
+
+
+def test_raster_attributes_never_shrink_the_width():
+    width, height, _pixel = decode('"1;1;1;6' + "#0!4~")
+    assert (width, height) == (4, 6)
+
+
+def test_the_raster_height_crops_the_last_band():
+    # Two bands make twelve rows, but the image is eight tall.
+    width, height, _pixel = decode('"1;1;4;8' + "#0!4~-!4~")
+    assert (width, height) == (4, 8)
+
+
+def test_a_raster_height_far_below_the_bands_is_ignored():
+    # A bogus value must not throw away rows that the body wrote.
+    width, height, _pixel = decode('"1;1;4;1' + "#0!4~-!4~")
+    assert (width, height) == (4, 12)
+
+
+def test_unwritten_pixels_are_transparent_with_p2_one():
+    _width, _height, pixel = decode("#0A", params="0;1;0")
+    assert pixel(0, 0) == (0, 0, 0, 0)  # Never written.
+    assert pixel(0, 1)[3] == 255  # Written.
+
+
+def test_unwritten_pixels_take_register_zero_otherwise():
+    _width, _height, pixel = decode("#1;2;0;100;0#1A", params="0;0;0")
+    assert pixel(0, 0) == (0, 0, 0, 255)  # Register 0 is black.
+    assert pixel(0, 1) == (*GREEN, 255)
+
+
+def test_the_background_follows_register_zero():
+    _width, _height, pixel = decode("#0;2;0;0;100#1A")
+    assert pixel(0, 0) == (*BLUE, 255)
+
+
+def test_whitespace_in_the_body_is_ignored():
+    width, height, _pixel = decode(DEFINE_RED + RED_ + "~\n  ~\r\n~")
+    assert (width, height) == (3, 6)
+
+
+def test_a_selection_of_an_undefined_high_register_is_black():
+    _width, _height, pixel = decode("#200~")
+    assert pixel(0, 0) == (0, 0, 0, 255)
+
+
+def test_a_huge_repeat_is_bounded():
+    # The guard must cap the width instead of allocating forever.
+    width, height, _pixel = decode("#0!999999999~")
+    assert (width, height) == (16384, 6)
+
+
+def test_an_image_past_the_pixel_bound_is_refused():
+    assert decode_sixel('0;0;0q"1;1;9000;9000#0~') is None
+
+
+# ----------------------------------------------------------------------
+# The screen stores the image.
+
+
+def make_screen():
+    responses = []
+    screen = Screen(24, 80, write_process_input=responses.append)
+    stream = Stream(screen)
+    return screen, stream, responses
+
+
+def sixel(body, params="0;0;0"):
+    return "\x1bP" + params + "q" + body + "\x1b\\"
+
+
+def test_a_sixel_image_becomes_a_placement():
+    screen, stream, _ = make_screen()
+    stream.feed(sixel('"1;1;30;12' + DEFINE_RED + RED_ + "!30~-!30~"))
+
+    assert len(screen.graphics.placements) == 1
+    placement = screen.graphics.placements[0]
+    # 30x12 pixels with a 10x20 cell: three columns, one row.
+    assert (placement.x, placement.y) == (0, 0)
+    assert (placement.columns, placement.rows) == (3, 1)
+
+    image = screen.graphics.images_by_id[placement.image_id]
+    assert (image.format, image.width, image.height) == (PixelFormat.SIXEL, 30, 12)
+    width, height, pixels = decode_sixel(stored_payload(image.data))
+    assert (width, height, len(pixels)) == (30, 12, 30 * 12 * 4)
+
+
+def test_the_screen_reserves_the_cells_without_decoding(monkeypatch):
+    "The size is read; the pixels wait for whoever draws them. Lillecarl/pymux#575."
+
+    def refuse(payload):
+        raise AssertionError("the screen decoded a sixel image")
+
+    monkeypatch.setattr(sixel_module, "decode_sixel", refuse)
+    screen, stream, _ = make_screen()
+    stream.feed(sixel('"1;1;30;12' + DEFINE_RED + RED_ + "!30~-!30~"))
+    (placement,) = screen.graphics.placements
+    assert (placement.columns, placement.rows) == (3, 1)
+
+
+def test_a_stored_payload_comes_back_whole():
+    "A program may send a lone surrogate, and Unicode digits are digits to the decoder."
+    payload = "0;1q\ud800#٣~"
+    assert stored_payload(sixel_module.store_payload(payload)) == payload
+
+
+def test_the_cursor_lands_below_the_image():
+    screen, stream, _ = make_screen()
+    stream.feed("abc")
+    stream.feed(sixel('"1;1;30;40' + DEFINE_RED + RED_ + "~"))
+    # 40 pixels is two rows of 20. The cursor goes to the left of the
+    # row below the image.
+    assert (screen.pt_cursor_position.x, screen.pt_cursor_position.y) == (0, 2)
+
+
+def test_the_image_covers_its_cells():
+    screen, stream, _ = make_screen()
+    stream.feed("abcdef")
+    stream.feed("\r")
+    stream.feed(sixel('"1;1;30;12' + DEFINE_RED + RED_ + "~"))
+    row = screen.page.data_buffer[0]
+    assert "".join(row[i].char for i in range(6)) == "   def"
+
+
+#: Three columns by three rows, with a 10x20 cell.
+THREE_BY_THREE = sixel('"1;1;30;60' + DEFINE_RED + RED_ + "~")
+
+
+def pieces(screen):
+    return sorted((p.x, p.y, p.columns, p.rows, p.crop) for p in screen.graphics.placements)
+
+
+def test_text_over_a_sixel_image_cuts_it_around_the_cell():
+    "Lillecarl/pymux#598."
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed("\x1b[2;2Hx")
+    assert pieces(screen) == [
+        (0, 0, 3, 1, (0, 0, 3, 3)),
+        (0, 1, 1, 1, (0, 1, 3, 3)),
+        (0, 2, 3, 1, (0, 2, 3, 3)),
+        (2, 1, 1, 1, (2, 1, 3, 3)),
+    ]
+
+
+def test_a_piece_cut_again_keeps_its_place_in_the_image():
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed("\x1b[1;1Hx")
+    stream.feed("\x1b[3;3Hx")
+    assert pieces(screen) == [
+        (0, 1, 3, 1, (0, 1, 3, 3)),
+        (0, 2, 2, 1, (0, 2, 3, 3)),
+        (1, 0, 2, 1, (1, 0, 3, 3)),
+    ]
+
+
+def test_spaces_over_every_row_take_the_image_away():
+    "yazi takes a sixel preview away like this."
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed("\x1b[1;1H   \x1b[2;1H   \x1b[3;1H   ")
+    assert screen.graphics.placements == []
+
+
+def test_a_run_that_wraps_cuts_every_row_it_drew_on():
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed("\x1b[1;1H" + "x" * 163)
+    assert screen.graphics.placements == []
+
+
+@pytest.mark.parametrize(
+    "erase",
+    [
+        pytest.param("\x1b[2;1H\x1b[K", id="EL 0"),
+        pytest.param("\x1b[2;3H\x1b[1K", id="EL 1"),
+        pytest.param("\x1b[2;1H\x1b[2K", id="EL 2"),
+        pytest.param("\x1b[2;1H\x1b[3X", id="ECH"),
+    ],
+)
+def test_an_erase_of_a_row_cuts_the_image(erase):
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed(erase)
+    assert pieces(screen) == [(0, 0, 3, 1, (0, 0, 3, 3)), (0, 2, 3, 1, (0, 2, 3, 3))]
+
+
+@pytest.mark.parametrize("erase", ["\x1b[1;1H\x1b[J", "\x1b[3;3H\x1b[1J"], ids=["ED 0", "ED 1"])
+def test_an_erase_of_the_display_takes_the_image(erase):
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed(erase)
+    assert screen.graphics.placements == []
+
+
+def test_text_beside_a_sixel_image_leaves_it_whole():
+    screen, stream, _ = make_screen()
+    stream.feed(THREE_BY_THREE)
+    stream.feed("\x1b[2;4Hbeside")
+    assert pieces(screen) == [(0, 0, 3, 3, None)]
+
+
+def test_text_over_a_kitty_image_leaves_it():
+    "A kitty placement lies above the text."
+    screen, stream, _ = make_screen()
+    stream.feed(apc("Ga=T,f=24,s=1,v=1,i=1,c=3,r=3;/wAA"))
+    stream.feed("\x1b[2;2Hx")
+    assert [(p.columns, p.rows, p.crop) for p in screen.graphics.placements] == [(3, 3, None)]
+
+
+def test_a_sixel_image_does_not_take_a_kitty_image_id():
+    screen, stream, _ = make_screen()
+    # A kitty image claims id 1 first.
+    stream.feed(apc("Ga=t,f=24,s=1,v=1,i=1;AAAA"))
+    stream.feed(sixel(DEFINE_RED + RED_ + "~"))
+
+    ids = sorted(screen.graphics.images_by_id)
+    assert len(ids) == 2
+    assert 1 in ids
+    assert screen.graphics.images_by_id[1].width == 1  # The kitty one.
+
+
+def test_a_non_sixel_dcs_is_consumed():
+    screen, stream, _ = make_screen()
+    stream.feed(decrqss(escape.SGR))
+    stream.feed("hello")
+    assert screen.graphics.placements == []
+    row = screen.page.data_buffer[0]
+    assert "".join(row[i].char for i in range(5)) == "hello"
+
+
+def test_a_sixel_image_scrolls_with_the_text():
+    screen, stream, _ = make_screen()
+    stream.feed(csi(escape.DECSTBM, 1, 10))  # Margins: rows 0..9.
+    stream.feed(csi(escape.CUP, 5, 1))
+    stream.feed(sixel('"1;1;30;12' + DEFINE_RED + RED_ + "~"))
+    assert screen.graphics.placements[0].y == 4
+
+    stream.feed(csi(escape.CUP, 10, 1))
+    stream.feed("\n")
+
+    # The region starts at the first row, so the screen moves down the
+    # buffer and the image keeps its row of it. One row higher on the
+    # screen, which is what the scroll asked for.
+    assert screen.graphics.placements[0].y - screen.line_offset == 3

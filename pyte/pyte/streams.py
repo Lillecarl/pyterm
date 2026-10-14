@@ -1,0 +1,839 @@
+"""
+pyte.streams
+~~~~~~~~~~~~
+
+This module provides three stream implementations with different
+features; for starters, here's a quick example of how streams are
+typically used:
+
+>>> from pyte.screen import Screen
+>>> from pyte.streams import Stream
+>>> screen = Screen(24, 80, write_process_input=lambda data: None)
+>>> stream = Stream(screen)
+>>> stream.feed("\x1b[5B")  # Move the cursor down 5 rows.
+>>> screen.pt_cursor_position.y
+5
+
+:copyright: (c) 2011-2012 by Selectel.
+:copyright: (c) 2012-2017 by pyte authors and contributors,
+                see AUTHORS for details.
+:license: LGPL, see LICENSE for more details.
+"""
+
+from __future__ import annotations
+
+import inspect
+import itertools
+import re
+from collections import defaultdict
+from typing import TYPE_CHECKING, ClassVar
+
+from . import control as ctrl
+from . import escape as esc
+from .keep import Keep
+from .sequences import Csi, Escape
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Mapping
+    from typing import Any
+
+    from .screen import Screen as Screen
+
+    ParserGenerator = Generator[bool | None, str]
+
+
+def fit_parameters(handler: Callable[..., None]) -> Callable[..., None]:
+    """
+    A handler that gets the parameters it can take, with its defaults.
+
+    Two things, and both read the handler's own signature.
+
+    **It drops the parameters the handler has no room for.** A terminal
+    reads the parameters a sequence needs and ignores the rest. Without
+    this, a sequence such as "CSI 1;1 G", which carries one parameter
+    too many, raises a TypeError and stops the stream. One stray
+    sequence may not stop a whole terminal.
+
+    **It fills in the default of a parameter the program left out.** An
+    omitted parameter arrives as None (Lillecarl/pymux#178), and the
+    signature is the default table of the sequence: `erase_in_line`
+    declares `type_of: int = 0`, so "CSI K" reads as "CSI 0 K" without
+    the handler doing anything.
+
+    So a handler that must tell zero from omitted declares its default
+    as None and reads it. Most do that already, because `count or 1`
+    answers both for a sequence whose zero means one.
+
+    A handler that takes `*params` is handed what arrived, None and
+    all. It names no defaults, so there are none to fill.
+    """
+    try:
+        signature = inspect.signature(handler)
+    except TypeError, ValueError:
+        return handler
+
+    defaults: list[Any] = []
+    for parameter in signature.parameters.values():
+        if parameter.kind is parameter.VAR_POSITIONAL:
+            return handler  # It takes as many as arrive.
+        if parameter.kind in (
+            parameter.POSITIONAL_ONLY,
+            parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            defaults.append(None if parameter.default is parameter.empty else parameter.default)
+
+    count = len(defaults)
+
+    takes_private = "private" in signature.parameters or any(
+        parameter.kind is parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+    )
+
+    def call(*params: Any, **kwargs: Any) -> None:
+        if not takes_private:
+            kwargs.pop("private", None)
+        handler(
+            *(defaults[index] if value is None else value for index, value in enumerate(params[:count])),
+            **kwargs,
+        )
+
+    return call
+
+
+#: Longest OSC code that the parser reads. (kitty uses codes of up to
+#: five digits, such as ``OSC 30001``.)
+MAX_OSC_CODE_LENGTH = 8
+
+
+#: The controls a CSI sequence runs where it meets them, and goes on.
+CONTROLS_IN_CSI = "".join([ctrl.BEL, ctrl.BS, ctrl.HT, ctrl.LF, ctrl.VT, ctrl.FF, ctrl.CR])
+_RUN_IN_CSI = {ord(control): None for control in CONTROLS_IN_CSI}
+
+
+#: Plain text: everything the parser does not have to look at, which is
+#: everything but the controls and the starts of sequences.
+_SPECIAL = (
+    ctrl.ESC,
+    ctrl.CSI_C1,
+    ctrl.NUL,
+    ctrl.DEL,
+    ctrl.OSC_C1,
+    # The basic controls: the keys of `Stream.basic`.
+    ctrl.BEL,
+    ctrl.BS,
+    ctrl.HT,
+    ctrl.LF,
+    ctrl.VT,
+    ctrl.FF,
+    ctrl.CR,
+    ctrl.SO,
+    ctrl.SI,
+)
+_TEXT = re.compile("[^" + "".join(map(re.escape, _SPECIAL)) + "]+").match
+
+
+def _take_ground(
+    data: str,
+    offset: int,
+    draw: Callable[[str], None],
+    basic: Mapping[str, Callable[[], None]],
+    csi: Mapping[str, Callable[..., None]],
+    define_charset: Callable[..., None] | None,
+) -> int:
+    """
+    Read what the parser would read from its ground state, from `offset`,
+    and return where it stopped.
+
+    This takes one run of plain text and draws it, which is all the
+    stream needs of it. `pyte_rs` puts a compiled one in its place that
+    reads further -- the basic controls, whole CSI sequences, the charset
+    selections -- and stops wherever the parser has something to decide;
+    the parser takes over from there. It dispatches what the parser would
+    dispatch, through the same tables, in the same order. Returning
+    `offset` itself says the parser has to read the next character.
+    Lillecarl/pymux#570.
+    """
+    match = _TEXT(data, offset)
+    if match is None:
+        return offset
+    end = match.end()
+    draw(data[offset:end])
+    return end
+
+
+class Stream:
+    """A stream is a state machine that parses a stream of bytes and
+    dispatches events based on what it sees.
+
+    :param pyte.screen.Screen screen: a screen to dispatch events to.
+    :param bool strict: check if a given screen implements all required
+                        events.
+
+    .. versionchanged 0.6.0::
+
+       For performance reasons the binding between stream events and
+       screen methods was made static. As a result, the stream **will
+       not** dispatch events to methods added to screen **after** the
+       stream was created.
+
+    .. seealso::
+
+        `man console_codes <http://linux.die.net/man/4/console_codes>`_
+            For details on console codes listed bellow in :attr:`basic`,
+            :attr:`escape`, :attr:`csi`, :attr:`sharp`.
+    """
+
+    #: Control sequences, which don't require any arguments.
+    basic = {
+        ctrl.BEL: "bell",
+        ctrl.BS: "backspace",
+        ctrl.HT: "tab",
+        ctrl.LF: "linefeed",
+        ctrl.VT: "linefeed",
+        ctrl.FF: "linefeed",
+        ctrl.CR: "carriage_return",
+        ctrl.SO: "shift_out",
+        ctrl.SI: "shift_in",
+    }
+
+    #: non-CSI escape sequences.
+    escape = {
+        esc.RIS: "reset",
+        esc.IND: "index",
+        esc.NEL: "linefeed",
+        esc.RI: "reverse_index",
+        esc.HTS: "set_tab_stop",
+        esc.DECSC: "save_cursor",
+        esc.DECRC: "restore_cursor",
+        # The ones after the VT220. `sequences.py` names them.
+        Escape.NEL: "next_line",
+        Escape.DECBI: "back_index",
+        Escape.DECFI: "forward_index",
+        Escape.SPA: "start_protected_area",
+        Escape.EPA: "end_protected_area",
+        Escape.DECID: "report_device_attributes",
+        Escape.DECKPAM: "set_application_keypad",
+        Escape.DECKPNM: "reset_application_keypad",
+        Escape.LS2: "locking_shift_2",
+        Escape.LS3: "locking_shift_3",
+        Escape.SS2: "single_shift_2",
+        Escape.SS3: "single_shift_3",
+    }
+
+    #: "sharp" escape sequences -- ``ESC # <N>``.
+    #:
+    #: **The four DEC line attributes are read and dropped.** "ESC # 3",
+    #: "ESC # 4", "ESC # 5" and "ESC # 6" draw a line at twice the width
+    #: or twice the height on a VT100. kitty, Ghostty and Alacritty
+    #: implement none of them, esctest has no test for them, and no
+    #: recorded program in this repository sends one; xterm and libvterm
+    #: are the two that do. So this screen reads the byte and draws the
+    #: line the plain way. Lillecarl/pymux#141.
+    #:
+    #: Reading the byte is what matters. The dispatch answers an unknown
+    #: one with `debug`, which eats it, and a byte nobody reads would
+    #: land on the screen as text.
+    sharp = {
+        esc.DECALN: "alignment_display",
+    }
+
+    #: "space" escape sequences -- ``ESC SP <N>``.
+    #:
+    #: ECMA-48 calls these announcers. Only the two that pick the form
+    #: of a C1 control have a handler; the rest name a conformance
+    #: level, and the stream eats them. Eating them is the point: the
+    #: space is an intermediate byte, so a stream that does not read it
+    #: puts the final byte on the screen as text.
+    space = {
+        esc.S7C1T: "set_seven_bit_controls",
+        esc.S8C1T: "set_eight_bit_controls",
+    }
+
+    #: CSI escape sequences -- ``CSI P1;P2;...;Pn <fn>``.
+    csi = {
+        esc.ICH: "insert_characters",
+        esc.CUU: "cursor_up",
+        esc.CUD: "cursor_down",
+        esc.CUF: "cursor_forward",
+        esc.CUB: "cursor_back",
+        esc.CNL: "cursor_down1",
+        esc.CPL: "cursor_up1",
+        esc.CHA: "cursor_to_column",
+        esc.CUP: "cursor_position",
+        esc.ED: "erase_in_display",
+        esc.EL: "erase_in_line",
+        esc.IL: "insert_lines",
+        esc.DL: "delete_lines",
+        esc.DCH: "delete_characters",
+        esc.ECH: "erase_characters",
+        esc.HPR: "cursor_forward",
+        esc.DA: "report_device_attributes",
+        esc.VPA: "cursor_to_line",
+        esc.VPR: "cursor_down",
+        esc.HVP: "cursor_position",
+        esc.TBC: "clear_tab_stop",
+        esc.SM: "set_mode",
+        esc.RM: "reset_mode",
+        esc.SGR: "select_graphic_rendition",
+        esc.DSR: "report_device_status",
+        esc.DECSTBM: "set_margins",
+        esc.HPA: "cursor_to_column",
+        # The rest of what a VT400, a VT500, xterm and kitty send.
+        # `sequences.py` names them, and a key here can carry the
+        # intermediate bytes as well as the final one.
+        Csi.CBT: "cursor_to_previous_tab",
+        Csi.CHT: "cursor_to_next_tab",
+        Csi.DECCRA: "copy_rectangle",
+        Csi.DECDC: "delete_columns",
+        Csi.DECERA: "erase_rectangle",
+        Csi.DECFRA: "fill_rectangle",
+        Csi.DECIC: "insert_columns",
+        Csi.DECRQCRA: "report_checksum",
+        Csi.DECRQM: "report_mode",
+        Csi.DECSCA: "set_character_protection",
+        Csi.DECSACE: "set_attribute_extent",
+        Csi.DECSASD: "set_active_display",
+        Csi.DECSCL: "set_conformance_level",
+        Csi.DECSCUSR: "set_cursor_style",
+        Csi.DECSERA: "selective_erase_rectangle",
+        Csi.DECSNLS: "set_lines_per_screen",
+        Csi.DECSSDT: "set_status_line_type",
+        Csi.DECSLRM: "set_left_right_margins",
+        Csi.DECSTR: "soft_reset",
+        Csi.HPA: "cursor_to_absolute_column",
+        # HPB and VPB move the way CUB and CUU move, so they go to the
+        # same handlers. libvterm serves them from the same two lines
+        # of arithmetic as well.
+        Csi.HPB: "cursor_back",
+        Csi.VPB: "cursor_up",
+        Csi.REP: "repeat_last_character",
+        Csi.SD: "scroll_down",
+        Csi.SU: "scroll_up",
+        Csi.KITTY_KEYBOARD: "report_kitty_keyboard",
+        Csi.KITTY_UNSCROLL: "unscroll",
+        Csi.XTVERSION: "report_version",
+        Csi.XTWINOPS: "report_window",
+    }
+
+    #: A set of all events dispatched by the stream.
+    events = frozenset(
+        itertools.chain(
+            basic.values(),
+            escape.values(),
+            sharp.values(),
+            space.values(),
+            csi.values(),
+            ["define_charset"],
+            ["set_icon_name", "set_title"],  # OSC.
+            ["draw", "debug", "apc", "dcs"],
+        )
+    )
+
+    #: What a hot upgrade does with each attribute; `pyte.keep` says.
+    #: The parser is a suspended generator, which no snapshot can hold.
+    #: A load starts it on the ground state, and the bytes of a
+    #: sequence it was in the middle of are replayed into it.
+    #: Lillecarl/pymux#399.
+    KEEP: ClassVar[dict[str, Keep]] = {
+        "screen": Keep.REBUILT,
+        "strict": Keep.REBUILT,
+        "_parser": Keep.DROPPED,
+        "_tables": Keep.DROPPED,
+        "_ground": Keep.DROPPED,
+        "_taking_plain_text": Keep.DROPPED,
+        "_pending": Keep.SAVED,
+    }
+
+    def __init__(self, screen: Screen, strict: bool = True) -> None:
+        """
+        :param screen: the one screen this stream drives.
+        :param strict: refuse a screen that lacks a handler for an event.
+        """
+        self.screen = screen
+        self.strict = strict
+
+        self._taking_plain_text: bool | None = None
+
+        #: What the parser read since it last stood on the ground state:
+        #: the open sequence, which `replay` gives a new parser.
+        self._pending = ""
+
+        if strict:
+            for event in self.events:
+                if not hasattr(screen, event):
+                    raise TypeError(f"{screen} is missing {event}")
+
+        self._parser: ParserGenerator | None = None
+        self._initialize_parser()
+
+    def feed(self, data: str) -> None:
+        """Consume some data and advances the state as necessary.
+
+        :param str data: a blob of data to feed from.
+        """
+        send = self._send_to_parser
+        take = _take_ground
+        ground = self._ground
+        taking_plain_text = self._taking_plain_text
+
+        length = len(data)
+        offset = 0
+        # Where the sequence that is open began, in `data`. Noted per
+        # sequence and sliced once per feed, not kept per character:
+        # this loop is the hottest one in a pane.
+        opened = 0
+        while offset < length:
+            if taking_plain_text:
+                taken = take(data, offset, *ground)
+                if taken != offset:
+                    offset = opened = taken
+                else:
+                    taking_plain_text = False
+            else:
+                # A sequence is read here to its end, so the test of
+                # the loop above runs once per sequence and not per byte.
+                while True:
+                    taking_plain_text = send(data[offset : offset + 1])
+                    offset += 1
+                    if taking_plain_text:
+                        opened = offset
+                        break
+                    if offset >= length:
+                        break
+
+        self._taking_plain_text = taking_plain_text
+        if taking_plain_text:
+            self._pending = ""
+        elif opened:
+            self._pending = data[opened:]
+        else:
+            self._pending += data
+
+    def _send_to_parser(self, data: str) -> bool | None:
+        try:
+            assert self._parser is not None
+            return self._parser.send(data)
+        except Exception:
+            # Reset the parser state to make sure it is usable even
+            # after receiving an exception. See PR #101 for details.
+            self._initialize_parser()
+            raise
+
+    def _initialize_parser(self) -> None:
+        self._tables = self._dispatch_tables()
+        basic_dispatch, _sharp, _space, _escape, csi_dispatch = self._tables
+        # What `_take_ground` reads with: the same tables as the parser,
+        # so a handler a table makes for an unknown key is made once.
+        # A screen that is not strict may have no `define_charset`; the
+        # parser then meets the sequence, and fails there as it always did.
+        self._ground = (
+            self.screen.draw,
+            basic_dispatch,
+            csi_dispatch,
+            getattr(self.screen, "define_charset", None),
+        )
+        self._parser = self._parser_fsm()
+        self._taking_plain_text = next(self._parser)
+        self._pending = ""
+
+    def _dispatch_tables(self):
+        "The handler of every event, by the key that names it, per kind of sequence."
+        screen = self.screen
+        debug = screen.debug
+
+        def create_dispatcher(
+            mapping: Mapping[str, str],
+        ) -> dict[str, Callable[..., None]]:
+            return defaultdict(
+                lambda: debug,
+                {event: getattr(screen, attr) for event, attr in mapping.items()},
+            )
+
+        # Only a CSI sequence carries parameters, so only its handlers
+        # need the count trimmed and the defaults filled in.
+        csi_dispatch = defaultdict(
+            lambda: debug,
+            {event: fit_parameters(handler) for event, handler in create_dispatcher(self.csi).items()},
+        )
+        return (
+            create_dispatcher(self.basic),
+            create_dispatcher(self.sharp),
+            create_dispatcher(self.space),
+            create_dispatcher(self.escape),
+            csi_dispatch,
+        )
+
+    def replay(self) -> str:
+        """
+        What a new parser reads to stand where this one stands.
+
+        That is the open sequence, less the controls a CSI sequence
+        runs as it goes: those already acted, and a second parser would
+        act on them again. Everywhere else a control either ends the
+        sequence, and so is never pending, or is payload.
+        """
+        pending = self._pending
+        if pending.startswith((ctrl.ESC + "[", ctrl.CSI_C1)):
+            return pending.translate(_RUN_IN_CSI)
+        return pending
+
+    def after_thaw(self) -> None:
+        "Start the parser on the ground state, and read the open sequence again."
+        replay = self.replay()
+        self._initialize_parser()
+        if replay:
+            self.feed(replay)
+
+    @property
+    def ground_timer_active(self) -> bool:
+        "Is the parser part-way through a sequence, and not reading plain text?"
+        return not self._taking_plain_text
+
+    def ground_timer_expired(self) -> None:
+        """
+        Drop an incomplete sequence and return the parser to plain text.
+
+        The embedder calls this when a sequence has stayed open too
+        long: a program that writes a partial escape and then stops
+        would otherwise leave the parser reading every later byte
+        through the wrong state. The screen keeps everything it drew;
+        only the bytes of the sequence that never finished go.
+        Lillecarl/pymux#390.
+        """
+        self._initialize_parser()
+
+    def _parser_fsm(self) -> ParserGenerator:
+        """An FSM implemented as a coroutine.
+
+        This generator is not the most beautiful, but it is as performant
+        as possible. When a process generates a lot of output, then this
+        will be the bottleneck, because it processes just one character
+        at a time.
+
+        Don't change anything without profiling first.
+        """
+        basic = self.basic
+        screen = self.screen
+        draw = screen.draw
+        debug = screen.debug
+
+        ESC, CSI_C1 = ctrl.ESC, ctrl.CSI_C1
+        OSC_C1 = ctrl.OSC_C1
+        NUL_OR_DEL = ctrl.NUL + ctrl.DEL
+        CAN_OR_SUB = ctrl.CAN + ctrl.SUB
+        ALLOWED_IN_CSI = CONTROLS_IN_CSI
+        OSC_TERMINATORS = {ctrl.ST_C0, ctrl.ST_C1, ctrl.BEL}
+        # Intermediate bytes of a CSI sequence. ECMA-48 gives them the
+        # whole range 0x20 to 0x2f. They name the sequence together with
+        # the final byte, so the dispatch key holds them.
+        #
+        # Reading the whole range matters even for a sequence we do not
+        # act on. A "*" read as a final byte ends the sequence there,
+        # and the real final byte lands on the screen as text.
+        INTERMEDIATE_IN_CSI = "".join(chr(code) for code in range(0x20, 0x30))
+
+        basic_dispatch, sharp_dispatch, space_dispatch, escape_dispatch, csi_dispatch = self._tables
+        escape_mapping = self.escape
+
+        # String sequences (APC/DCS) dispatch to optional screen
+        # methods. Screens that don't implement them get ``debug``.
+        apc_dispatch = getattr(screen, "apc", debug)
+        dcs_dispatch = getattr(screen, "dcs", debug)
+        osc_dispatch = getattr(screen, "osc", debug)
+
+        while True:
+            # ``True`` tells ``Screen.feed`` that it is allowed to send
+            # chunks of plain text directly to the screen, instead
+            # of this generator.
+            char = yield True
+
+            if char == ESC:
+                # Most non-VT52 commands start with a left-bracket after the
+                # escape and then a stream of parameters and a command; with
+                # a single notable exception -- :data:`escape.DECOM` sequence,
+                # which starts with a sharp.
+                #
+                # .. versionchanged:: 0.4.10
+                #
+                #    For compatibility with Linux terminal stream also
+                #    recognizes ``ESC % C`` sequences for selecting control
+                #    character set. However, in the current version these
+                #    are noop.
+                char = yield None
+                if char == "[":
+                    char = CSI_C1  # Go to CSI.
+                elif char == "]":
+                    char = OSC_C1  # Go to OSC.
+                elif char in escape_mapping:
+                    # Custom escape sequences take precedence over the
+                    # string sequences below.
+                    escape_dispatch[char]()
+                    continue  # Don't go to CSI.
+                elif char in "_PX^":
+                    # APC ("_"), DCS ("P"), SOS ("X") and PM ("^") are
+                    # string sequences: an opaque payload terminated by
+                    # ST ("ESC \" or the 8-bit C1 ST), aborted by CAN or
+                    # SUB. The kitty graphics protocol and sixel images
+                    # travel in these. (Versionadded:: 0.8.3)
+                    dispatch = {
+                        "_": apc_dispatch,
+                        "P": dcs_dispatch,
+                    }.get(char)
+
+                    data = ""
+                    aborted = False
+                    while True:
+                        char = yield None
+                        if char == ctrl.CAN or char == ctrl.SUB:
+                            # Aborted. Nothing is dispatched.
+                            aborted = True
+                            break
+                        elif char == ctrl.ST_C1:
+                            break
+                        elif char == ESC:
+                            char = yield None
+                            if char == "\\":
+                                break
+                            # ESC followed by anything else stays part
+                            # of the payload. (Same behavior as the OSC
+                            # handling above.)
+                            data += ESC
+                        data += char
+
+                    if dispatch is not None and not aborted:
+                        dispatch(data)
+                    continue  # Don't go to CSI.
+                else:
+                    if char == "#":
+                        sharp_dispatch[(yield None)]()
+                    elif char == " ":
+                        space_dispatch[(yield None)]()
+                    elif char == "%":
+                        self.select_other_charset((yield None))
+                    elif char in "()*+":
+                        # "ESC ( 0" names the line drawing set of the
+                        # DEC terminals, which is how ncurses draws a
+                        # box. xterm and kitty both read it in UTF-8
+                        # mode, so this does too. The Unicode FAQ says
+                        # to drop it there, but a program that draws a
+                        # box then shows letters.
+                        #
+                        # "*" and "+" name G2 and G3, which a locking
+                        # or a single shift then brings in.
+                        # Lillecarl/pymux#373.
+                        code = yield None
+                        # "ESC ( % 6" names the Portuguese national
+                        # set. A name that does not fit in one byte
+                        # starts with "%", and the byte after it
+                        # finishes the name. Lillecarl/pymux#111.
+                        if code == "%":
+                            code += yield None
+                        screen.define_charset(code, mode=char)
+                    else:
+                        escape_dispatch[char]()
+                    continue  # Don't go to CSI.
+
+            if char in basic:
+                basic_dispatch[char]()
+            elif char == CSI_C1:
+                # All parameters are unsigned, positive decimal integers, with
+                # the most significant digit sent first. Any parameter greater
+                # than 9999 is set to 9999. If you do not specify a value, a 0
+                # value is assumed.
+                #
+                # .. seealso::
+                #
+                #    `VT102 User Guide <http://vt100.net/docs/vt102-ug/>`_
+                #        For details on the formatting of escape arguments.
+                #
+                #    `VT220 Programmer Ref. <http://vt100.net/docs/vt220-rm/>`_
+                #        For details on the characters valid for use as
+                #        arguments.
+                params = []
+                current = ""
+                subparams = None
+                private = False
+                interm = ""
+                while True:
+                    char = yield None
+                    if char in "?<=>":
+                        # CSI private markers. "?" is the classic private
+                        # marker; ">", "<" and "=" are used by, e.g., the
+                        # kitty keyboard protocol.
+                        if char == "?":
+                            private = True
+                        elif not private:
+                            private = char
+                        elif private is True:
+                            private = "?" + char
+                        else:
+                            private += char
+                    elif char in ALLOWED_IN_CSI:
+                        basic_dispatch[char]()
+                    elif char in INTERMEDIATE_IN_CSI:
+                        # Intermediate byte. It belongs to the name of
+                        # the sequence: "CSI Ps SP q" (DECSCUSR) is not
+                        # "CSI Ps q", and "CSI Ps SP D" is not CUB. The
+                        # "$" names the mode and area sequences, e.g.
+                        # "CSI ? Ps $ p" (DECRQM).
+                        interm += char
+                    elif char in CAN_OR_SUB:
+                        # If CAN or SUB is received during a sequence, the
+                        # current sequence is aborted; terminal displays
+                        # the substitute character, followed by characters
+                        # in the sequence received after CAN or SUB.
+                        draw(char)
+                        break
+                    elif char.isdigit():
+                        current += char
+                    elif char == ":":
+                        # Sub-parameters (used by, e.g., the kitty keyboard
+                        # protocol for event types and alternate keys).
+                        if subparams is None:
+                            subparams = [int(current or 0)]
+                        else:
+                            subparams.append(int(current or 0))
+                        current = ""
+                    elif char == ";":
+                        if subparams is None:
+                            # An empty parameter is None and not zero, so
+                            # that a handler can tell "the program said
+                            # nothing here" from "the program said zero".
+                            # Some sequences read the two differently.
+                            # Lillecarl/pymux#178.
+                            params.append(None if current == "" else int(current))
+                        else:
+                            params.append(tuple([*subparams, int(current or 0)]))
+                            subparams = None
+                        current = ""
+                    else:
+                        # Final byte of the CSI sequence.
+                        #
+                        # NOTE: Parameters are not capped, because the kitty
+                        # keyboard protocol uses functional key codes above
+                        # 9999.
+                        if subparams is not None:
+                            params.append(tuple([*subparams, int(current or 0)]))
+                        elif current != "" or params:
+                            # An empty parameter *string* is not one empty
+                            # parameter. ECMA-48 reads "CSI m" as "the
+                            # defaults apply throughout", so it carries no
+                            # parameter at all, while "CSI ; m" carries two
+                            # that were left out.
+                            params.append(None if current == "" else int(current))
+
+                        # An intermediate byte makes another sequence:
+                        # it is part of the key that names the handler.
+                        event = interm + char
+                        if private is True:
+                            csi_dispatch[event](*params, private=True)
+                        elif private:
+                            csi_dispatch[event](*params, private=private)
+                        else:
+                            csi_dispatch[event](*params)
+                        break  # CSI is finished.
+            elif char == OSC_C1:
+                char = yield None
+                if char == "R":
+                    continue  # Reset palette. Not implemented.
+                elif char == "P":
+                    continue  # Set palette. Not implemented.
+
+                # The code is a number of any length. Reading a single
+                # character would turn "OSC 11" into "OSC 1", and every
+                # code above nine into the wrong one.
+                code = ""
+                while char.isdigit() and len(code) < MAX_OSC_CODE_LENGTH:
+                    code += char
+                    char = yield None
+
+                # `char` now holds the delimiter after the code: a ";"
+                # or a terminator. Everything up to the terminator is
+                # the payload.
+                param = ""
+                while True:
+                    if char == ESC:
+                        char += yield None
+                    if char in OSC_TERMINATORS:
+                        break
+                    param += char
+                    char = yield None
+
+                param = param.removeprefix(";")
+
+                if code in ("0", "1", "2"):
+                    if code in ("0", "1"):
+                        screen.set_icon_name(param)
+                    if code in ("0", "2"):
+                        screen.set_title(param)
+                elif code:
+                    # Every other code goes to the optional `osc` hook:
+                    # colour control, the clipboard, notifications and
+                    # the rest travel this way.
+                    osc_dispatch(code, param)
+            elif char not in NUL_OR_DEL:
+                draw(char)
+
+    def select_other_charset(self, code: str) -> None:
+        """Select other (non G0 or G1) charset.
+
+        :param str code: character set code, should be a character from
+                         ``"@G8"``, otherwise ignored.
+
+        .. note:: We currently follow ``"linux"`` and only use this
+                  command to switch from ISO-8859-1 to UTF-8 and back.
+
+        .. versionadded:: 0.6.0
+
+        .. seealso::
+
+           `Standard ECMA-35, Section 15.4 \
+           <http://ecma-international.org/publications/standards/Ecma-035.htm>`_
+           for a description of VTXXX character set machinery.
+        """
+        # A noop since all input is Unicode-only.
+
+
+class GroundTimer:
+    """
+    Bound how long a stream may stay out of plain text.
+
+    A program can write a partial escape and then stop. `Stream` then
+    reads every later byte as part of that sequence, and the screen
+    shows the wrong thing until something resets the parser. This does
+    that: bytes arriving `timeout` seconds after the parser left plain
+    text drop the unfinished sequence (`Stream.ground_timer_expired`),
+    which wastes only its own bytes.
+
+    **The embedder owns the clock.** `now` returns the current time,
+    so an embedder passes `time.monotonic` and this layer still
+    imports no `time`. Lillecarl/pymux#390, Lillecarl/pymux#484.
+    """
+
+    def __init__(
+        self,
+        stream: Stream,
+        timeout: float,
+        now: Callable[[], float],
+    ) -> None:
+        self.stream = stream
+        self.timeout = timeout
+        self.now = now
+
+        #: When the parser stopped being plain text, or `None` when it
+        #: is reading plain text.
+        self.since: float | None = None
+
+    def feed(self, data: str) -> None:
+        "Feed the stream, dropping a sequence that stayed open too long."
+        now = self.now()
+
+        if self.since is not None and now - self.since >= self.timeout:
+            self.stream.ground_timer_expired()
+
+        self.stream.feed(data)
+
+        if self.stream.ground_timer_active:
+            if self.since is None:
+                self.since = now
+        else:
+            self.since = None
