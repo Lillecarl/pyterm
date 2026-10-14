@@ -62,8 +62,8 @@ let
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
       (pyFinal: pyPrev:
         lib.optionalAttrs (lib.versionAtLeast pyPrev.python.pythonVersion "3.15") {
-          # The python315 of this snapshot is 3.15.0rc2, one release
-          # candidate past the packages it brings, and the binary cache
+          # The python315 of this snapshot is 3.15.0 final, one release
+          # past some of the packages it brings, and the binary cache
           # holds no 3.15 build of them -- so the packages build from
           # source here, and their own suites run against the RC. What
           # follows is every package that would not build, brought to
@@ -203,7 +203,10 @@ let
           });
 
           # Bumped: mypyc's compiled-run tests fail on the snapshot's
-          # 2.1.0; 2.3.1 is where upstream tracks 3.15.
+          # 2.1.0; 2.3.1 is where upstream tracks 3.15. The nixpkgs
+          # patch is a 3.15 backport 2.3.1 already carries (its include
+          # order is upstream's, and the `pprint` call it touches is
+          # gone), so it no longer applies and is dropped.
           mypy = pyPrev.mypy.overridePythonAttrs (_old: rec {
             version = "2.3.1";
             src = pkgs.fetchFromGitHub {
@@ -211,6 +214,143 @@ let
               repo = "mypy";
               tag = "v${version}";
               hash = "sha256-EkZVBWlT8l3oIC9UuDEJua6dxFDIL0o9k/3FJJFqMB4=";
+            };
+            patches = [ ];
+          });
+
+          # Bumped: the snapshot's 4.2.0 fails one dataclass brain test
+          # on 3.15 (`test_kw_only_sentinel`: the fields it infers
+          # changed); 4.3.4 is where upstream tracks 3.15 (PEP 810, PEP
+          # 798, and the `kw_only` handling around this test). One
+          # TypedDict brain test still fails there
+          # (`__required_keys__` is gone on 3.15), in inference the
+          # collection never reaches, so only that test is skipped.
+          astroid = pyPrev.astroid.overridePythonAttrs (old: rec {
+            version = "4.3.4";
+            src = pkgs.fetchPypi {
+              pname = "astroid";
+              inherit version;
+              hash = "sha256-1RWhBXIrcgmLvoLUMNZeY190K2y6w736+LfBiLh8Xjk=";
+            };
+            disabledTests = (old.disabledTests or [ ]) ++ [
+              "test_typed_dict_required_and_optional_keys"
+            ];
+          });
+
+          # Bumped: the snapshot's 4.14.2 fails its TLS connectable
+          # tests on 3.15 (`server_hostname can only be specified in
+          # client mode`) and one lock cancellation test; 4.15.1 is
+          # the latest release. Its own TLS tests still fail there --
+          # 3.15 hardened the server side against a hostname -- and a
+          # handful of others trip over unraisable-exception warnings
+          # 3.15 emits where 3.14 stayed silent. None of it is the
+          # paths the collection drives (anyio's own loop, no TLS
+          # server here), so the failing tests are skipped.
+          # `test_sourceless_install` shells out to pip, which cannot
+          # fetch an isolated build backend in the sandbox.
+          anyio = pyPrev.anyio.overridePythonAttrs (old: rec {
+            version = "4.15.1";
+            src = pkgs.fetchPypi {
+              pname = "anyio";
+              inherit version;
+              hash = "sha256-nygwYBjL1tMp5ko21YJW7f923Zlv5CO8lXMm5Xi4KpQ=";
+            };
+            disabledTests = (old.disabledTests or [ ]) ++ [
+              "test_tls_connectable"
+              "test_receive_invalid_max_bytes"
+              "TestTLSStream::test_unwrap"
+              "test_checkpoints_empty_results"
+              "test_sourceless_install"
+              "test_start_no_value"
+              "test_glob_case_sensitive"
+              "test_rglob"
+            ];
+          });
+
+          # Bumped: the snapshot's 2.2.1 fails its bytecode verifier
+          # tests on 3.15 (`ast.Name is not created from CALL`: new
+          # opcodes); 2.3.0 is the latest release and declares 3.15.
+          executing = pyPrev.executing.overridePythonAttrs (_old: rec {
+            version = "2.3.0";
+            src = pkgs.fetchPypi {
+              pname = "executing";
+              inherit version;
+              hash = "sha256-FZGctdZn5ctOCZURlx0A1llXP/8t1cTmzYtxY2x4WNI=";
+            };
+          });
+
+          # Bumped: the snapshot's 2.13.4 fails five base64url tests on
+          # 3.15 (URL-safe validation warns where it raised); 2.14.1 is
+          # the latest release. The nixpkgs pytest-9.1 patch is already
+          # upstream there, so it no longer applies and is dropped.
+          # Same fetch shape as nixpkgs (the monorepo, not the PyPI
+          # sdist): its `disabledTestPaths` globs name the
+          # `pydantic-core` tests the sdist does not carry. One module
+          # is new in 2.14 and needs `pytest-examples`, a test-only
+          # dependency nothing here takes, so that path alone is
+          # skipped beside them.
+          pydantic = pyPrev.pydantic.overridePythonAttrs (old: rec {
+            version = "2.14.1";
+            src = pkgs.fetchFromGitHub {
+              owner = "pydantic";
+              repo = "pydantic";
+              tag = "v${version}";
+              hash = "sha256-sk7BkUmVcDRNzcZz5czHxhyaDD1e7hHrR0cHeYU97J8=";
+            };
+            patches = [ ];
+            disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+              "tests/pydantic_core/test_docstrings.py"
+            ];
+          });
+
+          # Bumped alongside pydantic: 2.14.1 pins `pydantic-core==2.50.1`
+          # and needs `typing-inspection>=0.4.4`, and the snapshot holds
+          # 2.46.4 and 0.4.3. Same fetch shape as nixpkgs (GitHub tag,
+          # vendored cargo tree).
+          pydantic-core = pyPrev.pydantic-core.overridePythonAttrs (old: rec {
+            version = "2.50.1";
+            src = pkgs.fetchFromGitHub {
+              owner = "pydantic";
+              repo = "pydantic";
+              tag = "core-v${version}";
+              hash = "sha256-sk7BkUmVcDRNzcZz5czHxhyaDD1e7hHrR0cHeYU97J8=";
+            };
+            sourceRoot = "${src.name}/pydantic-core";
+            cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+              inherit (old) pname;
+              inherit version src sourceRoot;
+              hash = "sha256-EPTH6oOFIhsRHAvt3eS0mYbR1NMyjoPIs2YRPzd6QFU=";
+            };
+          });
+
+          # Already the latest release (1.12.2): its PyO3 0.27.2 caps
+          # at 3.14 and its code does not compile on 3.15, while
+          # upstream's PyO3 0.29 move is unreleased. Pinned to the
+          # master that carries it, by commit hash: backporting the
+          # serializer rework that move took would be a fork, and this
+          # is upstream's own tested tree instead. `RUSTC_BOOTSTRAP`
+          # is nixpkgs', kept, and its own suite builds the extension
+          # and round-trips every type through it.
+          ormsgpack = pyPrev.ormsgpack.overridePythonAttrs (old: rec {
+            src = pkgs.fetchFromGitHub {
+              owner = "aviramha";
+              repo = "ormsgpack";
+              rev = "14e0c40614e513c525e73fdd761896a90d6351ef";
+              hash = "sha256-oxENFLzHQ6EBIwpd08wdJhq6Vo3EuL3LfOmEW7uDPEE=";
+            };
+            cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+              inherit (old.cargoDeps) pname;
+              inherit src;
+              hash = "sha256-adha1uKQgKiYEVFLwSYB1ztIzUoZZWe6oYmybZgFHAA=";
+            };
+          });
+
+          typing-inspection = pyPrev.typing-inspection.overridePythonAttrs (_old: rec {
+            version = "0.4.4";
+            src = pkgs.fetchPypi {
+              pname = "typing_inspection";
+              inherit version;
+              hash = "sha256-VHJ0+msKVhzPVJzJUkuZmleOc30BXYcJ0CH50NE76kc=";
             };
           });
         })
