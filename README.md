@@ -227,7 +227,7 @@ with the token as the only guard and no TLS unless something else adds it.
 
 **The server never imports a web library.** `pymux web` runs beside a server and
 reaches it over the ordinary socket, one stream per viewer, so the web half is
-an extra: `pip install pymux[web]`, or
+an extra (requires Python >=3.14; pymux is not on PyPI, install via Nix):
 
     nix build --file . pymux-web
 
