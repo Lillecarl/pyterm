@@ -1,0 +1,60 @@
+# The esctest2 tests that fail with the suite running as a program
+# inside a txterm widget, inside a Textual application, on Textual's own
+# event loop. 565 tests ran, and these eight failed.
+#
+# ptterm/tests/esctest-failures.txt is the same suite on a bare pty,
+# with no toolkit anywhere. **The two lists together are the answer to
+# Lillecarl/pymux#82**: a name here and not there would be txterm's own,
+# and there is not one.
+#
+# Three are on both lists, so they are the screen's and not a front
+# end's:
+#
+#     DATests.test_DA_0
+#     DATests.test_DA_NoParameter
+#     ResetSpecialColorTests.test_ResetSpecialColor_Dynamic
+#
+# The two DA tests ask for all thirteen extensions that xterm names. A
+# pane names ten, and the four it leaves out are ones it really does
+# not have: the printer port, the locator port, user windows and the
+# ANSI text locator. `ptterm/tests/DEVIATIONS.md` entry 18 says why,
+# and says how the two character set numbers left that list and came
+# back to it. Lillecarl/pymux#112. Lillecarl/pymux#111.
+#
+# Five are here alone, and all five ask the terminal to change size.
+# A widget sits in a layout that somebody else owns, so `Terminal` says
+# no, and the modes that only exist where a program can have a
+# different page go away. ptterm's own host owns its pty and can say
+# yes, which is the whole difference. `pymux` has a list of its own for
+# the same reason.
+#
+# Two are on ptterm's list and not on this one:
+#
+#     DECSETTests.test_DECSET_DECNCSM
+#     ManipulateSelectionDataTests.test_ManipulateSelectionData_default
+#
+# **Both follow from the resize, and neither is a difference in what
+# the screen does.** DECNCSM is about what DECCOLM clears, and nothing
+# here changes columns.
+#
+# The second is esctest2's own bookkeeping. Measured: the test fails
+# identically on both hosts, with the same "Timeout waiting to read"
+# from `escio.ReadOSC("52")`, because the screen writes the clipboard
+# and does not read it (`ptterm/tests/DEVIATIONS.md` entry 19). It is
+# decorated `@optionRequired(terminal="xterm", option=XTERM_WINOPS_ENABLED)`,
+# and that decorator downgrades a failure to an expected one when the
+# option is absent. ptterm's host passes the option because it answers
+# a resize; this one does not, so the same failure is excused here and
+# counted there. Lillecarl/pymux#124.
+#
+# To write this file again:
+#     nix build --file . checks.txterm-esctest.run
+#     cp result/failures.txt txterm/tests/esctest-failures.txt
+DATests.test_DA_0
+DATests.test_DA_NoParameter
+DECRQSSTests.test_DECRQSS_DECSLPP
+DECSETTests.test_DECSET_Allow80To132
+DECSETTests.test_DECSET_DECCOLM
+RISTests.test_RIS_ResetDECCOLM
+ResetSpecialColorTests.test_ResetSpecialColor_Dynamic
+XtermWinopsTests.test_XtermWinops_DECSLPP
