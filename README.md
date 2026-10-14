@@ -1112,21 +1112,35 @@ every pane's scrollback. The three commands above need none of it.
 ## The repository of each source
 
 Each source keeps a repository of its own, and josh fills it from this one.
-`.github/josh-export.sh` filters this history through `:/<source>` for each
-source and pushes the result. The filter gives back the commits each source
-always had, with their own hashes, so the history of every repository goes
-on where it stopped. Lillecarl/pymux#667.
+`josh-export` (`pkgs/josh-export`) filters this history through
+`:/<source>` for each source and pushes the result. The filter gives back
+the commits each source always had, with their own hashes, so the history
+of every repository goes on where it stopped. Lillecarl/pymux#667.
 
 The workflow `josh-export.yml` runs it after every push. It never forces a
 push. It refuses a source whose repository holds a commit this repository
 does not, so a commit made straight in one of them stops the export of that
 source rather than disappearing. Commit here.
 
-josh is pinned to one nixpkgs revision in the workflow. Another version of
-josh may filter the same history to other hashes, and every export after
-that would be refused.
+josh comes from the nixpkgs `flake.lock` pins. Another version of josh may
+filter the same history to other hashes, and then every export is refused:
+**after a nixpkgs update, run `josh-export HEAD` before the push** and read
+that every source still says ok.
 
-The script runs by hand as well, from a checkout with the whole history:
+Each exported repository stands on its own: `nix run github:Lillecarl/pymux`
+works, and so does `nix build --file .` in a clone. Its `flake.nix` has one
+input, pyterm, and its `default.nix` builds its own directory against its
+siblings there, through flake-compatish. Lillecarl/pymux#670. So its
+`flake.lock` names a pyterm commit, and `lock-subtrees` writes it: pyterm's
+own lock with a pyterm node on top. A commit cannot name itself, so the locks
+name the commit under them and land as a commit of their own. The export
+refuses a lock that names a commit with anything but locks changed since,
+and `--verify` requires that each exported tree builds the derivation pyterm
+builds for it here.
 
-    .github/josh-export.sh HEAD          # report what an export would do
-    .github/josh-export.sh HEAD --push   # and do it
+Both run by hand, from a checkout with the whole history:
+
+    nix run --file . lock-subtrees                    # lock to HEAD, and commit
+    nix run --file . lock-subtrees -- --check         # are the locks current
+    nix run --file . josh-export -- HEAD --verify     # what an export would do
+    nix run --file . josh-export -- HEAD --push       # and do it

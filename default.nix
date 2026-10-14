@@ -537,6 +537,8 @@ rec {
   # Writes each source's flake.lock from this one, and checks them before an
   # export. Lillecarl/pymux#670.
   lock-subtrees = pkgs.callPackage ./pkgs/lock-subtrees { };
+  # Filters each source out of this repository into its own. Lillecarl/pymux#667.
+  josh-export = pkgs.callPackage ./pkgs/josh-export { };
 
 
   # The collection's package scopes, one per interpreter: the same

@@ -1,7 +1,8 @@
 # The collection
 
 One repository. Each directory is a source with one job, and josh
-exports each to a repository of its own (`.github/josh-export.sh`):
+exports each to a repository of its own (`pkgs/josh-export`), which
+builds alone through its own `flake.lock` (`pkgs/lock-subtrees`):
 
 | directory | job |
 | --- | --- |

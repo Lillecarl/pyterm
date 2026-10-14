@@ -1,5 +1,6 @@
-# Export each source to its own repository. `.github/josh-export.sh` says
-# what it checks before a push. Lillecarl/pymux#667.
+# Export each source to its own repository. `pkgs/josh-export` says what it
+# checks before a push, and `pkgs/lock-subtrees` why every source's lock has
+# to name the commit under it. Lillecarl/pymux#667, Lillecarl/pymux#670.
 
 name: josh export
 on:
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   export:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       # josh filters the whole history, and the default depth is one commit.
       # A persisted credential is the run's own GITHUB_TOKEN, sent as a
@@ -32,19 +33,11 @@ jobs:
         timeout-minutes: 10
       - uses: cachix/install-nix-action@master
         timeout-minutes: 15
-      # josh at the nixpkgs revision the first export was made with. Another
-      # version may filter the same history to other hashes, and then every
-      # push after it is refused as not a fast-forward.
-      - name: Install josh
-        run: |
-          josh=$(nix build --no-link --print-out-paths \
-            github:NixOS/nixpkgs/aff8a0b28396750446e5537a96461bc4facdb287#josh)
-          echo "$josh/bin" >> "$GITHUB_PATH"
-        timeout-minutes: 15
+      - name: Check the locks of the sources
+        run: nix run --file . lock-subtrees -- --check "$GITHUB_SHA"
+        timeout-minutes: 20
       - name: Export
         env:
-          TOKEN: ${{ secrets.JOSH_EXPORT_TOKEN }}
-        run: |
-          JOSH_REMOTE="https://x-access-token:${TOKEN}@github.com/Lillecarl/%s.git" \
-            .github/josh-export.sh "$GITHUB_SHA" --push
-        timeout-minutes: 10
+          JOSH_REMOTE: "https://x-access-token:${{ secrets.JOSH_EXPORT_TOKEN }}@github.com/Lillecarl/{}.git"
+        run: nix run --file . josh-export -- "$GITHUB_SHA" --verify --push
+        timeout-minutes: 30

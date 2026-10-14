@@ -102,12 +102,19 @@ bookmarks. Move `main` yourself.
 ## Finishing a piece of work
 
     jj commit -m "..."
+    nix run --file . lock-subtrees     # commits each source's flake.lock
     jj bookmark set main -r @-
     jj git push
 
+Every push needs the lock commit, a change to the docs too: each source's
+`flake.lock` names the pyterm commit under it, and the export refuses one
+that names a commit with anything but locks changed since. The README's
+"The repository of each source" says why.
+
 The push starts the export. Read its run with `gh run list --workflow
-josh-export.yml`: a red export means a source's repository moved on its
-own, and that wants a person, not a force push.
+josh-export.yml`. A red export says why in its log: a stale lock, a tree
+that does not build alone, or a source's repository that moved on its own.
+The last wants a person, not a force push.
 
 ## When someone else has moved main
 
