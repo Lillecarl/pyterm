@@ -1,0 +1,523 @@
+"""
+A program on a pty, from end to end.
+
+`Process` starts a program, pumps what it writes to `receive`, and
+writes back what a caller sends. Nothing here parses any of it, which
+is the whole shape of this package.
+
+**Most programs below wait at the end instead of exiting.** They were
+written that way because what a program wrote just before it exited
+was sometimes lost: the reaper closed the pty without draining it, so
+a test that ended its program at once failed about once in a dozen
+runs for a reason that had nothing to do with what it asked. The reap
+drains now (Lillecarl/pymux#121), and `linger=False` says so where it
+is the point.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import signal
+import sys
+
+import anyio
+import pytest
+
+from ptyhost import Process
+from ptyhost.backends.posix import PosixBackend, spawn_of
+from ptyhost.spawn import Spawn, exec_pipe, run_in_child, wait_for_exec
+
+#: How long a test may wait for a program to say something, in seconds.
+#: Every one of these is a fork and a write, so this is generous and a
+#: run that reaches it has gone wrong.
+TIMEOUT = 5.0
+
+#: How often to look while waiting. The pump runs on its own task, so
+#: this only sets how fast the test notices.
+TICK = 0.01
+
+#: What keeps a program alive after it has said its piece. The test
+#: kills it, so the number only has to be longer than the test.
+LINGER = "\nimport time\ntime.sleep(30)\n"
+
+
+def names_of(program: str) -> set[str]:
+    """
+    What a pty may call a running `program`. Linux reads `argv[0]`;
+    macOS reads `p_comm`, the executable's own file name cut to 16
+    bytes, and nix's `sleep` is a link to the one `coreutils`.
+    """
+    return {os.path.basename(program), os.path.basename(os.path.realpath(program))[:16]}
+
+
+async def until(said, text: str) -> None:
+    "Wait for `text` to turn up in what the program wrote."
+    try:
+        with anyio.fail_after(TIMEOUT):
+            while text not in "".join(said):
+                await anyio.sleep(TICK)
+    except TimeoutError:
+        raise AssertionError("waited %g seconds for %r; the program wrote %r" % (TIMEOUT, text, "".join(said)))
+
+
+async def running(program: str, said, ended=None, linger: bool = True, priority=None, *, task_group):
+    "A `Process` on a python program, sized and started, watched by the group."
+    command = [sys.executable, "-c", program + (LINGER if linger else "")]
+    backend = PosixBackend(spawn_of(command))
+    process = Process(
+        backend=backend,
+        receive=said.append,
+        done_callback=ended,
+        has_priority=priority,
+    )
+    process.set_size(80, 24)
+    await process.start(task_group)
+    return process
+
+
+async def test_what_a_program_writes_reaches_the_callback():
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running("print('hello from the pty')", said, task_group=task_group)
+        try:
+            await until(said, "hello from the pty")
+        finally:
+            process.kill()
+
+
+async def test_what_a_caller_writes_reaches_the_program():
+    "The program reads a line and writes it back."
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running("print('<' + input() + '>')", said, task_group=task_group)
+        try:
+            # The pty echoes as well, so the marks are what the program made.
+            process.write_input("ping\n")
+            await until(said, "<ping>")
+        finally:
+            process.kill()
+
+
+async def test_the_program_is_told_how_big_the_pty_is():
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running(
+            "import os\nsize = os.get_terminal_size()\nprint('SIZE %d %d' % (size.columns, size.lines))",
+            said,
+            task_group=task_group,
+        )
+        try:
+            await until(said, "SIZE 80 24")
+        finally:
+            process.kill()
+
+
+async def test_a_resize_reaches_a_program_that_is_already_running():
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running(
+            "import os, signal, sys\n"
+            "def report(*_):\n"
+            "    size = os.get_terminal_size()\n"
+            "    print('SIZE %d %d' % (size.columns, size.lines), flush=True)\n"
+            "signal.signal(signal.SIGWINCH, report)\n"
+            "print('READY', flush=True)",
+            said,
+            task_group=task_group,
+        )
+        try:
+            await until(said, "READY")
+            process.set_size(40, 10)
+            await until(said, "SIZE 40 10")
+        finally:
+            process.kill()
+
+
+async def test_a_tap_hears_a_resize_once():
+    "A recorder keeps the size changes, so a replay draws at the size the program drew at."
+    said = []
+    tapped = []
+    async with anyio.create_task_group() as task_group:
+        process = await running("print('READY', flush=True)", said, task_group=task_group)
+        try:
+            process.tap = lambda kind, data: tapped.append((kind, data)) if kind == "size" else None
+            process.set_size(80, 24)
+            process.set_size(40, 10)
+            process.set_size(40, 10)
+            assert tapped == [("size", "40x10")]
+        finally:
+            process.kill()
+
+
+async def test_the_end_of_a_program_is_reported():
+    "The one program that ends. Nothing here reads what it wrote."
+    said = []
+    ended = anyio.Event()
+    async with anyio.create_task_group() as task_group:
+        process = await running("pass", said, ended.set, linger=False, task_group=task_group)
+        try:
+            with anyio.fail_after(TIMEOUT):
+                await ended.wait()
+        finally:
+            process.kill()
+
+
+@pytest.mark.parametrize(("program", "code"), [("raise SystemExit(3)", 3), ("import os; os.kill(os.getpid(), 9)", -9)])
+async def test_the_end_of_a_program_says_how_it_ended(program, code):
+    ended = anyio.Event()
+    async with anyio.create_task_group() as task_group:
+        process = await running(program, [], ended.set, linger=False, task_group=task_group)
+        with anyio.fail_after(TIMEOUT):
+            await ended.wait()
+        assert process.backend.returncode == code
+
+
+@pytest.mark.parametrize("run", range(12))
+async def test_the_last_thing_a_program_writes_arrives(run):
+    """
+    A program writes and exits at once, and every character of it
+    reaches the screen.
+
+    It did not. The reaper closed the pty without reading it, so what
+    the kernel still held went with it whenever the loop had not
+    turned since the write. Eleven of twelve runs arrived, and the one
+    that failed lost the lot.
+
+    That is the last thing a program draws before it quits, which is
+    often the thing a person wanted: the error a build printed as it
+    died, the summary a test runner writes on its last line. Twelve
+    runs, because once is not a measurement of a race.
+    Lillecarl/pymux#121.
+    """
+    said = []
+    ended = anyio.Event()
+    async with anyio.create_task_group() as task_group:
+        process = await running(
+            "import sys; sys.stdout.write('the last word'); sys.stdout.flush()",
+            said,
+            ended.set,
+            linger=False,
+            task_group=task_group,
+        )
+        try:
+            with anyio.fail_after(TIMEOUT):
+                await ended.wait()
+            await until(said, "the last word")
+        finally:
+            process.kill()
+
+
+async def test_a_program_that_ended_is_terminated():
+    """
+    `is_terminated` says there is nothing more to read.
+
+    It never became true. The reader sets its flag on a read that
+    gives back nothing, and nothing reads after the child is reaped:
+    `_waitpid` takes the reader away and closes the pty. So a pane
+    whose program had exited read as alive for the life of the server,
+    and `#{pane_dead}` answered "0" forever.
+    Lillecarl/pymux#120.
+    """
+    said = []
+    ended = anyio.Event()
+    async with anyio.create_task_group() as task_group:
+        process = await running("pass", said, ended.set, linger=False, task_group=task_group)
+        try:
+            with anyio.fail_after(TIMEOUT):
+                await ended.wait()
+            with anyio.fail_after(1.0):
+                while not process.is_terminated:
+                    await anyio.sleep(TICK)
+        finally:
+            process.kill()
+
+
+async def test_a_suspended_program_is_not_read():
+    """
+    Copy mode suspends a pane. The program keeps running and nothing
+    reads it, and a resume picks up what it wrote in the meantime.
+    """
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running("import time\ntime.sleep(0.2)\nprint('late', flush=True)", said, task_group=task_group)
+        try:
+            process.suspend()
+            await anyio.sleep(0.4)
+            assert "late" not in "".join(said)
+            process.resume()
+            await until(said, "late")
+        finally:
+            process.kill()
+
+
+async def test_a_program_that_ends_while_suspended_waits_for_the_resume():
+    """
+    Copy mode stops a pane, and the promise is that no row of the
+    screen changes while a person reads it. A program that ends in the
+    meantime does not get to break that: its last words wait for the
+    resume, the way anything else it wrote does.
+
+    The reap makes the end of the file reachable (Lillecarl/pymux#121),
+    so the reader has something to give the moment it goes back on the
+    loop. It may not go back by itself.
+    """
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running("print('last', flush=True)", said, linger=False, task_group=task_group)
+        try:
+            process.suspend()
+            await anyio.sleep(0.4)
+            assert "last" not in "".join(said)
+            process.resume()
+            await until(said, "last")
+        finally:
+            process.kill()
+
+
+async def test_several_programs_that_nobody_watches_are_still_read():
+    """
+    A program that nobody is looking at waits for a turn of the event
+    loop that nothing else wants, or for its deadline, whichever comes
+    first. **The deadline is what makes this safe**, and it is easy to
+    lose: the re-queues that each waiting program makes are what keeps
+    the loop busy for the others, so with more than one of them an idle
+    loop never comes.
+
+    pymux froze entirely on two panes of Claude Code for exactly that
+    reason, for as long as a deadline of `time.time() + 1` was read as
+    a duration and landed fifty-seven years out. Lillecarl/pymux#122.
+    """
+    watched = [[] for _ in range(4)]
+
+    def nobody_is_looking():
+        return False
+
+    async with anyio.create_task_group() as task_group:
+        programs = [
+            await running(
+                "print('pane %d', flush=True)" % number,
+                said,
+                priority=nobody_is_looking,
+                task_group=task_group,
+            )
+            for number, said in enumerate(watched)
+        ]
+        try:
+            for number, said in enumerate(watched):
+                await until(said, "pane %d" % number)
+        finally:
+            for process in programs:
+                process.kill()
+
+
+async def test_a_program_starts_in_the_environment_and_directory_it_was_given(tmp_path):
+    """
+    The edit runs here and not in the child, so this process keeps its
+    own environment, and the program is found on the PATH it was given.
+    Lillecarl/pymux#553.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "only-here").symlink_to(sys.executable)
+    program = "import os, time; print('%s in %s' % (os.environ['GIVEN'], os.getcwd()), flush=True); time.sleep(30)"
+
+    def environment(env: dict[str, str]) -> None:
+        env["GIVEN"] = "given"
+        env["PATH"] = str(bin_dir)
+
+    before = dict(os.environ)
+    said: list[str] = []
+    backend = PosixBackend(spawn_of(["only-here", "-c", program], environment, str(tmp_path)))
+    async with anyio.create_task_group() as task_group:
+        process = Process(backend=backend, receive=said.append)
+        process.set_size(400, 24)
+        await process.start(task_group)
+        try:
+            await until(said, "given in %s" % (tmp_path,))
+            assert dict(os.environ) == before
+        finally:
+            process.kill()
+
+
+async def test_a_program_gets_sigwinch_and_this_process_keeps_its_mask():
+    "The fork blocks SIGWINCH until the child has reset it; neither side stays blocked."
+    # The mask an exec keeps, read from the program itself: /proc is Linux's.
+    program = (
+        "import signal\n"
+        "blocked = signal.SIGWINCH in signal.pthread_sigmask(signal.SIG_BLOCK, [])\n"
+        "print('WINCH BLOCKED' if blocked else 'WINCH FREE', flush=True)"
+    )
+    said: list[str] = []
+    async with anyio.create_task_group() as task_group:
+        process = await running(program, said, task_group=task_group)
+        try:
+            await until(said, "WINCH")
+            assert "WINCH FREE" in "".join(said)
+            assert signal.SIGWINCH not in signal.pthread_sigmask(signal.SIG_BLOCK, [])
+        finally:
+            process.kill()
+
+
+@pytest.mark.parametrize("text", ["ä", "日本", "🙂"])
+async def test_a_character_split_across_two_reads_survives(text):
+    """
+    A read can end in the middle of a character. `PtyReader` keeps what
+    it cannot finish until the rest arrives.
+    """
+    said = []
+    # The bytes and not the character: the source of the child is plain
+    # ASCII this way, so what a locale would do to it is not part of
+    # the question.
+    async with anyio.create_task_group() as task_group:
+        process = await running(
+            "import sys, time\n"
+            "for byte in %r:\n"
+            "    sys.stdout.buffer.write(bytes([byte]))\n"
+            "    sys.stdout.buffer.flush()\n"
+            "    time.sleep(0.01)\n" % (text.encode("utf-8"),),
+            said,
+            task_group=task_group,
+        )
+        try:
+            await until(said, text)
+        finally:
+            process.kill()
+
+
+async def test_a_started_program_has_already_exec_d():
+    """
+    `start` returns once the child has exec'd, so the name read off the
+    pty's foreground is the program's and never the fork's.
+    Lillecarl/pymux#562.
+    """
+    sleep = shutil.which("sleep")
+    if sleep is None:
+        pytest.skip("no sleep on the PATH")
+    async with anyio.create_task_group() as task_group:
+        backend = PosixBackend(spawn_of([sleep, "30"]))
+        process = Process(backend=backend, receive=lambda data: None)
+        process.set_size(80, 24)
+        await process.start(task_group)
+        try:
+            assert os.path.basename(backend.get_name() or "") in names_of(sleep)
+        finally:
+            process.kill()
+
+
+def test_a_child_that_cannot_take_its_pty_never_returns():
+    """
+    A failure before the exec ends the child where it is. Returned into
+    its caller, a child of the holder would run a second holder, and
+    one of the server a second server. A pipe is no terminal, so
+    taking it as the controlling one fails.
+    """
+    read_end, exec_end = exec_pipe()
+    master, slave = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_end)
+        try:
+            run_in_child(Spawn(["true"], dict(os.environ)), master, slave, exec_end)
+        finally:
+            os._exit(99)  # Reached only by a child that came back.
+    os.close(exec_end)
+    os.close(master)
+    os.close(slave)
+    wait_for_exec(read_end)
+
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 1
+
+
+async def test_a_write_to_a_program_that_never_reads_does_not_wait():
+    """
+    The pty fills, and what does not fit waits beside it. A blocking
+    write here would hold the caller's whole loop until the program
+    read. Lillecarl/pymux#563.
+    """
+    sleep = shutil.which("sleep")
+    if sleep is None:
+        pytest.skip("no sleep on the PATH")
+    async with anyio.create_task_group() as task_group:
+        backend = PosixBackend(spawn_of([sleep, "30"]))
+        process = Process(backend=backend, receive=lambda data: None)
+        process.set_size(80, 24)
+        await process.start(task_group)
+        try:
+            backend.write_bytes(b"x" * (1 << 20))
+            # Linux holds the input until it is read, and what does not
+            # fit waits here. A BSD tty drops what overflows its queue,
+            # so on macOS the write takes it all and nothing waits.
+            if sys.platform.startswith("linux"):
+                assert backend._unwritten, "a megabyte fitted in the pty"
+        finally:
+            process.kill()
+
+
+async def test_a_close_while_the_writer_waits_ends_the_writer(monkeypatch):
+    """
+    The pty turns writable, and the pump closes it before the writer
+    runs again. The writer then holds no file to write to, and ends.
+    It wrote to `None` once, under a loaded gate.
+    """
+    backend = PosixBackend(spawn_of(["true"]))
+    backend._unwritten += b"x"
+    backend._more_to_write.set()
+
+    async def writable_then_closed(fd):
+        backend.close()
+
+    monkeypatch.setattr(anyio, "wait_writable", writable_then_closed)
+    try:
+        with anyio.fail_after(5):
+            await backend._write_the_rest()
+    finally:
+        if backend.slave is not None:
+            os.close(backend.slave)
+
+    assert backend.master is None
+
+
+async def test_what_did_not_fit_reaches_the_program():
+    "Every byte, in order, once the program reads. Lillecarl/pymux#563."
+    data = bytes(range(256)) * 800
+    said = []
+    async with anyio.create_task_group() as task_group:
+        process = await running(
+            "import os, tty\n"
+            "tty.setraw(0)\n"
+            "print('READY', flush=True)\n"
+            "got = bytearray()\n"
+            "while len(got) < %d:\n"
+            "    got += os.read(0, 65536)\n"
+            "print('\\r\\nGOT', got == bytes(range(256)) * 800, flush=True)\n" % (len(data),),
+            said,
+            task_group=task_group,
+        )
+        try:
+            await until(said, "READY")
+            process.backend.write_bytes(data)
+            await until(said, "GOT True")
+        finally:
+            process.kill()
+
+
+async def test_a_running_program_says_where_it_is(tmp_path):
+    """
+    The directory a pane's program stands in, which `#{pane_current_path}`
+    and `split-window -c` read. /proc on Linux, `proc_pidinfo` on macOS.
+    Lillecarl/pymux#565.
+    """
+    sleep = shutil.which("sleep")
+    if sleep is None:
+        pytest.skip("no sleep on the PATH")
+    async with anyio.create_task_group() as task_group:
+        backend = PosixBackend(spawn_of([sleep, "30"], directory=str(tmp_path)))
+        process = Process(backend=backend, receive=lambda data: None)
+        process.set_size(80, 24)
+        await process.start(task_group)
+        try:
+            assert backend.get_cwd() == os.path.realpath(tmp_path)
+        finally:
+            process.kill()
