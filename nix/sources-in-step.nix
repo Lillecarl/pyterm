@@ -21,12 +21,22 @@ let
   ];
   # A path joined and not interpolated: "${path}" would copy the whole
   # source to the store.
+  # What `pkgs/sync-sources` writes in a source.
+  copied = [
+    "pyproject.toml"
+    "README.md"
+    ".gitignore"
+    "default.nix"
+    "shell.nix"
+    "nix/compat.nix"
+    ".github/workflows/pages.yml"
+  ];
   copies = lib.concatMapStringsSep "\n" (name: ''
-    mkdir -p tree/${name}
+    mkdir -p tree/${name}/nix tree/${name}/.github/workflows
     touch tree/${name}/flake.nix
-    cp ${sources.${name} + "/pyproject.toml"} tree/${name}/pyproject.toml
-    cp ${sources.${name} + "/.gitignore"} tree/${name}/.gitignore
-    cp ${sources.${name} + "/README.md"} tree/${name}/README.md
+    ${lib.concatMapStringsSep "\n" (
+      file: "cp ${sources.${name} + "/${file}"} tree/${name}/${file}"
+    ) copied}
   '') ours;
 in
 suite {

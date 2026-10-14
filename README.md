@@ -1146,7 +1146,8 @@ Each source has the same shape: `package.nix`, a standalone `default.nix`,
 them, and a source cannot read the root's, so it holds a copy:
 
 - the `[tool.ruff]` of its `pyproject.toml`, from `ruff.toml`;
-- its `.gitignore`, from `nix/shared/gitignore`;
+- its `default.nix`, `shell.nix`, `nix/compat.nix`, `.gitignore` and
+  `.github/workflows/pages.yml`, from `nix/shared`, with its name in them;
 - the start and the end of its `README.md`, from `nix/shared/readme-*.md`.
 
 `nix run --file . sync-sources` writes the copies, and

@@ -26,7 +26,8 @@ The other seven are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),
 one `checks.*-ruff` gate per package, tests beside the code they
 judge, no backwards compatibility. `CLAUDE.md` holds the rest.
-Shared files (ruff stanza, `.gitignore`, README head/tail) are copies:
+Shared files (ruff stanza, README head/tail, `default.nix`,
+`shell.nix`, `nix/compat.nix`, `.gitignore`, `pages.yml`) are copies:
 edit the root's (`ruff.toml`, `nix/shared/`), then
 `nix run --file . sync-sources`; `checks.pyterm-sources-in-step`
 gates drift.

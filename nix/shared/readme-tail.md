@@ -2,14 +2,14 @@
 
 ## Building
 
-    nix build github:Lillecarl/{name}    # from this repository alone
-    nix build --file . {name}            # in a checkout of pyterm
+    nix build github:Lillecarl/@name@    # from this repository alone
+    nix build --file . @name@            # in a checkout of pyterm
 
-The suites that judge it run in pyterm, as `checks.{name}-*`.
+The suites that judge it run in pyterm, as `checks.@name@-*`.
 
 ## The collection
 
-{name} is one source of [pyterm](https://github.com/Lillecarl/pyterm), and
+@name@ is one source of [pyterm](https://github.com/Lillecarl/pyterm), and
 each source claims one job:
 
 | source | job |

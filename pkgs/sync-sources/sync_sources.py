@@ -3,17 +3,17 @@ Copy what every source shares out of pyterm's root, or check the copies.
 
 A source's checks run in a sandbox that sees only its own tree, and its
 repository stands alone, so it cannot read a file of the root. Each one
-holds a copy instead:
+holds a copy instead, with `@name@` replaced by the source's name:
 
 - `ruff.toml`, everything above `[lint.isort]`, as the `[tool.ruff]` and
   `[tool.ruff.lint]` of its `pyproject.toml`. The copy ends at the
   source's own `[tool.ruff.lint.isort]`, which names its first-party
   modules and is kept by hand.
-- `nix/shared/gitignore`, as its `.gitignore`.
-- `nix/shared/readme-head.md` and `readme-tail.md`, with the source's
-  name in them, as the start and the end of its `README.md`. The first
-  and last line of each is a comment, which is how the copy is found
-  again; what lies between the two is the source's own.
+- Each file in `SHARED`, whole.
+- `nix/shared/readme-head.md` and `readme-tail.md`, as the start and the
+  end of its `README.md`. The last line of the head and the first line
+  of the tail are comments, which is how the copy is found again; what
+  lies between the two is the source's own.
 
     sync-sources [ROOT]            rewrite each copy
     sync-sources --check [ROOT]    exit 1 if a copy differs
@@ -33,7 +33,15 @@ from typing import Final
 MARK: Final = "# Copied from pyterm's `ruff.toml`"
 GENERATED: Final = f"{MARK} by `sync-sources`. Change it there.\n"
 OWN: Final = "[tool.ruff.lint.isort]\n"
-SHARED: Final = {"nix/shared/gitignore": ".gitignore"}
+# Where each file of `nix/shared` goes in a source. `flake.nix` is not
+# here: pysmithay's names fewer systems.
+SHARED: Final = {
+    "gitignore": ".gitignore",
+    "default.nix": "default.nix",
+    "shell.nix": "shell.nix",
+    "compat.nix": "nix/compat.nix",
+    "pages.yml": ".github/workflows/pages.yml",
+}
 
 
 def stanza(ruff_toml: str) -> str:
@@ -72,10 +80,11 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="change nothing; exit 1 if a copy differs")
     args = parser.parse_args()
 
+    shared_dir = args.root / "nix/shared"
     copy = stanza((args.root / "ruff.toml").read_text())
-    shared = {to: (args.root / origin).read_text() for origin, to in SHARED.items()}
-    head = (args.root / "nix/shared/readme-head.md").read_text()
-    tail = (args.root / "nix/shared/readme-tail.md").read_text()
+    shared = {to: (shared_dir / origin).read_text() for origin, to in SHARED.items()}
+    head = (shared_dir / "readme-head.md").read_text()
+    tail = (shared_dir / "readme-tail.md").read_text()
     stale = []
     for flake in sorted(args.root.glob("*/flake.nix")):
         source = flake.parent
@@ -83,12 +92,16 @@ def main() -> int:
         pyproject = source / "pyproject.toml"
         if not pyproject.exists() or name == "prompt-toolkit":
             continue
-        wanted = {pyproject: with_stanza(pyproject.read_text(), copy, name)}
-        wanted |= {source / to: text for to, text in shared.items()}
+
+        def named(text: str, name: str = name) -> str:
+            return text.replace("@name@", name)
+
         readme = source / "README.md"
-        wanted[readme] = with_frame(
-            readme.read_text(), head.replace("{name}", name), tail.replace("{name}", name), name
-        )
+        wanted = {
+            pyproject: with_stanza(pyproject.read_text(), copy, name),
+            readme: with_frame(readme.read_text(), named(head), named(tail), name),
+        }
+        wanted |= {source / to: named(text) for to, text in shared.items()}
         for path, after in wanted.items():
             before = path.read_text() if path.exists() else None
             if before == after:
@@ -97,6 +110,7 @@ def main() -> int:
             if args.check:
                 print(f"{path.relative_to(args.root)}: differs from the root's")
             else:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(after)
                 print(f"{path.relative_to(args.root)}: rewritten")
         print(f"{name}: checked")
