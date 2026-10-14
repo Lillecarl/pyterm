@@ -1,11 +1,11 @@
 # Every source's `nix/suite.nix` is the same file, and this says so.
 #
-# There are seven copies, one per source, and they are byte for byte the
+# There are eight copies, one per source, and they are byte for byte the
 # same. They exist because a source has to stand alone: josh exports each
 # one as its own repository, with its own `default.nix`, so it cannot
 # import a file from a sibling directory by path.
 #
-# **The cost is that a change to the rule is a change to seven files**,
+# **The cost is that a change to the rule is a change to eight files**,
 # and the copies can drift without anything noticing. Landing the
 # `couldNotRun` rule met that: one copy changed, the derivation that was
 # supposed to fail built happily, because each source reads its own copy.
@@ -18,7 +18,7 @@
   sources,
 }:
 let
-  # Any of the seven would do, and this check is what says so. pyte's is
+  # Any of the eight would do, and this check is what says so. pyte's is
   # the one the header of each copy and `CLAUDE.md` both point at.
   inherit (callPackage (sources.pyte + "/nix/suite.nix") { }) suite;
 
@@ -29,6 +29,7 @@ let
     "ptterm"
     "ptyhost"
     "pymux"
+    "pysmithay"
     "pyte"
     "pyterm-pytest"
     "txterm"

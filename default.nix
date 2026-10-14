@@ -705,7 +705,7 @@ rec {
   # needs nothing but python.
   suites = {
     # The one check that belongs to the collection and to no package:
-    # only the root can see all seven copies of `nix/suite.nix` at
+    # only the root can see all eight copies of `nix/suite.nix` at
     # once. Lillecarl/pymux#367.
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
