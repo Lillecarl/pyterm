@@ -948,8 +948,8 @@ rec {
 
   # What prompt-toolkit's own CI runs, and a stricter typing pass
   # over changed code, as programs on PATH instead of sandbox
-  # verdicts. The checks above judge locked revisions; these judge the
-  # working copy, which is what an edit needs before it is committed,
+  # verdicts. The checks above judge what nix builds; these judge the
+  # checkout as it is, which is what an edit needs before it is committed,
   # and `prompt-toolkit-review` judges one upstream PR base against
   # head inside a throwaway sandbox the caller names.
   # `nix run --file . prompt-toolkit-ci`, from the prompt-toolkit

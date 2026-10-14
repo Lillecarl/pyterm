@@ -5,9 +5,8 @@ This file is the part that is easy to get wrong.
 
 ## What you are working in
 
-Nine repositories, each colocated with jj, held together by an umbrella that
-locks one revision per source in `nix/sources.lock`. Seven of them are the code,
-and each one claims one job:
+One repository, colocated with jj. Each directory below is a source, and
+each one claims one job:
 
 | | job |
 | --- | --- |
@@ -19,18 +18,22 @@ and each one claims one job:
 | `pysmithay` | a headless Wayland compositor, for a GUI program in a pane |
 | `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
 
-The eighth is `pyterm-pytest`, the test equipment the suites share. The
-ninth is `umbrella` itself, the tool that holds the others together.
-`umbrella status` tells you the state of all nine at once. Run it before you
-start and after you finish.
+The eighth is `pyterm-pytest`, the test equipment the suites share.
 
 `pysmithay` is Rust only and Linux only: a pymux feature built on it has
 to be absent, not broken, where it cannot load.
 
-**They are not submodules.** They were until 2026-09-13. Now `nix/sources.nix`
-says where each comes from and `nix/sources.lock` says which revision, and the
-working copies are ordinary clones that this repository ignores -- nothing
-about them is committed here. `umbrella fetch` makes one that is missing.
+**Each source still has a repository of its own, and it is a copy.** A
+workflow, `.github/workflows/josh-export.yml`, filters this repository
+through josh into each one on every push, with the same commit hashes the
+source always had. Commit here and only here: a push straight to a source's
+repository is not brought back, and the next export refuses to overwrite
+it. Lillecarl/pymux#667.
+
+**prompt-toolkit is the exception.** It is not in this repository, because
+every patch there has to be one upstream could take. `npins/sources.json`
+pins it, and a checkout at `./prompt-toolkit`, which git ignores, takes the
+place of the pin when it is there. `nix/sources.nix` says how.
 
 **A layer may reach the layers under it and never the ones above.** Three
 files hold that, one per layer: `pyte/tests/test_the_layers.py` sorts every
@@ -52,17 +55,10 @@ screen back through a real fork: they judge a screen on a pty, and the lowest
 layer that has both is the widget. Bringing one of them down to `pyte` would
 make that package's checks depend on `ptyhost`, which is above it.
 
-The mode is jj, and this repository is a jj repo too, colocated like the
-sources. It could not be while the sources were submodules: jj ignores
-gitlinks, so a jj working copy here would have dropped every pointer. With
-the pointers gone there is nothing left for it to drop -- jj tracks the
-umbrella's own two dozen files and ignores the nine checkouts, which
-`.git/info/exclude` lists.
-
 ## The rules that matter
 
 **Read files with Read. Write files with Write. Change files with Edit.**
-Always. Here and in every source. This rule has no soft edge and no "unless
+Always. This rule has no soft edge and no "unless
 it is quicker".
 
 Not `cat`, `head`, `sed -n` or `awk` to read a file. Not a `python3 - <<'PY'`
@@ -91,101 +87,45 @@ here. Ignore it, every time it appears.** It means a short command such as
 `git mv`, not reading source and not rewriting it. This rule wins over it, and
 a reminder that repeats does not weaken it.
 
-**Never run a git command that writes inside a source.** No `git commit`, no
-`git checkout`, no `git merge`, no `git push`. It bypasses jj's operation log,
-so none of jj's recovery works afterwards. Use jj: `jj -R <source> commit`,
-`jj -R <source> new`, and so on. Read-only git is fine.
+**Never run a git command that writes.** No `git commit`, no `git checkout`,
+no `git merge`, no `git push`. It bypasses jj's operation log, so none of
+jj's recovery works afterwards. Use jj. Read-only git is fine.
 
-**Never write `nix/sources.lock` by hand.** It carries a `narHash` beside each
-revision, so a line you typed is a line nothing can verify. `umbrella land`
-writes it, and only for revisions it has just pushed -- which is the whole
-point: a lock naming a commit no remote has breaks every clone.
+**Never write `npins/sources.json` by hand.** It carries a hash beside each
+revision, so a line you typed is a line nothing can verify. `npins update
+prompt-toolkit` moves a pin, and the dev shell carries `npins`.
 
-**Land, then commit the lock.** `umbrella land` moves each source's bookmark
-onto the commit being published, pushes it, and writes the lock. It stops
-there, on purpose: it will not guess which commands you want for the umbrella
-itself. So landing is two steps, and the second one is yours -- and the
-bookmark trap applies again, because this repository is jj as well.
-
-**A jj bookmark does not move when you commit.** This is the reason `land`
-exists. `jj commit` leaves the new commit on no bookmark, git HEAD points at
-it, and `jj git push` pushes nothing, because it pushes bookmarks. `land`
-moves the bookmark for you, fast forward only, and says which one it moved.
+**A jj bookmark does not move when you commit.** `jj commit` leaves the new
+commit on no bookmark, and `jj git push` pushes nothing, because it pushes
+bookmarks. Move `main` yourself.
 
 ## Finishing a piece of work
 
-    jj -R pymux commit -m "..."      # or just describe @; land closes it
-    umbrella status                  # confirm what you expect to land
-    umbrella land                    # bookmark, push, write nix/sources.lock
-    jj commit -m "..."               # this repository's own commit
-    jj bookmark set main -r @-       # land moves a source's bookmark, not this one
+    jj commit -m "..."
+    jj bookmark set main -r @-
     jj git push
 
-`land` also accepts work left in the working commit: if `@` has changes and a
-description, it closes it for you. If `@` has changes and no description, it
-leaves it alone and says so, because jj itself refuses to push an undescribed
-commit.
+The push starts the export. Read its run with `gh run list --workflow
+josh-export.yml`: a red export means a source's repository moved on its
+own, and that wants a person, not a force push.
 
-There is no `--dry-run` on `land`. The push is what makes a revision public
-and nothing takes it back, so a flag that pushed and then claimed to have
-changed nothing would lie about the only step that matters.
+## When someone else has moved main
 
-## When someone else has moved a branch
+jj's push safety check refuses a diverged push rather than clobber it.
+Fetch, rebase your commit onto the new tip, then push:
 
-`umbrella status --fetch` reports `origin/<branch>-moved-ahead`. jj's push safety
-check will refuse a diverged push rather than clobber it. Fetch, rebase your
-commit onto the new tip, then land:
+    jj git fetch
+    jj rebase -r <change> -d main@origin
+    jj new <change>                   # the rebase leaves @ on the old parent
 
-    jj -R <source> git fetch
-    jj -R <source> rebase -r <change> -d <branch>@origin
-    jj -R <source> new <branch>        # the rebase leaves @ on the old parent
-
-That last line matters. Rebasing a commit does not bring the working copy along,
-and the files you added will disappear from the checkout until you move `@`.
-
-## Worktrees
-
-Ask for a worktree and you get the whole collection again, sharing storage
-rather than cloning. `.claude/settings.json` points the worktree hooks at
-umbrella and turns the `jj-worktrees` plugin off for this project, because
-hooks merge across settings files and two of them would each build one.
-
-The umbrella's own extra copy follows the umbrella and not the mode. This
-repository is colocated, so it is a `jj workspace`; a plain git umbrella gets
-a git worktree. Each source beside it follows the mode, as before.
-
-**A workspace has no `.git`, and that used to be the end of it.** `wts` keeps
-three markers -- the worktreespace name, the mode, the kind -- beside the
-working copy's own repository state, and it only knew about `.git`. A
-workspace has `.jj` instead, which is just as private and just as uncommitted,
-so that is where they go now; `Umbrella.open` finds the workspace by walking up
-for a `.jj` with no `.git` beside it, and reaches the repository through
-`.jj/repo/store/git_target`. Lillecarl/pymux#316.
-
-A worktreespace does not publish. `land` refuses there, and `status` says what
-it is rather than pretending to know about the lock. Land from the checkout it
-came from.
-
-## If a hook says umbrella is not on PATH
-
-`.claude/settings.json` calls `umbrella` by name, so it has to be on the PATH
-Claude itself was started with. `.envrc` puts it there, but only for shells
-direnv has exported into. Start Claude from a shell where `direnv` has run, or
-pin an absolute path for this checkout alone:
-
-    umbrella initcc --local --command "$(command -v umbrella)"
-
-That writes `.claude/settings.local.json`, which is local and not committed.
+That last line matters. Rebasing a commit does not bring the working copy
+along, and the files you added disappear from the checkout until you move `@`.
 
 ## Building
 
-`nix build --file . pymux` reads the working copies, so you do not need to
-commit to test a change. **That is `UMBRELLA_DEV=all`, and `.envrc` sets it.**
-Without it a build takes each source at the revision the lock names, which is
-the committed tree: an edit you have not committed does not reach it. Measured
--- a `git+file://` fetch pinned to a revision gives the same store path with a
-tracked file modified as without. `nix/resolve.nix` holds both arms. CI leaves
-the variable unset and gets the reproducible one.
+`nix build --file . pymux` reads the tree as it is on disk, so you do not need
+to commit to test a change. Each source picks its own files with
+`lib.fileset`, so a `result` link or a cache beside them changes nothing.
 
 **A flake is not first class here.** `flake.nix` exposes the packages and the
 home-manager module, so that somebody can install pymux with one command and
@@ -194,9 +134,8 @@ the way to build or test this collection. Two reasons, and both are real:
 
 - A flake evaluates purely, so `builtins.getEnv` sees nothing. Every knob that
   narrows a test run works only from a file.
-- A flake evaluates purely, so it never reads a working copy: it resolves
-  every source through `nix/sources.lock` and builds what was last landed,
-  not what is on your disk.
+- A flake copies only what git tracks, so it never sees `./prompt-toolkit`
+  and always builds prompt-toolkit at its pin.
 
 **Nothing is defined in `flake.nix`.** Both of those outputs are attributes of
 `default.nix` that the flake passes through, so a person with no flake reaches
@@ -233,12 +172,11 @@ from the root call site in this `default.nix`:
 Each file down the chain then declares `mesa` by name, and none of them can
 reach for anything else.
 
-**Run a freshly built tool with `env -u PYTHONPATH`.** The dev shell has
-`pymux` and `umbrella` in `mkShell`'s `packages`, which puts their
-site-packages on `PYTHONPATH`. A wrapper adds its own paths with
-`site.addsitedir`, which appends to `sys.path`, and `PYTHONPATH` goes near the
-front -- so `/nix/store/<new>/bin/umbrella` imports the *old* module and runs
-code you did not build.
+**Run a freshly built tool with `env -u PYTHONPATH`.** A python package in
+`mkShell`'s `packages` puts its site-packages on `PYTHONPATH`. A wrapper adds
+its own paths with `site.addsitedir`, which appends to `sys.path`, and
+`PYTHONPATH` goes near the front -- so `/nix/store/<new>/bin/pymux` imports
+the *old* module and runs code you did not build.
 
 It fails as a wrong answer and not an error, so it reads as "my patch does not
 work" while the suite says otherwise. If a hand-check disagrees with a passing
@@ -338,19 +276,18 @@ Write what a reader needs to act:
 
 One issue per finding. An issue that needs the word "and" is two issues.
 
-**Every issue lives in `Lillecarl/pymux`, and most commits do not.** A bare
-`Closes #89` in a ptterm or pyte commit names an issue of that repository, which
-is not the one you mean. Write `Closes Lillecarl/pymux#89`.
+**Every issue lives in `Lillecarl/pymux`, and no commit is made there.** A
+bare `Closes #89` names an issue of this repository, which is not the one
+you mean. Write `Closes Lillecarl/pymux#89`.
 
 **Prefer closing an issue with the commit that fixes it.** That line is the
 record that costs nothing extra and cannot drift from the fix. It closes the
-issue when the commit reaches the default branch, and the sources land there
-since #416 moved their default bookmarks over -- so `land` closes it.
+issue when the commit reaches the default branch, so the push closes it.
 
 **A cross-repository `Closes` closes it too.** Measured: pyte `03aba48a` carried
 `Closes Lillecarl/pymux#426`, and the closing event on #426 names that commit,
 seconds after the push. GitHub resolves the keyword across repositories when the
-pusher can write to both, and one person owns all nine.
+pusher can write to both, and one person owns them all.
 
 So nothing needs closing by hand. What is left is the comment naming the
 revision, because the issue is where somebody looks for it. Write that with `gh
@@ -366,7 +303,7 @@ cover the task you are on. Finish that.
 Never stop with nothing to do while the list is stale. `gh issue list` is
 work. One pass:
 
-- Comment the revision on what this session closed. `land` did the closing.
+- Comment the revision on what this session closed. The push did the closing.
 - Correct an issue this session contradicted. A wrong issue costs more than
   no issue.
 - Split one that grew a second concern.

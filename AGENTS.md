@@ -1,9 +1,9 @@
 # The collection
 
-Nine repositories; `umbrella status` shows all nine at once. Each
-has one job:
+One repository. Each directory is a source with one job, and josh
+exports each to a repository of its own (`.github/josh-export.sh`):
 
-| repo | job |
+| directory | job |
 | --- | --- |
 | `pyte` | parse input, hold the screen |
 | `ptyhost` | run a program on a pty, carry its bytes |
@@ -13,15 +13,13 @@ has one job:
 | `pysmithay` | headless Wayland compositor (Rust, Linux) |
 | `pyterm-pytest` | test equipment the suites share |
 | `prompt-toolkit` | upstream toolkit under `ptterm`/`pymux` |
-| `umbrella` | source control: pins revisions, lands, marks |
 
-`umbrella` is plumbing, not product. Touch it only when asked, or
-for a bug found there. Same for its lock file: `umbrella land`
-writes `nix/sources.lock`, never a hand.
-
-`prompt-toolkit` is upstream, not ours. Hands off, except a patch
+`prompt-toolkit` is upstream, not ours, and not in this repository:
+`npins/sources.json` pins it, and an ignored checkout at
+`./prompt-toolkit` replaces the pin. Hands off, except a patch
 upstream could take: minimal, in upstream style, about one thing
-(`prompt-toolkit-upstreaming.md`).
+(`prompt-toolkit-upstreaming.md`). `npins update` moves the pin,
+never a hand.
 
 The other seven are ours. Maintain them to collection standards:
 `ruff.toml` (143 rules, width 120, lazy annotations, floor 3.14),

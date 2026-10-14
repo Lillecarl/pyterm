@@ -1,35 +1,33 @@
 # pyterm
 
-A glorified lock file. There is no code of its own here. What it holds is the
-record of nine repositories that are worked on together, a nix expression that
-builds each of them, and the wiring that keeps them in step.
+The terminal programs and libraries below, in one repository. Each directory
+is a source, and each source also has a repository of its own, which josh
+fills from this one: "The repository of each source", at the end, says how.
 
-| source | branch | upstream | job |
+| source | its repository | upstream | job |
 | --- | --- | --- | --- |
-| `pymux` | `graphics-protocol` | prompt-toolkit/pymux | arrange several terminals |
-| `ptterm` | `graphics-protocol` | prompt-toolkit/ptterm | draw one with prompt-toolkit |
-| `txterm` | `main` | Lillecarl/txterm | draw one with Textual |
-| `ptyhost` | `main` | Lillecarl/ptyhost | run a program and carry its bytes |
-| `pyte` | `graphics-protocol` | selectel/pyte | parse, and hold a screen |
-| `prompt-toolkit` | `render-performance` | prompt-toolkit/python-prompt-toolkit | the toolkit under it all |
-| `pysmithay` | `main` | Lillecarl/pysmithay | a headless Wayland compositor, for GUI programs in a pane |
-| `pyterm-pytest` | `main` | Lillecarl/pyterm-pytest | the test equipment the suites share |
-| `umbrella` | `main` | Lillecarl/umbrella | hold the others together |
+| `pymux` | Lillecarl/pymux, `master` | prompt-toolkit/pymux | arrange several terminals |
+| `ptterm` | Lillecarl/ptterm, `master` | prompt-toolkit/ptterm | draw one with prompt-toolkit |
+| `txterm` | Lillecarl/txterm, `main` | | draw one with Textual |
+| `ptyhost` | Lillecarl/ptyhost, `main` | | run a program and carry its bytes |
+| `pyte` | Lillecarl/pyte, `master` | selectel/pyte | parse, and hold a screen |
+| `pysmithay` | Lillecarl/pysmithay, `main` | | a headless Wayland compositor, for GUI programs in a pane |
+| `pyterm-pytest` | Lillecarl/pyterm-pytest, `main` | | the test equipment the suites share |
 
-**These are not submodules.** They were until 2026-09-13. `nix/sources.nix`
-says where each comes from and `nix/sources.lock` says which revision, with a
-`narHash` beside it; `nix/resolve.nix` joins the two. A working copy is an
-ordinary clone beside this file, ignored here, and nothing about it is
-committed.
+**prompt-toolkit is not in this repository.** Every patch to it has to be one
+upstream could take, so it stays a branch of upstream's own repository,
+`render-performance` of Lillecarl/python-prompt-toolkit. `npins/sources.json`
+pins it, beside pyproject.nix. A checkout of it at `./prompt-toolkit`, which
+git ignores, takes the place of the pin, so an edit there reaches the next
+build. `nix/sources.nix` says how.
 
 Each source carries its own `default.nix`. That file holds the package and
 the tests that judge it, and nothing else. Sibling packages arrive as arguments
 rather than paths, so a source built on its own takes its dependencies from
-nixpkgs, and built here it takes the checkouts next to it. Nothing in a source
-points back at this repository.
+nixpkgs, and built here it takes the directories next to it. Nothing in a
+source points back at this repository.
 
-This repository owns the assembly. It decides which checkout answers for
-`ptterm`, it names the tests, and it holds the dev shell.
+The root owns the assembly. It names the tests, and it holds the dev shell.
 
 **`docs/the-model.md` says what the six are, in one place**: the words we use
 for each thing, what each layer holds, and how one keystroke and one frame
@@ -39,51 +37,31 @@ because several words here mean two things -- "window", "screen", "layout" and
 
 ## Getting a checkout
 
-    git clone git@github.com:Lillecarl/pyterm.git
+    jj git clone --colocate git@github.com:Lillecarl/pyterm.git
     cd pyterm
-    umbrella init --jj   # drop --jj if you would rather drive them with git
-    umbrella fetch --all # clone each source at the revision the lock names
 
-`umbrella init` installs the hooks described below and lists the sources in
-`.git/info/exclude`, so a clone of one never lands in this repository's
-history. `umbrella fetch` is separate because you do not always want them all:
-it takes source names, and `--all` is how you say every one. A build with no
-working copies reads the lock and fetches what it needs, so a checkout that
-fetched nothing still builds.
+To work on prompt-toolkit as well, clone it into the ignored directory:
 
-**`nix/sources.nix` names the sources over https, and it has to.** Nix follows
-those URLs when nothing is checked out, whatever the URL of this repository
-was, so an SSH URL there makes every one of them need a key. A machine without
-one -- CI, a fresh container, somebody else's laptop -- then cannot evaluate a
-configuration that pins pyterm at all, which is most of what the home-manager
-module below is for.
-
-If you push to these repositories, tell git to send https to SSH once:
-
-    git config --global url."git@github.com:".pushInsteadOf "https://github.com/"
-
-Fetching stays anonymous and pushing goes over your key. A checkout that
-already exists keeps the remotes it has; only a fresh clone reads these URLs.
+    jj git clone --colocate --branch render-performance \
+      git@github.com:Lillecarl/python-prompt-toolkit.git prompt-toolkit
 
 ## Building
 
-    nix build --file . pymux    # or pyte, ptterm, prompt-toolkit, umbrella
-    nix-shell                   # pymux, umbrella and the test dependencies
+    nix build --file . pymux    # or pyte, ptterm, prompt-toolkit
+    nix-shell                   # pymux, npins and the test dependencies
 
 `default.nix` is the whole definition. `shell.nix` and `flake.nix` only call
-into it, and the flake takes nixpkgs as its one input. Everything else comes
-from the sources `nix/sources.lock` names.
+into it, and the flake takes nixpkgs as its one input. The two sources from
+outside come from `npins/sources.json`.
 
 Each source's `default.nix` holds its package alone. The suites that judge
 it live in that repository's `nix/checks.nix`, which declares its own inputs,
 so a package definition does not name the six terminal emulators and two
 display servers that only a test needs.
 
-Builds read the working copies, so an edit in any of them builds without a
-commit or a push. **That is `UMBRELLA_DEV=all`, and `.envrc` sets it.** Without
-it a build reads each source at the revision the lock names, which is the
-committed tree, so an uncommitted edit does not reach it. `nix/resolve.nix`
-holds both arms; CI leaves the variable unset and gets the reproducible one.
+A build reads the tree as it is on disk, so an edit builds without a commit.
+Each source picks its own files with `lib.fileset`, so a `result` link or a
+cache beside them changes no store path, and a build here gives what CI gives.
 
 **A flake is not first class here.** `flake.nix` exposes the packages and the
 home-manager module, so that somebody can install pymux with one command and
@@ -95,14 +73,9 @@ Neither of those two is defined there. Both are attributes of `default.nix`
 that the flake passes through, so a person with no flake reaches the same
 things.
 
-**A flake build reads the lock, never your disk.** A flake evaluates purely,
-so `builtins.getEnv` sees nothing and `nix/resolve.nix` takes its reproducible
-arm: every source comes from the revision in `nix/sources.lock`. That is what
-makes `nix build .#pymux` work in a clone with no working copies at all, and
-it is also why a flake build ignores the edit you just made.
-
-A build from a file reads the working copies, which is usually what you want
-while working.
+**A flake build always takes prompt-toolkit at its pin.** A flake copies only
+what git tracks, so it never sees the ignored `./prompt-toolkit`, and its pure
+evaluation means `builtins.getEnv` sees nothing.
 
 ## Configuring pymux with home-manager
 
@@ -121,8 +94,7 @@ who takes this repository as a flake input:
     pyterm.url = "github:Lillecarl/pyterm";
 
 Nothing has to be asked for by name. The default of the module's `package`
-option builds pymux out of the source the module came from, and that source
-resolves every project through `nix/sources.lock`.
+option builds pymux out of the source the module came from.
 
 Three options carry the configuration:
 
@@ -1134,48 +1106,24 @@ which the machines above deny, and a server can say otherwise:
 running as you read this server's memory and write to it, and a server holds
 every pane's scrollback. The three commands above need none of it.
 
-## umbrella
+## The repository of each source
 
-[umbrella](https://github.com/Lillecarl/umbrella) is what makes a collection
-like this workable. The problem it solves is small and sharp: this repository
-names one revision per source, and if it names one that no remote has, every
-clone breaks on it. That is easy to do by accident, and with jj it is the
-default path, because a jj bookmark does not move when you commit.
+Each source keeps a repository of its own, and josh fills it from this one.
+`.github/josh-export.sh` filters this history through `:/<source>` for each
+source and pushes the result. The filter gives back the commits each source
+always had, with their own hashes, so the history of every repository goes
+on where it stopped. Lillecarl/pymux#667.
 
-    umbrella status             # what each source is doing
-    umbrella status --fetch     # the same, current about the remotes
-    umbrella fetch              # clone a source at the revision the lock names
-    umbrella land               # push the sources, then lock what was pushed
-    umbrella update             # lock each source at the head of its branch
-    umbrella sync               # move working copies onto the locked revisions
+The workflow `josh-export.yml` runs it after every push. It never forces a
+push. It refuses a source whose repository holds a commit this repository
+does not, so a commit made straight in one of them stops the export of that
+source rather than disappearing. Commit here.
 
-`land` is the one to reach for. It moves each source's bookmark onto the commit
-being published, pushes it, and only then writes `nix/sources.lock`. The order
-is the whole point: a commit reaches its remote before anything names it. It
-stops there rather than committing this repository, so landing is two steps and
-the second one is yours.
+josh is pinned to one nixpkgs revision in the workflow. Another version of
+josh may filter the same history to other hashes, and every export after
+that would be refused.
 
-`update` is the other arm, and the difference is which way the truth flows.
-`land` publishes what is on this disk. `update` follows the branch each source
-declares in `nix/sources.nix`, which is what picks up somebody else's work.
+The script runs by hand as well, from a checkout with the whole history:
 
-Two git hooks enforce the same rule for anything that does not go through
-`land`. `pre-commit` refuses a locked revision no remote branch contains, and
-`pre-push` refuses to push this repository while any revision it locks is
-private. `pre-push` fetches first, so its answer is current.
-
-`umbrella wts add spike` makes a worktreespace: one more working copy of the
-whole collection, sharing storage rather than cloning, so making one costs
-about a second. The umbrella's own copy follows the umbrella -- a jj workspace
-of a colocated one, a git worktree otherwise -- and each source follows the
-mode. Lillecarl/pymux#316 is what taught it the workspace half.
-
-## umbrella is a source too
-
-It is also the tool that fetches the others, so a clone that has fetched
-nothing still has to build it. The lock is what makes that work: `umbrella`
-resolves from `nix/sources.lock` like every other source, with no checkout and
-no fallback pinned by hand.
-
-So editing umbrella needs nothing special. Change a file in `umbrella/` and
-`nix build --file . umbrella` reads it, the same as any other source.
+    .github/josh-export.sh HEAD          # report what an export would do
+    .github/josh-export.sh HEAD --push   # and do it
