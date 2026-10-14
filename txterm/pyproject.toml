@@ -39,6 +39,10 @@ test = [
 
 [project.urls]
 Homepage = "https://github.com/Lillecarl/txterm"
+Documentation = "https://lillecarl.github.io/txterm/"
+# Work happens in the monorepo this repository is exported from.
+Source = "https://github.com/Lillecarl/pyterm"
+Issues = "https://github.com/Lillecarl/pymux/issues"
 
 [project.scripts]
 txterm = "txterm.app:main"
