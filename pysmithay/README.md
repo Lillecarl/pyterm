@@ -32,10 +32,11 @@ while True:
 ```
 
 The caller owns the event loop: wait for either descriptor in `fds()`
-to become readable, then call `dispatch()`. Nothing blocks and no
-thread starts. The API reference on the docs site lists every call:
-input, popups, scale, the clipboard, and `Vp9Encoder`, which encodes a
-window's frames for a pane.
+to become readable, then call `dispatch()`. The dispatch path blocks
+nothing and starts no thread. The API reference on the docs site lists
+every call: input, popups, scale, the clipboard, and `Vp9Encoder`,
+which encodes a window's frames for a pane (frame encoding uses
+worker threads).
 
 Events are tuples, such as `("toplevel", id, tag)`,
 `("commit", id, [(x, y, w, h), ...])` and `("closed", id)`. A commit's

@@ -651,7 +651,7 @@ rec {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
-    # Eleven are left out, and none of them is a gate. The profile and
+    # Twelve are left out, and none of them is a gate. The profile and
     # the latency measurement both read a wall clock, which says
     # nothing twice in a sandbox beside other jobs; they are
     # instrumentation, and reading them is the work. The image exercise

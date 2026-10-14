@@ -66,15 +66,15 @@ A build reads the tree as it is on disk, so an edit builds without a commit.
 Each source picks its own files with `lib.fileset`, so a `result` link or a
 cache beside them changes no store path, and a build here gives what CI gives.
 
-**A flake is not first class here.** `flake.nix` exposes the packages and the
-home-manager module, so that somebody can install pymux with one command and
-configure it, and nothing else. The checks and the dev shell are not there on
-purpose: a flake evaluates purely, so the knobs below that narrow a run would
-be invisible to it. Build and test from the file.
+**A flake is not first class here.** `flake.nix` exposes the packages, the
+dev shell and the home-manager module, so that somebody can install pymux
+with one command and configure it, and nothing else. The checks are not
+there on purpose: a flake evaluates purely, so the knobs below that
+narrow a run would be invisible to it. Build and test from the file.
 
-Neither of those two is defined there. Both are attributes of `default.nix`
-that the flake passes through, so a person with no flake reaches the same
-things.
+The checks are no attribute of the flake. They are an attribute of
+`default.nix` that the file build reaches, so a person with no flake
+reaches the same things.
 
 **A flake build always takes prompt-toolkit at its pin.** A flake copies only
 what git tracks, so it never sees the ignored `./prompt-toolkit`, and its pure
@@ -315,9 +315,11 @@ it. Running it again gives the same stored failure until an input changes.
 `--rebuild` is the way to make it run again.
 
 `checks.all` is every gate at once, and `checks.all.run` is the report: each
-suite's output linked by name, and a summary of how each one ended. Four are
-left out of it, and none of the four is a gate: the fuzz hunt, the vttest
-walk, the pictures of vttest, and the roaming property tests.
+suite's output linked by name, and a summary of how each one ended. Twelve
+are left out of it, and none of the twelve is a gate: the fuzz hunt, the
+vttest walk, the picture sets of chrome, window panes, themes and vttest,
+the image exercise, the latency and profile instruments, the scenarios, the
+wire measurement, and the roaming property tests.
 
 ### Narrowing a run
 

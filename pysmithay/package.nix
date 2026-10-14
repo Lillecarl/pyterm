@@ -126,6 +126,7 @@ stdenv.mkDerivation {
 
   meta = {
     description = "A headless Wayland compositor on Smithay, for Python";
+    homepage = "https://github.com/Lillecarl/pysmithay";
     license = lib.licenses.mit;
     platforms = lib.platforms.linux;
   };

@@ -1,7 +1,6 @@
 # The docs site of one source, built with Sphinx. Lillecarl/pymux#671.
 #
-# A source with a `docs/index.rst` of its own (pyte) keeps that tree.
-# Every other source gets one written for it: its README, every page in
+# Every source gets one written for it: its README, every page in
 # its `docs/`, and an API reference of its modules.
 { stdenvNoCC }:
 /**
