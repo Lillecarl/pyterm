@@ -77,6 +77,7 @@ use smithay::{
 
 mod canvas;
 mod kitty;
+mod text_input;
 mod vp9;
 
 use canvas::Canvas;
@@ -263,6 +264,9 @@ struct State {
     _fractional_scale_state: FractionalScaleManagerState,
     /// `wp_cursor_shape_v1`: a pointer named, which a terminal can show.
     _cursor_shape_state: CursorShapeManagerState,
+    /// `zwp_text_input_v3`: text a key cannot type on the keymap every
+    /// client gets, which is xkb's default.
+    text_inputs: text_input::TextInputs,
     /// The window the pointer last moved over. A pointer request names
     /// no window, and only the client under the pointer may make one.
     pointer_over: Option<u64>,
@@ -379,6 +383,8 @@ impl SeatHandler for State {
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
+        // Text input follows the keyboard as well. Lillecarl/pymux#624.
+        self.text_inputs.set_focus(focused);
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
@@ -849,6 +855,7 @@ impl Compositor {
             _viewporter_state: ViewporterState::new::<State>(&handle),
             _fractional_scale_state: FractionalScaleManagerState::new::<State>(&handle),
             _cursor_shape_state: CursorShapeManagerState::new::<State>(&handle),
+            text_inputs: text_input::TextInputs::new(&handle),
             pointer_over: None,
             output: output.clone(),
             popups: PopupManager::default(),
@@ -958,6 +965,17 @@ impl Compositor {
             |_, _, _| FilterResult::Forward,
         );
         self.flush()
+    }
+
+    /// Give `text` to the window with the keyboard, as text and not as
+    /// keys, through its active `zwp_text_input_v3`. False when it has
+    /// none: the window did not enable text input where its focus is.
+    /// A character outside the default keymap has no key to press.
+    /// Lillecarl/pymux#624.
+    fn commit_text(&mut self, text: &str) -> PyResult<bool> {
+        let sent = self.state.text_inputs.commit_text(text);
+        self.flush()?;
+        Ok(sent)
     }
 
     /// Move the pointer to `(x, y)` in the window's pixels, as the canvas

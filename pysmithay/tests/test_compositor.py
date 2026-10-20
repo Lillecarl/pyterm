@@ -192,6 +192,27 @@ def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
         client.wait(10)
 
 
+def test_text_no_key_types_reaches_a_window_as_text(compositor):
+    "é and an emoji, which xkb's default keymap has no key for. Lillecarl/pymux#624."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("text_input_client.py")))
+    try:
+        events = pump(compositor, lambda seen: any(event[0] == "toplevel" for event in seen))
+        (toplevel,) = [event[1] for event in events if event[0] == "toplevel"]
+        # No text input is enabled until the window has the keyboard.
+        assert not compositor.commit_text("too soon")
+
+        # The key that brings the text moves the keyboard too, and the
+        # window enables text input a dispatch later: the text waits.
+        compositor.focus(toplevel)
+        assert compositor.commit_text("é😀")
+        lines = []
+        pump(compositor, lambda _seen: _read_until(client, lines, "text"))
+        assert [line for line in lines if line.startswith("text")] == ["text é😀"]
+    finally:
+        client.kill()
+        client.wait(10)
+
+
 def _read_until(client, lines, prefix):
     "Take what the client printed so far, and say whether a line starts with `prefix`."
     os.set_blocking(client.stdout.fileno(), False)
