@@ -58,6 +58,17 @@ def _ended(code: int, stderr: str) -> str:
 def workload(candidate: str, policy: str, name: str, cache: Path) -> dict:
     argv = [sys.executable, "-m", "lazylab", candidate, policy, str(LAB / "measure" / "workload.py"), name]
     env = _env(cache)
+    # A first start, with a rewrite cache of its own that is empty. The
+    # parse and compile are C, so its clock says more than its count.
+    with tempfile.TemporaryDirectory() as cold:
+        _, out, _ = _run([*argv, "count"], _env(Path(cold)))
+        cold_instructions = json.loads(out.rsplit("RESULT ", 1)[1])["instructions"] if "RESULT " in out else None
+    cold_seconds = []
+    for _ in range(TIMINGS):
+        with tempfile.TemporaryDirectory() as cold:
+            _, out, _ = _run([*argv, "time"], _env(Path(cold)))
+            if "RESULT " in out:
+                cold_seconds.append(json.loads(out.rsplit("RESULT ", 1)[1])["seconds"])
     # The first run fills the rewrite cache, so the counted one reads
     # bytecode the way an installed package does.
     _run([*argv, "count"], env)
@@ -65,6 +76,9 @@ def workload(candidate: str, policy: str, name: str, cache: Path) -> dict:
     if code:
         return {"error": _ended(code, err)}
     row = json.loads(out.rsplit("RESULT ", 1)[1])
+    if cold_instructions is not None and cold_seconds:
+        row["cold_instructions"] = cold_instructions
+        row["cold_seconds"] = statistics.median(cold_seconds)
     seconds = []
     for _ in range(TIMINGS):
         code, out, err = _run([*argv, "time"], env)
@@ -128,13 +142,13 @@ def render(results: dict) -> str:
         lines += [
             "## %s" % name,
             "",
-            "| candidate | policy | modules run | lazy | instructions | ms (median) | commands |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| candidate | policy | modules run | lazy | instructions | ms (median) | first start: instructions | ms | commands |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         for row in rows:
             value, base = row[name], eager[name]
             lines.append(
-                "| %s | %s | %s | %s | %s | %s | %s |"
+                "| %s | %s | %s | %s | %s | %s | %s | %s | %s |"
                 % (
                     row["candidate"],
                     row["policy"],
@@ -142,6 +156,8 @@ def render(results: dict) -> str:
                     value.get("lazy", ""),
                     _cell(value, "instructions", base),
                     _cell(value, "seconds", base, 1000, 1) if "seconds" in value else "",
+                    _cell(value, "cold_instructions", base) if "cold_instructions" in value else "",
+                    _cell(value, "cold_seconds", base, 1000, 1) if "cold_seconds" in value else "",
                     value.get("commands", ""),
                 )
             )

@@ -147,11 +147,17 @@ exact; the clock is one sandbox's. The frame rows are pymux's own
   The check sees the absolute target only, never the fromlist, and a
   module that assigns its own `__lazy_modules__` replaces the loader's.
   `-contains` is a Python call per import: -62% on completion against
-  `ast-native`'s -64% (1.53 M against 1.45 M), frame +0.0%. But
-  `ast-native` counts with its rewrite cache warm, and `-contains`
-  needs no cache, no parse and no compile, so a cold start costs it
-  nothing extra. The frozenset variant loses: `dis` over every
-  module's bytecode at each load is the whole +158%.
+  `ast-native`'s -64% (1.53 M against 1.45 M), frame +0.0%. The
+  frozenset variant loses: `dis` over every module's bytecode at each
+  load is the whole +158%.
+- **A rewrite pays on the first start.** With its cache empty,
+  `ast-native` under everything-but takes completion from 113 ms eager
+  to 330 ms (+193%), and `import pymux.server` under "ours" from 88 to
+  71 ms against 53 ms warm. Every key the rewrite cache holds changes
+  with the source path, so each new store path, and each sandbox with
+  an empty `HOME`, starts cold. `lazy-modules-contains` reads the
+  store's `.pyc` and is the same both times: 32 ms. tomllib assigns
+  its own `__lazy_modules__`, the one stdlib module that does.
 - **`ast-proxy-loads` against `-flags`**: the resolving call is about
   thirteen instructions a read, the flag test four: +1.8% against +0.8%
   on `measure`.
