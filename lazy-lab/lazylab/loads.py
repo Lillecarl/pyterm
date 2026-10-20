@@ -8,9 +8,12 @@ reads it, and C code that checks a type refuses it: `ord()` on a lazy
 string constant, `except` on a lazy class,
 `Mapping.register(lazy_class)`. A call through it works, but puts the
 proxy's `__call__` between caller and callee, and a callee that reads
-`sys._getframe(1)` sees the proxy: anyio's lazy importer on 3.15 did.
-So every read but an attribute fetch, `X` in `ord(X)` and in `X()`,
-becomes `__lazylab_force__(X)`.
+`sys._getframe(1)` sees the proxy: anyio's lazy importer on 3.15 did,
+from its module body. So every read but an attribute fetch, `X` in
+`ord(X)`, becomes `__lazylab_force__(X)`, and so does `X` in `X()` in a
+module or class body. A call inside a function is left alone: the
+extra frame lasts only until the first call rebinds the name, and
+wrapping every call costs a frame of pymux 6%.
 
 `symtable` says which reads are of the global. Measured on 3.14: list,
 set and dict comprehensions have no table of their own (PEP 709), a
@@ -92,8 +95,21 @@ class _Loads(ast.NodeTransformer):
             return ast.copy_location(call, node)
         return node
 
+    def visit_Call(self, node: ast.Call):
+        # A call is resolved first only in a module or class body, which
+        # runs once: wrapping every call in a function cost pymux's
+        # frame +6.4% where +0.8% was the rest, and the proxy's extra
+        # frame exists only until its first call rebinds the name.
+        table = self.tables[-1]
+        at_import = table is not None and table.get_type() in ("module", "class")
+        if at_import or not isinstance(node.func, ast.Name):
+            node.func = self.visit(node.func)
+        node.args = [self.visit(arg) for arg in node.args]
+        node.keywords = [self.visit(keyword) for keyword in node.keywords]
+        return node
+
     def visit_Attribute(self, node: ast.Attribute):
-        # So does a fetch off it.
+        # An attribute fetch resolves the proxy itself, and adds no frame.
         if not isinstance(node.value, ast.Name):
             node.value = self.visit(node.value)
         return node

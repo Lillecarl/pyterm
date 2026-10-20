@@ -53,8 +53,14 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     # `anyio.to_thread`, which another module's import put there.
     "submodule-side-effect": ("inner", {}),
     # A callee called through a proxy sees the proxy's `__call__` as its
-    # caller: anyio's lazy importer on 3.15 read the wrong globals.
-    "caller-frame": ("app.calls_frames", dict.fromkeys(PROXIES, "lazylab.proxy")),
+    # caller: anyio's lazy importer on 3.15 read the wrong globals. The
+    # read rewrite resolves a call in a module body first; in a function
+    # it leaves the first call through the proxy, for the frame's sake.
+    "caller-frame-at-import": ("app.calls_frames_at_import", dict.fromkeys(PROXIES, "lazylab.proxy")),
+    "caller-frame": (
+        "app.calls_frames",
+        dict.fromkeys((*PROXIES, "ast-proxy-loads", "ast-proxy-flags"), "lazylab.proxy"),
+    ),
     # Importing `shadow.thing` sets `shadow.thing` to the module; eagerly
     # the statement then sets the object. A proxy that knows its name
     # takes it back; `__import__` never learns the name it binds.
