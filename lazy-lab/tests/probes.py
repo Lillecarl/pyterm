@@ -27,7 +27,7 @@ __all__ = ["FIXTURES", "POLICY", "PROBES", "observe", "run"]
 FIXTURES = Path(__file__).parent / "fixtures"
 LAB = Path(__file__).parent.parent
 
-POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks"
+POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing"
 
 _PREAMBLE = """
 import importlib, os, sys
@@ -125,6 +125,11 @@ except Exception as e:
     "subclass": """
 m = load("app.subclass")
 result = [ran(), m.Mine.__mro__[1].__name__]
+""",
+    # A base that is a function with `__mro_entries__`, not a class.
+    "named-tuple-base": """
+point = load("app.named_tuple").Point(1, 2)
+result = [point.x, point.y, type(point).__mro__[1].__name__]
 """,
     # `from m import *` of a module whose names are still lazy.
     "star": """

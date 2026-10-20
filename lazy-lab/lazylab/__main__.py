@@ -8,6 +8,7 @@ Run a program with a candidate installed first.
 
 from __future__ import annotations
 
+import os
 import runpy
 import sys
 
@@ -28,6 +29,8 @@ def main(argv: list[str]) -> None:
             exec(compile(code, "<string>", "exec"), {"__name__": "__main__"})
         case [script, *args]:
             sys.argv = [script, *args]
+            # As `python script.py` does, so the script's siblings import.
+            sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
             runpy.run_path(script, run_name="__main__")
         case _:
             raise SystemExit(__doc__)

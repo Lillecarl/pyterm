@@ -78,9 +78,11 @@ def eligible(tree: ast.Module, package: str | None) -> list[Site]:
             continue
         relative = "." * node.level + (node.module or "")
         if node.level:
-            if not package:
+            # One that reaches past the top fails as written, eagerly.
+            try:
+                target = importlib.util.resolve_name(relative, package)
+            except ImportError, ValueError:
                 continue
-            target = importlib.util.resolve_name(relative, package)
         else:
             target = relative
         sites.append(Site(node, target, tuple(alias.name for alias in node.names)))

@@ -45,7 +45,9 @@ _VERSION = b"lazylab-1"
 class Transform(Protocol):
     name: str
 
-    def rewrite(self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str) -> int:
+    def rewrite(
+        self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
+    ) -> int:
         "Change `tree` in place and return how many statements went lazy."
 
     def prepare(self, module: types.ModuleType, lazy: int) -> None:
@@ -82,7 +84,7 @@ class _RewriteLoader(importlib.machinery.SourceFileLoader):
         source = self.get_data(source_path)
         tree = select.split_imports(ast.parse(source, source_path))
         package = fullname if self.is_package(fullname) else fullname.rpartition(".")[0]
-        lazy = self._finder.transform.rewrite(tree, fullname, package or None, self._finder.policy, source_path)
+        lazy = self._finder.transform.rewrite(tree, fullname, package or None, self._finder.policy, source_path, source)
         code = compile(ast.fix_missing_locations(tree), source_path, "exec", dont_inherit=True)
         STATS["lazy"] += lazy
         self._lazy = lazy

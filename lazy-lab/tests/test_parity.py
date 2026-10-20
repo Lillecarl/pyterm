@@ -14,6 +14,9 @@ import pytest
 from lazylab import available
 from probes import PROBES, observe
 
+#: The proxies that leave a bare read alone. `ast-proxy-loads` resolves
+#: one, as 3.15 does, and answers every probe as 3.15 does but the
+#: module's class.
 PROXIES = ("ast-proxy", "ast-proxy-restore", "dunder-import")
 
 # probe: (common answer, {candidate: its own answer})
@@ -43,6 +46,7 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "cycle": ("b sees a", {"eager": "ImportError"}),
     "submodules": (["inner", "other"], {}),
     "subclass": ([True, "Thing"], {}),
+    "named-tuple-base": ([1, 2, "tuple"], {}),
     "star": (True, {}),
     "outside-fetch": (True, {}),
     # `import_module` hands back a module LazyLoader has not run.
@@ -58,7 +62,10 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
             "dunder-import": ["top_from", "in_if", "in_try", "in_with", "in_for", "in_while", "in_match"],
         },
     ),
-    "module-type": ("module", dict.fromkeys(("ast-proxy", "dunder-import"), "LazyModuleType")),
+    "module-type": (
+        "module",
+        {"ast-proxy": "LazyModuleType", "dunder-import": "LazyModuleType", "ast-proxy-loads": "LazyModule"},
+    ),
 }
 
 

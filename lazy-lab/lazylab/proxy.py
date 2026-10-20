@@ -60,6 +60,49 @@ class LazyModuleType(types.ModuleType):
         return value
 
 
+#: The global that holds a module's own class, when it has one.
+CLASS = "__lazylab_class__"
+
+
+def own_class(module: types.ModuleType) -> type:
+    """
+    Give `module` a class of its own, which holds a property for each
+    name still lazy. An outside fetch of that name resolves it, and the
+    property goes once it has; every other fetch never leaves C. The
+    other way, `LazyModuleType`, runs `__getattribute__` in Python on
+    every fetch from outside, for as long as the module lives.
+    """
+    cls = type("LazyModule", (types.ModuleType,), {})
+    module.__class__ = cls
+    module.__dict__[CLASS] = cls
+    return cls
+
+
+def _forget(namespace: dict, name: str) -> None:
+    cls = namespace.get(CLASS)
+    if cls is not None and isinstance(cls.__dict__.get(name), property):
+        delattr(cls, name)
+
+
+def _descriptor(name: str) -> property:
+    def get(module):
+        value = module.__dict__[name]
+        if type(value) is LazyProxy:
+            return value._reify()
+        _forget(module.__dict__, name)
+        return value
+
+    def set_(module, value):
+        module.__dict__[name] = value
+        _forget(module.__dict__, name)
+
+    def delete(module):
+        del module.__dict__[name]
+        _forget(module.__dict__, name)
+
+    return property(get, set_, delete)
+
+
 def _resolved_one(namespace: dict) -> None:
     pending = namespace.get(PENDING, 0) - 1
     namespace[PENDING] = pending
@@ -95,6 +138,9 @@ class LazyProxy:
         self._lazy_display = display
         if namespace is not None:
             namespace[PENDING] = namespace.get(PENDING, 0) + 1
+            cls = namespace.get(CLASS)
+            if cls is not None and name:
+                setattr(cls, name, _descriptor(name))
 
     def _reify(self) -> Any:
         if self._lazy_done:
@@ -124,6 +170,7 @@ class LazyProxy:
                 for name in names:
                     if namespace.get(name) is self:
                         namespace[name] = obj
+                        _forget(namespace, name)
                 _resolved_one(namespace)
             return obj
 
@@ -192,8 +239,13 @@ class LazyProxy:
         return issubclass(subclass, self._reify())
 
     def __mro_entries__(self, bases):
-        # A class statement with a proxy among its bases.
-        return (self._reify(),)
+        # A class statement with a proxy among its bases. A base that is
+        # not a class answers for itself: `typing.NamedTuple` is a
+        # function whose own `__mro_entries__` names the real base.
+        real = self._reify()
+        if not isinstance(real, type) and hasattr(real, "__mro_entries__"):
+            return real.__mro_entries__(bases)
+        return (real,)
 
     def __lt__(self, other):
         return self._reify() < other

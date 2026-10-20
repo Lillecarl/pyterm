@@ -26,7 +26,9 @@ AVAILABLE = sys.version_info >= (3, 15)
 class Native:
     name = "ast-native"
 
-    def rewrite(self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str) -> int:
+    def rewrite(
+        self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
+    ) -> int:
         lazy = 0
         for site in select.eligible(tree, package):
             if policy(importer, site.target, site.fromlist):

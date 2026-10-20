@@ -5,18 +5,24 @@ Each import the policy picks becomes an assignment of a `LazyProxy`, the
 one the `lazy-imports` branch's shim builds from the `lazy` keyword.
 Here the policy picks, and the source stays plain Python.
 
-Two variants. `ast-proxy` keeps a rewritten module on `LazyModuleType`
-for good, as the shim does. `ast-proxy-restore` puts it back on
-`types.ModuleType` once its last proxy resolves, so an attribute fetch
-from outside stops paying a `__getattribute__` written in Python.
+Three variants. `ast-proxy` keeps a rewritten module on
+`LazyModuleType` for good, as the shim does. `ast-proxy-restore` puts
+it back on `types.ModuleType` once its last proxy resolves, so an
+attribute fetch from outside stops paying a `__getattribute__` written
+in Python. `ast-proxy-loads` wraps every bare read of a lazy global
+in a call that resolves it (`lazylab/loads.py`), which is what 3.15
+does in `LOAD_GLOBAL`, and gives each module a class of its own with a
+property per name still lazy (`proxy.own_class`) instead.
 """
 
 from __future__ import annotations
 
 import ast
+import importlib.util
+import sys
 from typing import TYPE_CHECKING
 
-from .. import hook, proxy, select
+from .. import hook, loads, proxy, select
 
 if TYPE_CHECKING:
     import types
@@ -37,13 +43,31 @@ class _Binder:
     def __init__(self, namespace: dict):
         self.namespace = namespace
 
+    def from_(self, name, target, attr, site):
+        return proxy.lazy_from(self.namespace, name, target, attr, site)
+
     def mod(self, name, fullname, site):
         return proxy.lazy_mod(self.namespace, name, fullname, site)
 
     def mod_as(self, name, fullname, site):
         return proxy.lazy_mod_as(self.namespace, name, fullname, site)
 
+
+class _NativeBinder(_Binder):
+    """
+    As 3.15 binds: a `from m import x` with `m` loaded takes `x` at once.
+    A plain `import m` stays lazy even then, as it does on 3.15.
+    """
+
+    __slots__ = ()
+
     def from_(self, name, target, attr, site):
+        module = sys.modules.get(target)
+        if module is not None and not getattr(getattr(module, "__spec__", None), "_initializing", False):
+            try:
+                return getattr(module, attr)
+            except AttributeError:
+                pass
         return proxy.lazy_from(self.namespace, name, target, attr, site)
 
 
@@ -88,12 +112,21 @@ class _Replace(ast.NodeTransformer):
         return super().generic_visit(node)
 
 
-class Proxy:
-    def __init__(self, restore: bool):
-        self.restore = restore
-        self.name = "ast-proxy-restore" if restore else "ast-proxy"
+def _force(value):
+    if type(value) is proxy.LazyProxy:
+        return value._reify()
+    return value
 
-    def rewrite(self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str) -> int:
+
+class Proxy:
+    def __init__(self, restore: bool, loads: bool):
+        self.restore = restore
+        self.loads = loads
+        self.name = "ast-proxy-loads" if loads else "ast-proxy-restore" if restore else "ast-proxy"
+
+    def rewrite(
+        self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
+    ) -> int:
         chosen = {
             id(site.node): _replacement(site, filename)
             for site in select.eligible(tree, package)
@@ -101,14 +134,24 @@ class Proxy:
         }
         if chosen:
             _Replace(chosen).visit(tree)
+        if chosen and self.loads:
+            bound = {statement.targets[0].id for statements in chosen.values() for statement in statements}
+            wrapped, unmatched = loads.wrap_bare_loads(tree, importlib.util.decode_source(source), filename, bound)
+            hook.STATS["wrapped"] = hook.STATS.get("wrapped", 0) + wrapped
+            hook.STATS["unmatched"] = hook.STATS.get("unmatched", 0) + unmatched
         return len(chosen)
 
     def prepare(self, module: types.ModuleType, lazy: int) -> None:
-        if lazy:
-            module.__dict__[BINDER] = _Binder(module.__dict__)
+        if not lazy:
+            return
+        module.__dict__[BINDER] = (_NativeBinder if self.loads else _Binder)(module.__dict__)
+        if self.loads:
+            module.__dict__[loads.FORCE] = _force
+            proxy.own_class(module)
+        else:
             module.__class__ = proxy.LazyModuleType
 
 
-def install(policy: Policy, *, restore: bool = False) -> None:
-    proxy.RESTORE = restore
-    hook.install(Proxy(restore), policy)
+def install(policy: Policy, *, restore: bool = False, loads: bool = False) -> None:
+    proxy.RESTORE = restore or loads
+    hook.install(Proxy(restore or loads, loads), policy)

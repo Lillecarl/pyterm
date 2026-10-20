@@ -624,6 +624,10 @@ rec {
       "314" = pkgs'.python3;
       "315" = pkgs'.python315;
     };
+    devEnvs = {
+      "314" = scopes.python3.devEnv;
+      "315" = scopes.python315.devEnv;
+    };
   };
 
   sourceNames = [
