@@ -45,6 +45,8 @@ do that, holds them to one set of probes, and measures them on pymux.
 | `ast-proxy-loads` | the same, and a bare read of a lazy global resolves it; each module gets a class of its own | any |
 | `ast-proxy-flags` | the same, with a flag per name that skips the resolving call once resolved | any |
 | `native-filter` | `sys.set_lazy_imports("all")` with the policy as the filter: no rewrite | 3.15 |
+| `lazy-modules` | the loader sets `__lazy_modules__` to a frozenset read off the bytecode: no rewrite | 3.15 |
+| `lazy-modules-contains` | the same, set to an object whose `__contains__` asks the policy | 3.15 |
 | `lazy-loader` | `importlib.util.LazyLoader` on each target module | any |
 | `dunder-import` | `builtins.__import__` returns proxies | any |
 
@@ -121,6 +123,8 @@ exact; the clock is one sandbox's. The frame rows are pymux's own
 | `ast-native`, everything-but | | 164 modules, 1.49 M (-63%) |
 | `native-filter`, everything-but | | 164 modules, 1.68 M (-58%) |
 | `ast-proxy-flags`, everything-but | 162 modules, 1.80 M (-59%) | 166 modules, 1.72 M (-57%) |
+| `lazy-modules-contains`, everything-but | | 160 modules, 1.53 M (-62%) |
+| `lazy-modules`, everything-but | | 160 modules, 10.4 M (+158%) |
 | frame `measure`, `ast-native` | | +0.0% |
 | frame `measure`, `ast-proxy-flags` | +0.8% / +1.4% | +0.8% / +1.5% |
 | frame `measure`, `ast-proxy-restore` foreign | +8.1% / +9.1% | +8.2% / +9.2% |
@@ -136,6 +140,18 @@ exact; the clock is one sandbox's. The frame rows are pymux's own
   every import everywhere: under "foreign" `import pymux.server` cost
   +68% instructions. `ast-native` applies the same policy once, at
   rewrite, and the rewrite cache keeps it.
+- **`__lazy_modules__` is `ast-native` with no rewrite.** 3.15 tests
+  `abs_name in __lazy_modules__` (`PySequence_Contains`) at each
+  module-level import outside a `try`. It answers every probe as
+  `ast-native`, and pymux's suite adds no failure under either policy.
+  The check sees the absolute target only, never the fromlist, and a
+  module that assigns its own `__lazy_modules__` replaces the loader's.
+  `-contains` is a Python call per import: -62% on completion against
+  `ast-native`'s -64% (1.53 M against 1.45 M), frame +0.0%. But
+  `ast-native` counts with its rewrite cache warm, and `-contains`
+  needs no cache, no parse and no compile, so a cold start costs it
+  nothing extra. The frozenset variant loses: `dis` over every
+  module's bytecode at each load is the whole +158%.
 - **`ast-proxy-loads` against `-flags`**: the resolving call is about
   thirteen instructions a read, the flag test four: +1.8% against +0.8%
   on `measure`.
