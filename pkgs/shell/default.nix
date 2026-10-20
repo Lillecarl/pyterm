@@ -17,6 +17,10 @@
   ruff,
   black,
   ncurses,
+  # The reader that `ptyhost/tests/test_asciicast.py` judges an export
+  # with. `convert` is asciinema 3, which is Rust: PyPI stops at 2.4.0,
+  # so the `test` extra cannot carry it.
+  asciinema,
 }:
 let
   # A python program's programs, and nothing that says it is a python package.
@@ -51,5 +55,6 @@ mkShell {
     ruff
     # tic and infocmp, for the terminfo entry of a pane.
     ncurses
+    asciinema
   ];
 }
