@@ -183,8 +183,10 @@ def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
         compositor.pointer_scroll_smooth(1, 40.0, 2)
         lines = []
         pump(compositor, lambda _seen: _read_until(client, lines, "axis"))
-        # 2 is `wl_pointer.axis_source.continuous`.
-        assert lines[-1] == "axis 2 20"
+        # 2 is `wl_pointer.axis_source.continuous`. The axis line, and
+        # not the last: the scroll can reach the client during the
+        # roundtrip before it prints "ready". Lillecarl/pymux#668.
+        assert [line for line in lines if line.startswith("axis")] == ["axis 2 20"]
     finally:
         client.kill()
         client.wait(10)
