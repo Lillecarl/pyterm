@@ -147,19 +147,24 @@ def render(results: dict) -> str:
             )
         lines.append("")
     if "frame" in eager:
-        shapes = [shape for shape in eager["frame"] if isinstance(eager["frame"].get(shape), int)]
-        lines += ["## frame (instructions, against eager)", ""]
-        lines += ["| shape | " + " | ".join("%s %s" % (r["candidate"], r["policy"]) for r in rows) + " |"]
-        lines += ["| --- |" + " --- |" * len(rows)]
-        for shape in shapes:
+        # One row per run: each kind of measurement over every shape, as
+        # the mean and the worst change against eager.
+        kinds = ["measure", "frame", "neighbours", "neighbours cold"]
+        lines += ["## frame (instructions against eager: mean / worst over the shapes)", ""]
+        lines += ["| candidate | policy | " + " | ".join(kinds) + " |", "| --- | --- |" + " --- |" * len(kinds)]
+        for row in rows[1:]:
+            if "error" in row["frame"]:
+                lines.append("| %s | %s | **%s** |" % (row["candidate"], row["policy"], row["frame"]["error"][:80]))
+                continue
             cells = []
-            for row in rows:
-                count = row["frame"].get(shape)
-                if not isinstance(count, int):
-                    cells.append("**%s**" % row["frame"].get("error", "missing")[:40])
-                    continue
-                cells.append("%+.1f%%" % ((count / eager["frame"][shape] - 1) * 100))
-            lines.append("| %s | %s |" % (shape, " | ".join(cells)))
+            for kind in kinds:
+                changes = [
+                    (count / eager["frame"][shape] - 1) * 100
+                    for shape, count in row["frame"].items()
+                    if shape.endswith("(%s)" % kind) and eager["frame"].get(shape)
+                ]
+                cells.append("%+.1f%% / %+.1f%%" % (sum(changes) / len(changes), max(changes)) if changes else "")
+            lines.append("| %s | %s | %s |" % (row["candidate"], row["policy"], " | ".join(cells)))
         lines.append("")
     return "\n".join(lines)
 

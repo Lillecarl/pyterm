@@ -49,6 +49,9 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "named-tuple-base": ([1, 2, "tuple"], {}),
     "star": (True, {}),
     "outside-fetch": (True, {}),
+    # `LazyModuleType` reads through `object.__getattribute__`, which
+    # skips the module's own `__getattr__`. ptyhost has one.
+    "module-getattr": ("late", dict.fromkeys(("ast-proxy", "ast-proxy-restore", "dunder-import"), "AttributeError")),
     # `import_module` hands back a module LazyLoader has not run.
     "import-module": (True, {"lazy-loader": False}),
     "threads": (["Thing"] * 4, {}),

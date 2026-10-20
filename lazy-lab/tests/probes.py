@@ -141,6 +141,14 @@ result = m.thing() is load("heavy").Thing
 m = load("app.members")
 result = m.Thing is load("heavy").Thing
 """,
+    # A module's own `__getattr__` (PEP 562), while a lazy name in it is
+    # still pending.
+    "module-getattr": """
+try:
+    result = load("app.dynamic").LATE
+except Exception as e:
+    result = type(e).__name__
+""",
     # `importlib.import_module` at module level, as a dependency does it.
     "import-module": """
 load("app.by_function")
