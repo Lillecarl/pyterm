@@ -1,20 +1,25 @@
 """
-3.15: the rewrite sets `is_lazy` on each import the policy picks.
+3.15: no rewrite. The loader sets `__lazy_modules__` before the module
+runs, to an object that asks the policy.
 
-That compiles to the bytecode `lazy import` compiles to: the name binds a
-lazy object, and its first load imports and rebinds, in C. Nothing of
-this package runs after the import, and the frame cost measured +0.0%.
-`sys.set_lazy_imports_filter` gives the same semantics with no rewrite,
-but calls the policy in Python on every import, every start: up to +68%
-instructions on an import workload. Here the policy runs once per module,
-and the cache keeps its answer.
+3.15 tests `abs_name in __lazy_modules__` at each module-level import
+outside a `try`, and makes the import lazy when it is: the name binds a
+lazy object, and its first load imports and rebinds, in C. The module
+compiles from the bytecode its installer wrote, so a first start costs
+what every start costs. Setting `is_lazy` in a rewrite gives the same
+semantics two points cheaper warm, and three times eager's start cold,
+when every module is parsed and compiled. pyterm's `lazy-lab` measured
+both.
+
+The test sees the absolute target, never the fromlist. A module that
+assigns its own `__lazy_modules__` keeps its own.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import select
+from . import hook
 
 if TYPE_CHECKING:
     import ast
@@ -25,21 +30,35 @@ if TYPE_CHECKING:
 __all__ = ["Native"]
 
 
+class _Asks:
+    "A `__lazy_modules__` that asks the policy for each import."
+
+    __slots__ = ("importer", "policy")
+
+    def __init__(self, importer: str, policy: Policy):
+        self.importer = importer
+        self.policy = policy
+
+    def __contains__(self, target: str) -> bool:
+        lazy = self.policy(self.importer, target)
+        hook.STATS["lazy"] += lazy
+        return lazy
+
+
 class Native:
     name = "native"
+    rewrites = False
+
+    def __init__(self, policy: Policy):
+        self.policy = policy
 
     def rewrite(
         self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
     ) -> int:
-        lazy = 0
-        for site in select.eligible(tree, package):
-            if policy(importer, site.target, site.fromlist):
-                site.node.is_lazy = 1
-                lazy += 1
-        return lazy
+        return 0
 
     def prepare(self, module: types.ModuleType, lazy: int) -> None:
-        pass
+        module.__dict__["__lazy_modules__"] = _Asks(module.__name__, self.policy)
 
     def finish(self, module: types.ModuleType, lazy: int) -> None:
         pass

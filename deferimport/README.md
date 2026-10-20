@@ -14,18 +14,21 @@ source.
     import deferimport
     deferimport.install("deny=hypothesis,asyncssh")
 
-`install` puts a finder first on `sys.meta_path`, and every module loaded
-after it is rewritten before it compiles: each module-scope import the
-policy picks goes lazy, in the positions 3.15 picks itself. The laziness
+`install` puts a finder first on `sys.meta_path`, and in every module
+loaded after it each module-scope import the policy picks goes lazy, in
+the positions 3.15 picks itself. The laziness
 cascades through every dependency and the standard library, where the
 `lazy` keyword makes one statement lazy and leaves what that module
 imports eager.
 
 ## The two mechanisms
 
-- **3.15** compiles its own lazy imports (PEP 810): the rewrite sets
-  `is_lazy`, and nothing of this package runs after the import.
-- **3.14** has none, so each import becomes a proxy that rebinds its
+- **3.15** has lazy imports of its own (PEP 810). The loader sets
+  `__lazy_modules__` to an object that asks the policy at each import,
+  and rewrites nothing: a module compiles from the bytecode its
+  installer wrote. The policy sees the target, never the fromlist.
+- **3.14** has none, so each module is rewritten before it compiles,
+  and each import becomes a proxy that rebinds its
   name on first use, and the reads a proxy would leak are rewritten to
   resolve it first. A module that holds one gets a class of its own,
   with a property per name still lazy.
@@ -50,15 +53,20 @@ import inside a `with` runs after the block, on 3.15 as well.
 
 pyterm's `lazy-lab/` holds the candidates this was chosen from, and
 their numbers on pymux. With every import lazy but hypothesis and
-asyncssh, the parser behind a shell's Tab costs 63% fewer instructions
+asyncssh, the parser behind a shell's Tab costs 62% fewer instructions
 on 3.15 and 59% fewer on 3.14, and a frame of pymux +0.0% and +0.3%.
+
+A rewrite on 3.15, setting `is_lazy`, measured two points cheaper with
+its cache warm, and three times eager's start with it cold: 330 ms
+against 113. Every new install path starts cold, so 3.15 rewrites
+nothing.
 
 ## Other ways, and why not them
 
 | | what goes lazy | source changes | where it falls short here |
 | --- | --- | --- | --- |
 | PEP 810 `lazy` keyword (3.15) | one statement | every import, by hand | does not cascade into what the module imports |
-| `sys.set_lazy_imports("all")` + filter (3.15) | every module-scope import | none | the filter is a Python call per import, each start: up to +68% instructions |
+| `sys.set_lazy_imports("all")` + filter (3.15) | every module-scope import | none | the filter is a Python call at every import of every module: up to +68% instructions |
 | Cinder, PEP 690 (rejected 2022) | every module-scope import | none | an interpreter fork |
 | `importlib.util.LazyLoader`, Mercurial's demandimport | a whole module, on attribute fetch | none | `from m import x` loads `m` at once; cryptography refuses it |
 | `lazy_loader` (SPEC 1), apipkg, transformers' `_LazyModule` | a package's attributes, through PEP 562 | each package's `__init__` | only packages written for it |
@@ -70,7 +78,7 @@ package's answer to that.
 
 `DEFERIMPORT=eager` makes `install` do nothing, so one suite runs both
 ways. `-p deferimport.pytest_plugin` runs a suite under
-`DEFERIMPORT_POLICY`. Rewritten bytecode is cached in
+`DEFERIMPORT_POLICY`. On 3.14, rewritten bytecode is cached in
 `DEFERIMPORT_CACHE`, by default the user's cache directory.
 
 <!-- The lines below are pyterm's nix/shared/readme-tail.md, written by sync-sources. -->

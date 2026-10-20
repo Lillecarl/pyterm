@@ -57,6 +57,9 @@ def cache_directory() -> Path:
 
 class Transform(Protocol):
     name: str
+    #: False: the module compiles from its own bytecode, and only
+    #: `prepare` and `finish` run.
+    rewrites: bool
 
     def rewrite(
         self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
@@ -82,6 +85,9 @@ class _Loader(importlib.machinery.SourceFileLoader):
 
     @override
     def get_code(self, fullname):
+        if not self._finder.transform.rewrites:
+            STATS["modules"] += 1
+            return super().get_code(fullname)
         source_path = self.get_filename(fullname)
         stats = self.path_stats(source_path)
         # The source's own path is in the key too: two installs of one

@@ -123,6 +123,7 @@ class _Replace(ast.NodeTransformer):
 
 class Proxies:
     name = "proxies"
+    rewrites = True
 
     def rewrite(
         self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes

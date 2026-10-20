@@ -17,9 +17,9 @@ result = [ran(), dict(hook.STATS)]
 
 
 @pytest.mark.parametrize("mechanism", LAZY)
-def test_a_cached_pyc_beside_the_source_is_bypassed(mechanism, tmp_path):
-    # An installed package carries a `__pycache__` beside every source,
-    # and a loader that reads it never runs the rewrite.
+def test_a_module_with_a_pyc_beside_it_still_goes_lazy(mechanism, tmp_path):
+    # An installed package carries a `__pycache__` beside every source:
+    # proxies bypass it, and native reads it.
     fixtures = tmp_path / "fixtures"
     shutil.copytree(FIXTURES, fixtures)
     assert compileall.compile_dir(fixtures, quiet=1)
@@ -28,22 +28,28 @@ def test_a_cached_pyc_beside_the_source_is_bypassed(mechanism, tmp_path):
     assert stats["lazy"] >= 1
 
 
-@pytest.mark.parametrize("mechanism", LAZY)
-def test_the_second_start_reads_the_rewrite_from_the_cache(mechanism, tmp_path):
-    first = run(mechanism, COUNT, cache=tmp_path)[1]
-    second = run(mechanism, COUNT, cache=tmp_path)[1]
+def test_the_second_start_reads_the_rewrite_from_the_cache(tmp_path):
+    first = run("proxies", COUNT, cache=tmp_path)[1]
+    second = run("proxies", COUNT, cache=tmp_path)[1]
     assert first["cached"] == 0
     assert second["cached"] == second["modules"] >= 1
     assert second["lazy"] == first["lazy"]
 
 
-@pytest.mark.parametrize("mechanism", LAZY)
-def test_a_cache_that_cannot_be_written_costs_nothing_but_the_parse(mechanism, tmp_path):
+def test_a_cache_that_cannot_be_written_costs_nothing_but_the_parse(tmp_path):
     blocked = tmp_path / "file"
     blocked.write_text("")
-    ran, stats = run(mechanism, COUNT, cache=blocked / "under-a-file")
+    ran, stats = run("proxies", COUNT, cache=blocked / "under-a-file")
     assert not ran
     assert stats["cached"] == 0
+
+
+@pytest.mark.skipif("native" not in MECHANISMS, reason="3.15 only")
+def test_native_writes_no_cache(tmp_path):
+    ran, stats = run("native", COUNT, cache=tmp_path / "cache")
+    assert not ran
+    assert stats["lazy"] >= 1
+    assert not (tmp_path / "cache").exists()
 
 
 def test_eager_in_the_environment_installs_nothing(tmp_path):
