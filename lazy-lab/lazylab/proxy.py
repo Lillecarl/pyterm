@@ -178,9 +178,15 @@ class LazyProxy:
                 # Only while the name still holds this proxy: the module
                 # may have rebound it since. With no name, as for a
                 # proxy `__import__` returned, every name holding it.
+                # Or while it holds the submodule of that name, which the
+                # import just set on its package: eagerly, the statement
+                # runs after that and wins (cryptography's
+                # `openssl.backend` is an object and a module).
                 names = [self._lazy_name] if self._lazy_name else [k for k, v in namespace.items() if v is self]
+                package = namespace.get("__name__")
                 for name in names:
-                    if namespace.get(name) is self:
+                    now = namespace.get(name)
+                    if now is self or (now is not obj and now is sys.modules.get("%s.%s" % (package, name))):
                         namespace[name] = obj
                         _forget(namespace, name)
                         if namespace.get(FLAGS):

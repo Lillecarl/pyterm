@@ -64,6 +64,27 @@ mechanism alone, and the probes hold them equal.
   A loader hook still makes that module's own imports lazy, however it
   was imported.
 
+## Recursive laziness
+
+3.15's `lazy` keyword defers one statement: what the imported module
+imports in turn stays eager. A loader rewrite cascades by construction,
+because every module it loads is rewritten, so the policy "everything"
+is the recursive case, down through the standard library and every
+dependency. pymux's suite is its judge:
+`checks.lazy-lab-pymux-unit-<version>` runs it eager and under each
+candidate and policy, and groups what a run adds by the reason.
+
+What the first runs taught, each now a probe:
+
+- **A side effect of `import a.b` is an attribute.** pymux reads
+  `anyio.to_thread` because some other module imported it; a proxy
+  imports nothing, so 299 tests failed. 3.15 keeps the submodule
+  pending and imports it on the read, and `lazylab/submodules.py` does
+  the same for proxies (`submodule-side-effect`).
+- **A package may lazily import its own submodule** and use it while it
+  loads: `multiprocessing`'s `from . import context`. The proxy found
+  itself in the namespace it fetched from (`own-submodule`).
+
 ## What it costs and saves on 3.14
 
 `checks.lazy-lab-measure-314` writes the whole table. Instructions are

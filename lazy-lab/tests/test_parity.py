@@ -52,6 +52,10 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     # Every proxy failed this before `lazylab/submodules.py`: pymux reads
     # `anyio.to_thread`, which another module's import put there.
     "submodule-side-effect": ("inner", {}),
+    # Importing `shadow.thing` sets `shadow.thing` to the module; eagerly
+    # the statement then sets the object. A proxy that knows its name
+    # takes it back; `__import__` never learns the name it binds.
+    "shadowed-submodule": (["the object", "the object"], {"dunder-import": ["the object", "module"]}),
     # Every proxy failed this as a cycle with itself, before `lazy_from`
     # learned to tell: multiprocessing's `from . import context`.
     "own-submodule": ("sub", {}),

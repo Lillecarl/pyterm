@@ -27,7 +27,7 @@ __all__ = ["FIXTURES", "POLICY", "PROBES", "observe", "run"]
 FIXTURES = Path(__file__).parent / "fixtures"
 LAB = Path(__file__).parent.parent
 
-POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing,selfpkg"
+POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing,selfpkg,shadow"
 
 _PREAMBLE = """
 import importlib, os, sys
@@ -148,6 +148,13 @@ try:
     result = load("app.reads_inner").read()
 except Exception as e:
     result = type(e).__name__
+""",
+    # `from pkg.thing import thing` in pkg: importing the submodule sets
+    # `pkg.thing` to the module, and the statement sets it back.
+    "shadowed-submodule": """
+m = load("shadow")
+first, second = m.thing, m.thing
+result = [first, second if isinstance(second, str) else type(second).__name__]
 """,
     # A package's `from . import sub`, used while the package loads.
     "own-submodule": """
