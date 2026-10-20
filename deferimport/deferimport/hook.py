@@ -20,6 +20,7 @@ import os
 import symtable  # noqa: F401  (loaded before the hook: see `_NEVER`)
 import sys
 import tokenize  # noqa: F401  (loaded before the hook: see `_NEVER`)
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, override
 
@@ -106,10 +107,16 @@ class _Loader(importlib.machinery.SourceFileLoader):
             self._lazy = lazy
             return code
         source = self.get_data(source_path)
-        tree = select.split_imports(ast.parse(source, source_path))
         package = fullname if self.is_package(fullname) else fullname.rpartition(".")[0]
-        lazy = self._finder.transform.rewrite(tree, fullname, package or None, self._finder.policy, source_path, source)
-        code = compile(ast.fix_missing_locations(tree), source_path, "exec", dont_inherit=True)
+        # The installer's own compile already said these; here they would
+        # reach a person's terminal on each cold start. opuslib has one.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = select.split_imports(ast.parse(source, source_path))
+            lazy = self._finder.transform.rewrite(
+                tree, fullname, package or None, self._finder.policy, source_path, source
+            )
+            code = compile(ast.fix_missing_locations(tree), source_path, "exec", dont_inherit=True)
         STATS["lazy"] += lazy
         self._lazy = lazy
         # A cache that cannot be written costs the next start a parse,

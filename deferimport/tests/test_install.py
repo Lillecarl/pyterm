@@ -52,6 +52,18 @@ def test_native_writes_no_cache(tmp_path):
     assert not (tmp_path / "cache").exists()
 
 
+def test_a_rewrite_says_no_syntax_warning(tmp_path):
+    # The installer's compile already said it. Under `error` a warning
+    # that escaped the rewrite would fail the import.
+    answer = run(
+        "proxies",
+        "load('app.warns')\nresult = ran()",
+        cache=tmp_path,
+        env={"PYTHONWARNINGS": "error::SyntaxWarning"},
+    )
+    assert answer is False
+
+
 def test_eager_in_the_environment_installs_nothing(tmp_path):
     answer = run(
         "proxies",
