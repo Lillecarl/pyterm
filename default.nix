@@ -481,7 +481,7 @@ rec {
   # A check is the verdict on a suite, and `checks.<name>.run` is the run it
   # judges: the log, and everything the suite left behind. `pyte/nix/suite.nix`
   # says why the two are separate.
-  checks = suites // {
+  checks = suites // lazyLab // {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
@@ -615,6 +615,16 @@ rec {
         ];
       };
     };
+
+  # TEMPORARY: the lazy-import lab's checks. Beside `suites` and not in
+  # it, so `checks.all` never runs them. `lazy-lab/README.md`.
+  lazyLab = pkgs.callPackage ./lazy-lab {
+    inherit sources;
+    pythons = {
+      "314" = pkgs'.python3;
+      "315" = pkgs'.python315;
+    };
+  };
 
   sourceNames = [
     "pyte"
