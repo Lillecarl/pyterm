@@ -125,11 +125,13 @@ exact; the clock is one sandbox's. The frame rows are pymux's own
 | frame `measure`, `ast-proxy-flags` | +0.8% / +1.4% | +0.8% / +1.5% |
 | frame `measure`, `ast-proxy-restore` foreign | +8.1% / +9.1% | +8.2% / +9.2% |
 
-- **The branch's frame rise is `LazyModuleType`.** Split by code object
-  (`measure/frame_breakdown.py`), 182 of the 237 extra instructions of
-  `strip 4 panes (measure)` are its `__getattribute__`, Python run on
-  every fetch from outside a module with a name still lazy.
-  `ast-proxy-restore` keeps that class and repeats the branch's +7–10%.
+- **The branch's frame rise is `LazyModuleType`.** Run on the branch
+  itself, split by code object (`measure/frame_breakdown.py`),
+  `_LazyModuleType.__getattribute__` is the whole difference from main:
+  all 182 extra instructions of `strip 4 panes (measure)` (2289 to
+  2471, +8.0%) and all 3,016 of its `neighbours cold` (+6.5%). It is
+  Python run on every fetch from outside a module with a name still
+  lazy. `ast-proxy-restore` keeps that class and repeats the rise.
 - **`native-filter` pays per import.** 3.15 calls the Python filter on
   every import everywhere: under "foreign" `import pymux.server` cost
   +68% instructions. `ast-native` applies the same policy once, at
