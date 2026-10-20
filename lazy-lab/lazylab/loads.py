@@ -2,12 +2,15 @@
 Resolve a lazy global where it is read bare, the way 3.15's
 `LOAD_GLOBAL` does, for the proxy rewrite on 3.14.
 
-A proxy resolves itself when it is called or an attribute is fetched,
-and then rebinds the global. Any other read hands the proxy itself to
-whoever reads it, and C code that checks a type refuses it: `ord()` on
-a lazy string constant, `except` on a lazy class,
-`Mapping.register(lazy_class)`. So every other read of a lazily bound
-global, `X` in `ord(X)`, becomes `__lazylab_force__(X)`.
+A proxy resolves itself when an attribute is fetched off it, and then
+rebinds the global. Any other read hands the proxy itself to whoever
+reads it, and C code that checks a type refuses it: `ord()` on a lazy
+string constant, `except` on a lazy class,
+`Mapping.register(lazy_class)`. A call through it works, but puts the
+proxy's `__call__` between caller and callee, and a callee that reads
+`sys._getframe(1)` sees the proxy: anyio's lazy importer on 3.15 did.
+So every read but an attribute fetch, `X` in `ord(X)` and in `X()`,
+becomes `__lazylab_force__(X)`.
 
 `symtable` says which reads are of the global. Measured on 3.14: list,
 set and dict comprehensions have no table of their own (PEP 709), a
@@ -87,14 +90,6 @@ class _Loads(ast.NodeTransformer):
                 read = ast.Name(node.id, ast.Load())
                 call = ast.IfExp(test=ast.Name(done(node.id), ast.Load()), body=read, orelse=call)
             return ast.copy_location(call, node)
-        return node
-
-    def visit_Call(self, node: ast.Call):
-        # A call resolves the proxy it calls, and rebinds it.
-        if not isinstance(node.func, ast.Name):
-            node.func = self.visit(node.func)
-        node.args = [self.visit(arg) for arg in node.args]
-        node.keywords = [self.visit(keyword) for keyword in node.keywords]
         return node
 
     def visit_Attribute(self, node: ast.Attribute):

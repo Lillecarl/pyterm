@@ -52,6 +52,9 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     # Every proxy failed this before `lazylab/submodules.py`: pymux reads
     # `anyio.to_thread`, which another module's import put there.
     "submodule-side-effect": ("inner", {}),
+    # A callee called through a proxy sees the proxy's `__call__` as its
+    # caller: anyio's lazy importer on 3.15 read the wrong globals.
+    "caller-frame": ("app.calls_frames", dict.fromkeys(PROXIES, "lazylab.proxy")),
     # Importing `shadow.thing` sets `shadow.thing` to the module; eagerly
     # the statement then sets the object. A proxy that knows its name
     # takes it back; `__import__` never learns the name it binds.

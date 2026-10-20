@@ -27,7 +27,7 @@ __all__ = ["FIXTURES", "POLICY", "PROBES", "observe", "run"]
 FIXTURES = Path(__file__).parent / "fixtures"
 LAB = Path(__file__).parent.parent
 
-POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing,selfpkg,shadow"
+POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing,selfpkg,shadow,frames"
 
 _PREAMBLE = """
 import importlib, os, sys
@@ -155,6 +155,10 @@ except Exception as e:
 m = load("shadow")
 first, second = m.thing, m.thing
 result = [first, second if isinstance(second, str) else type(second).__name__]
+""",
+    # A lazily imported callee that reads `sys._getframe(1)`.
+    "caller-frame": """
+result = load("app.calls_frames").who()
 """,
     # A package's `from . import sub`, used while the package loads.
     "own-submodule": """

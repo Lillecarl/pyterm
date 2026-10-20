@@ -31,8 +31,10 @@ def wrapped(source: str, names=("X",)) -> str:
         ("def f(a):\n    return list((X for _ in a))", "def f(a):\n    return list((F(X) for _ in a))"),
         ("def f(a=X):\n    pass", "def f(a=F(X)):\n    pass"),
         ("@X\ndef f():\n    pass", "@F(X)\ndef f():\n    pass"),
-        # A call and an attribute fetch resolve the proxy themselves.
-        ("X()", "X()"),
+        # A call too: through the proxy, the callee's caller would be
+        # the proxy's `__call__`, and `sys._getframe(1)` reads that.
+        ("X()", "F(X)()"),
+        # An attribute fetch resolves the proxy itself, and adds no frame.
         ("X.y", "X.y"),
         # A local, a parameter, a comprehension's own name: not the global.
         ("def f():\n    X = 1\n    return X", "def f():\n    X = 1\n    return X"),
