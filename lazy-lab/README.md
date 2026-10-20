@@ -64,6 +64,36 @@ mechanism alone, and the probes hold them equal.
   A loader hook still makes that module's own imports lazy, however it
   was imported.
 
+## What it costs and saves on 3.14
+
+`checks.lazy-lab-measure-314` writes the whole table. Instructions are
+exact; the clock is one sandbox's. Policies: "ours" makes every import
+our packages make lazy, "foreign" only their imports of other
+projects, "everything" every import everywhere.
+
+- **Completion** (the parser a shell's Tab builds), eager 534 modules
+  and 4.35 M instructions: `ast-proxy-loads` "ours" runs 180 modules
+  and 1.91 M (-56%), "everything" 161 and 1.72 M (-60%), and the clock
+  goes from 183 ms to 47–56 ms. The `lazy-imports` branch's marked
+  imports removed 48 modules.
+- **The branch's frame rise is `LazyModuleType`.** Split by code
+  object, 182 of the 237 extra instructions of `strip 4 panes
+  (measure)` are its `__getattribute__`, which is Python and runs on
+  every fetch from outside a module that has a name still lazy.
+  `ast-proxy-restore` under "foreign" keeps that class and repeats the
+  branch's numbers: `measure` +8.1% mean, `neighbours cold` +6.5%.
+- **A class per module removes it.** `ast-proxy-loads` gives each
+  module a `ModuleType` subclass with a property per name still lazy,
+  dropped once the name resolves, so no fetch runs Python at steady
+  state. Its frame rows are +0.0% to +3.3%; the rest is the resolving
+  call on each bare read.
+- **A flag per name nearly removes that too.** `ast-proxy-flags` reads
+  `X if __lazylab_done_X__ else force(X)`: `strip 4 panes` +1.1%
+  `measure`, +0.1% `frame`, +1.0% `neighbours cold`.
+- **`ptyhost` has a module `__getattr__`**, which `LazyModuleType`
+  skips, so "foreign" broke `from ptyhost import Process` under
+  `ast-proxy`. The probe `module-getattr` holds it.
+
 ## Running it
 
     nix build --file . checks.lazy-lab-unit-314

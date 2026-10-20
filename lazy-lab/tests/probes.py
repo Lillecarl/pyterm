@@ -27,7 +27,7 @@ __all__ = ["FIXTURES", "POLICY", "PROBES", "observe", "run"]
 FIXTURES = Path(__file__).parent / "fixtures"
 LAB = Path(__file__).parent.parent
 
-POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing"
+POLICY = "targets=heavy,plugins,missing_mod,cycle_b,pkg_two,marks,typing,selfpkg"
 
 _PREAMBLE = """
 import importlib, os, sys
@@ -140,6 +140,13 @@ result = m.thing() is load("heavy").Thing
     "outside-fetch": """
 m = load("app.members")
 result = m.Thing is load("heavy").Thing
+""",
+    # A package's `from . import sub`, used while the package loads.
+    "own-submodule": """
+try:
+    result = load("selfpkg").VALUE
+except Exception as e:
+    result = type(e).__name__
 """,
     # A module's own `__getattr__` (PEP 562), while a lazy name in it is
     # still pending.

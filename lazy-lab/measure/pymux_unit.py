@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 LAB = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(LAB))
@@ -46,20 +47,40 @@ def run(candidate: str, policy: str, out: Path, source: Path) -> tuple[dict[str,
     )
     cores = min(int(os.environ.get("NIX_BUILD_CORES") or 8) or 8, 8)
     selection = os.environ.get("LAZYLAB_PYMUX_TESTS", "").split()
+    junit = out / ("junit-" + label + ".xml")
     argv = [
         *(sys.executable, "-m", "pytest", "-p", "lazylab.pytest_plugin", "-q", "-rfE"),
         *("-p", "no:cacheprovider", "-n", str(cores), "--dist", "worksteal"),
-        *("-o", "faulthandler_timeout=120"),
+        *("-o", "faulthandler_timeout=120", "--junitxml", str(junit)),
         *selection,
     ]
     done = subprocess.run(argv, env=env, cwd=source, capture_output=True, text=True, check=False)
     (out / ("log-" + label)).write_text(done.stdout + done.stderr)
-    failed = {m[1]: (m[2] or "").strip() for line in done.stdout.splitlines() if (m := _FAILED.match(line))}
+    # A run that died before writing the report has only the summary
+    # lines, which name a test another way: one source per run.
+    failed = (
+        _junit_failures(junit)
+        if junit.exists()
+        else {m[1]: (m[2] or "").strip() for line in done.stdout.splitlines() if (m := _FAILED.match(line))}
+    )
     tail = next((line for line in reversed(done.stdout.splitlines()) if line.strip()), "")
     if not tail:
         tail = next((line for line in reversed(done.stderr.splitlines()) if line.strip()), "")
     workers = len(list(stamps.iterdir())) if stamps.exists() else 0
     return failed, workers, tail
+
+
+def _junit_failures(path: Path) -> dict[str, str]:
+    "Each failed test and the first line of why, from pytest's JUnit report."
+    if not path.exists():
+        return {}
+    failed = {}
+    for case in ElementTree.parse(path).iter("testcase"):
+        for outcome in case:
+            if outcome.tag in ("failure", "error"):
+                name = "%s::%s" % (case.get("classname", ""), case.get("name", ""))
+                failed[name] = (outcome.get("message") or "").splitlines()[0] if outcome.get("message") else ""
+    return failed
 
 
 def _reasons(failed: dict[str, str], only: set[str]) -> list[str]:

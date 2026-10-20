@@ -117,6 +117,11 @@ class RewriteFinder:
     def find_spec(self, fullname, path, target=None):
         if fullname.partition(".")[0] in _NEVER or not self.policy.covers_importer(fullname):
             return None
+        # A test module is pytest's to rewrite, for its asserts. The suite
+        # judges the rewrite here, and is not what is rewritten.
+        last = fullname.rpartition(".")[2]
+        if last == "conftest" or last.startswith("test_"):
+            return None
         spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
         if spec is None or type(spec.loader) is not importlib.machinery.SourceFileLoader:
             return spec

@@ -415,14 +415,21 @@ def lazy_mod_as(namespace, name, fullname, site):
 def lazy_from(namespace, name, target, attr, site):
     "Bind one name of `from target import attr`."
     display = f"{target}.{attr}"
+    made: list[LazyProxy] = []
 
     def resolve():
         module = importlib.import_module(target)
+        fullname = f"{target}.{attr}"
+        # `from . import sub` in a package binds the proxy in the very
+        # namespace it fetches from: the fetch would find itself and
+        # report a cycle. multiprocessing does this. The submodule is
+        # what such a name means.
+        if getattr(module, "__dict__", {}).get(attr) is made[0]:
+            return importlib.import_module(fullname)
         try:
             return getattr(module, attr)
         except AttributeError:
             pass
-        fullname = f"{target}.{attr}"
         try:
             return importlib.import_module(fullname)
         except ModuleNotFoundError as exc:
@@ -438,4 +445,5 @@ def lazy_from(namespace, name, target, attr, site):
         where = f" from {target!r} ({path})" if path else f" from {target!r}"
         raise ImportError(f"cannot import name {attr!r}{where}") from None
 
-    return LazyProxy(resolve, site, namespace, name, display)
+    made.append(LazyProxy(resolve, site, namespace, name, display))
+    return made[0]
