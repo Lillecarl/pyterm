@@ -64,7 +64,12 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     ),
     "module-type": (
         "module",
-        {"ast-proxy": "LazyModuleType", "dunder-import": "LazyModuleType", "ast-proxy-loads": "LazyModule"},
+        {
+            "ast-proxy": "LazyModuleType",
+            "dunder-import": "LazyModuleType",
+            "ast-proxy-loads": "LazyModule",
+            "ast-proxy-flags": "LazyModule",
+        },
     ),
 }
 

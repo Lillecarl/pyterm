@@ -27,16 +27,7 @@ LAB = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(LAB))
 
 from lazylab import available
-
-_PACKAGES = "pymux,libpymux,ptterm,ptyhost,pyte,txterm,pyterm_pytest"
-
-POLICIES = {
-    # Every import our packages make.
-    "ours": "importers=" + _PACKAGES,
-    # Only their imports of the rest of the world: never one another.
-    "foreign": "importers=%s;deny=%s" % (_PACKAGES, _PACKAGES),
-    "everything": "everything",
-}
+from lazylab.policy import PRESETS as POLICIES
 
 WORKLOADS = ("import-server", "completion")
 

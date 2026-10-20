@@ -22,12 +22,14 @@ from __future__ import annotations
 import ast
 import symtable
 
+from .proxy import done
+
 __all__ = ["FORCE", "wrap_bare_loads"]
 
-#: The global a rewritten read calls.
+#: The global a rewritten read calls. With flags, a read is
+#: `(X if __lazylab_done_X__ else __lazylab_force__(X))` instead: four
+#: instructions once `X` resolved, where the call alone is about thirteen.
 FORCE = "__lazylab_force__"
-
-_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp)
 
 
 def _targets(generators: list[ast.comprehension]) -> set[str]:
@@ -35,8 +37,9 @@ def _targets(generators: list[ast.comprehension]) -> set[str]:
 
 
 class _Loads(ast.NodeTransformer):
-    def __init__(self, names: set[str], table: symtable.SymbolTable):
+    def __init__(self, names: set[str], table: symtable.SymbolTable, flags: bool):
         self.names = names
+        self.flags = flags
         self.tables: list[symtable.SymbolTable | None] = [table]
         self.shadow: list[set[str]] = []
         self.used: set[int] = set()
@@ -57,7 +60,8 @@ class _Loads(ast.NodeTransformer):
         if table is None:
             return None
         for child in table.get_children():
-            if (child.get_type(), child.get_name(), child.get_lineno()) == (kind, name, lineno):
+            # 3.15 spells an anonymous scope `<lambda>`, 3.14 `lambda`.
+            if (child.get_type(), child.get_name().strip("<>"), child.get_lineno()) == (kind, name, lineno):
                 # `get_id`, not `id()`: each call of `get_children` makes
                 # new wrappers, and a freed one's `id()` comes back.
                 if child.get_id() not in self.used:
@@ -65,14 +69,6 @@ class _Loads(ast.NodeTransformer):
                     return child
         self.unmatched += 1
         return None
-
-    def _in(self, table: symtable.SymbolTable | None, nodes) -> None:
-        self.tables.append(table)
-        try:
-            for node in nodes:
-                self.visit(node)
-        finally:
-            self.tables.pop()
 
     def _visit_list(self, nodes) -> list:
         out = []
@@ -87,6 +83,9 @@ class _Loads(ast.NodeTransformer):
         if isinstance(node.ctx, ast.Load) and self._is_lazy_global(node.id):
             self.wrapped += 1
             call = ast.Call(func=ast.Name(FORCE, ast.Load()), args=[node], keywords=[])
+            if self.flags:
+                read = ast.Name(node.id, ast.Load())
+                call = ast.IfExp(test=ast.Name(done(node.id), ast.Load()), body=read, orelse=call)
             return ast.copy_location(call, node)
         return node
 
@@ -193,13 +192,15 @@ class _Loads(ast.NodeTransformer):
         return node
 
 
-def wrap_bare_loads(tree: ast.Module, source: str | bytes, filename: str, names: set[str]) -> tuple[int, int]:
+def wrap_bare_loads(
+    tree: ast.Module, source: str | bytes, filename: str, names: set[str], *, flags: bool = False
+) -> tuple[int, int]:
     """
     Wrap every bare read of a global in `names`. Returns how many reads
     were wrapped and how many scopes could not be matched to a table.
     """
     if not names:
         return 0, 0
-    loads = _Loads(names, symtable.symtable(source, filename, "exec"))
+    loads = _Loads(names, symtable.symtable(source, filename, "exec"), flags)
     tree.body = loads._visit_list(tree.body)
     return loads.wrapped, loads.unmatched

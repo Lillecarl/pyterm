@@ -63,6 +63,14 @@ class LazyModuleType(types.ModuleType):
 #: The global that holds a module's own class, when it has one.
 CLASS = "__lazylab_class__"
 
+#: Set in a module whose reads test a flag per name (`loads.done`).
+FLAGS = "__lazylab_flags__"
+
+
+def done(name: str) -> str:
+    "The flag global of `name`. The same spelling `loads.done` emits."
+    return "__lazylab_done_%s__" % name
+
 
 def own_class(module: types.ModuleType) -> type:
     """
@@ -141,6 +149,8 @@ class LazyProxy:
             cls = namespace.get(CLASS)
             if cls is not None and name:
                 setattr(cls, name, _descriptor(name))
+            if name and namespace.get(FLAGS):
+                namespace[done(name)] = False
 
     def _reify(self) -> Any:
         if self._lazy_done:
@@ -171,6 +181,8 @@ class LazyProxy:
                     if namespace.get(name) is self:
                         namespace[name] = obj
                         _forget(namespace, name)
+                        if namespace.get(FLAGS):
+                            namespace[done(name)] = True
                 _resolved_one(namespace)
             return obj
 

@@ -66,10 +66,10 @@ let
   # adds to the eager failures: `$out/report.md`. Minutes per
   # candidate, so narrow it while hunting:
   #
-  #     LAZYLAB_PYMUX_CANDIDATES=ast-native LAZYLAB_PYMUX_POLICY=everything \
+  #     LAZYLAB_PYMUX_CANDIDATES=ast-native LAZYLAB_PYMUX_POLICIES=everything \
   #       nix build --file . checks.lazy-lab-pymux-unit-315.run
   pymuxCandidates = builtins.getEnv "LAZYLAB_PYMUX_CANDIDATES";
-  pymuxPolicy = builtins.getEnv "LAZYLAB_PYMUX_POLICY";
+  pymuxPolicies = builtins.getEnv "LAZYLAB_PYMUX_POLICIES";
   pymuxTests = builtins.getEnv "LAZYLAB_PYMUX_TESTS";
   pymuxUnit =
     version: devEnv:
@@ -78,7 +78,7 @@ let
       inputs = [ devEnv ];
       env = {
         LAZYLAB_PYMUX_CANDIDATES = pymuxCandidates;
-        LAZYLAB_PYMUX_POLICY = pymuxPolicy;
+        LAZYLAB_PYMUX_POLICIES = pymuxPolicies;
         LAZYLAB_PYMUX_TESTS = pymuxTests;
       };
       setup = ''

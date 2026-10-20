@@ -56,6 +56,12 @@ def test_which_reads_are_wrapped(source, expected):
     assert wrapped(source) == expected
 
 
+def test_with_flags_a_read_tests_the_flag_before_it_calls():
+    tree = ast.parse("def f():\n    return ord(X)")
+    wrap_bare_loads(tree, "def f():\n    return ord(X)", "<test>", {"X"}, flags=True)
+    assert "ord(X if __lazylab_done_X__ else %s(X))" % FORCE in ast.unparse(tree)
+
+
 def test_methods_of_two_classes_each_find_their_own_table():
     # Each `get_children` makes new wrappers, and a freed one's `id()`
     # comes back: matching on `id()` lost every method after the first

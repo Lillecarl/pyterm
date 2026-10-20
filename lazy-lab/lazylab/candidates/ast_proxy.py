@@ -65,10 +65,33 @@ class _NativeBinder(_Binder):
         module = sys.modules.get(target)
         if module is not None and not getattr(getattr(module, "__spec__", None), "_initializing", False):
             try:
-                return getattr(module, attr)
+                value = getattr(module, attr)
             except AttributeError:
                 pass
+            else:
+                if self.namespace.get(proxy.FLAGS):
+                    self.namespace[proxy.done(name)] = True
+                return value
         return proxy.lazy_from(self.namespace, name, target, attr, site)
+
+
+def _flags(tree: ast.Module, names: set[str]) -> None:
+    """
+    Every flag false at the top, after the docstring and the future
+    imports: a lazy import in a branch that never ran leaves its flag
+    unset, and the read of it would raise where the original did not.
+    """
+
+    def preamble(at: int, node: ast.stmt) -> bool:
+        docstring = at == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+        return docstring or (isinstance(node, ast.ImportFrom) and node.module == "__future__")
+
+    at = 0
+    while at < len(tree.body) and preamble(at, tree.body[at]):
+        at += 1
+    like = tree.body[min(at, len(tree.body) - 1)]
+    flags = [_assign(proxy.done(name), ast.Constant(False), like) for name in sorted(names)]
+    tree.body[at:at] = [*flags, _assign(proxy.FLAGS, ast.Constant(True), like)]
 
 
 def _call(method: str, *args) -> ast.expr:
@@ -119,10 +142,19 @@ def _force(value):
 
 
 class Proxy:
-    def __init__(self, restore: bool, loads: bool):
+    def __init__(self, restore: bool, loads: bool, flags: bool = False):
         self.restore = restore
-        self.loads = loads
-        self.name = "ast-proxy-loads" if loads else "ast-proxy-restore" if restore else "ast-proxy"
+        self.loads = loads or flags
+        self.flags = flags
+        self.name = (
+            "ast-proxy-flags"
+            if flags
+            else "ast-proxy-loads"
+            if loads
+            else "ast-proxy-restore"
+            if restore
+            else "ast-proxy"
+        )
 
     def rewrite(
         self, tree: ast.Module, importer: str, package: str | None, policy: Policy, filename: str, source: bytes
@@ -136,7 +168,11 @@ class Proxy:
             _Replace(chosen).visit(tree)
         if chosen and self.loads:
             bound = {statement.targets[0].id for statements in chosen.values() for statement in statements}
-            wrapped, unmatched = loads.wrap_bare_loads(tree, importlib.util.decode_source(source), filename, bound)
+            wrapped, unmatched = loads.wrap_bare_loads(
+                tree, importlib.util.decode_source(source), filename, bound, flags=self.flags
+            )
+            if self.flags:
+                _flags(tree, bound)
             hook.STATS["wrapped"] = hook.STATS.get("wrapped", 0) + wrapped
             hook.STATS["unmatched"] = hook.STATS.get("unmatched", 0) + unmatched
         return len(chosen)
@@ -152,6 +188,6 @@ class Proxy:
             module.__class__ = proxy.LazyModuleType
 
 
-def install(policy: Policy, *, restore: bool = False, loads: bool = False) -> None:
-    proxy.RESTORE = restore or loads
-    hook.install(Proxy(restore or loads, loads), policy)
+def install(policy: Policy, *, restore: bool = False, loads: bool = False, flags: bool = False) -> None:
+    proxy.RESTORE = restore or loads or flags
+    hook.install(Proxy(restore or loads or flags, loads, flags), policy)

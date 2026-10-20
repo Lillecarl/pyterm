@@ -8,6 +8,7 @@ Every way the lab makes an import lazy, by name.
 | `ast-proxy` | loader rewrites to proxy assignments | any |
 | `ast-proxy-restore` | the same, module class put back | any |
 | `ast-proxy-loads` | the same, and a bare read of a lazy global resolves it | any |
+| `ast-proxy-flags` | the same, with a flag per name that skips the call once resolved | any |
 | `native-filter` | `sys.set_lazy_imports("all")` + filter | 3.15 |
 | `lazy-loader` | `importlib.util.LazyLoader` per target | any |
 | `dunder-import` | `builtins.__import__` returns proxies | any |
@@ -37,6 +38,7 @@ CANDIDATES: dict[str, tuple[bool, Callable[[Policy], None]]] = {
     "ast-proxy": (ast_proxy.AVAILABLE, ast_proxy.install),
     "ast-proxy-restore": (ast_proxy.AVAILABLE, lambda policy: ast_proxy.install(policy, restore=True)),
     "ast-proxy-loads": (ast_proxy.AVAILABLE, lambda policy: ast_proxy.install(policy, loads=True)),
+    "ast-proxy-flags": (ast_proxy.AVAILABLE, lambda policy: ast_proxy.install(policy, flags=True)),
     "native-filter": (native_filter.AVAILABLE, native_filter.install),
     "lazy-loader": (lazy_loader.AVAILABLE, lazy_loader.install),
     "dunder-import": (dunder_import.AVAILABLE, dunder_import.install),

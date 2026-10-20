@@ -14,14 +14,31 @@ A policy travels to a fresh interpreter as a string in `LAZYLAB_POLICY`:
     importers=pymux;deny=pymux.commands
     targets=anyio,aiosqlite
 
-Prefixes match a dotted name and everything under it.
+Prefixes match a dotted name and everything under it. A name from
+`PRESETS` stands for its spec.
+
+A rewrite cascades: every module the hook loads is rewritten, so with
+"everything" a lazy import's own imports are lazy too, down through the
+standard library. 3.15's `lazy` keyword makes one statement lazy, and
+what that module imports in turn stays eager.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["Policy", "parse"]
+__all__ = ["PRESETS", "Policy", "parse"]
+
+_OURS = "pymux,libpymux,ptterm,ptyhost,pyte,txterm,pyterm_pytest"
+
+PRESETS = {
+    # Every import our packages make, and none anybody else makes.
+    "ours": "importers=" + _OURS,
+    # Only our packages' imports of the rest of the world.
+    "foreign": "importers=%s;deny=%s" % (_OURS, _OURS),
+    # Every import in every module, down through the standard library.
+    "everything": "everything",
+}
 
 
 def _under(name: str | None, prefixes: frozenset[str]) -> bool:
@@ -64,6 +81,7 @@ class Policy:
 
 
 def parse(spec: str) -> Policy:
+    spec = PRESETS.get(spec.strip(), spec)
     if spec.strip() in ("", "everything"):
         return Policy()
     fields: dict[str, frozenset[str]] = {}
