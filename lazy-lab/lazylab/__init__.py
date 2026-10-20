@@ -5,6 +5,8 @@ tested against each other and measured. `README.md` says what it found.
 
 from __future__ import annotations
 
+import sys
+
 from . import hook
 from .candidates import CANDIDATES, available, dunder_import, lazy_loader, native_filter
 from .policy import Policy, parse
@@ -23,4 +25,8 @@ def install(candidate: str, policy: Policy | str) -> None:
 
 def lazy_count() -> int:
     "How many imports the installed candidate made lazy so far."
-    return hook.STATS["lazy"] + native_filter.STATS["lazy"] + lazy_loader.STATS["lazy"] + dunder_import.STATS["lazy"]
+    deferred = sys.modules.get("deferimport.hook")
+    own = deferred.STATS["lazy"] if deferred is not None else 0
+    return (
+        hook.STATS["lazy"] + native_filter.STATS["lazy"] + lazy_loader.STATS["lazy"] + dunder_import.STATS["lazy"] + own
+    )

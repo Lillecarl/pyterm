@@ -53,6 +53,21 @@ their numbers on pymux. With every import lazy but hypothesis and
 asyncssh, the parser behind a shell's Tab costs 63% fewer instructions
 on 3.15 and 59% fewer on 3.14, and a frame of pymux +0.0% and +0.3%.
 
+## Other ways, and why not them
+
+| | what goes lazy | source changes | where it falls short here |
+| --- | --- | --- | --- |
+| PEP 810 `lazy` keyword (3.15) | one statement | every import, by hand | does not cascade into what the module imports |
+| `sys.set_lazy_imports("all")` + filter (3.15) | every module-scope import | none | the filter is a Python call per import, each start: up to +68% instructions |
+| Cinder, PEP 690 (rejected 2022) | every module-scope import | none | an interpreter fork |
+| `importlib.util.LazyLoader`, Mercurial's demandimport | a whole module, on attribute fetch | none | `from m import x` loads `m` at once; cryptography refuses it |
+| `lazy_loader` (SPEC 1), apipkg, transformers' `_LazyModule` | a package's attributes, through PEP 562 | each package's `__init__` | only packages written for it |
+| `lazy-object-proxy` and the like | one object | each use | `except`, `type()` and `is` see the proxy |
+
+PEP 690 was rejected for a global switch every project would have to
+test both ways. A policy per importer, and `DEFERIMPORT=eager`, are this
+package's answer to that.
+
 `DEFERIMPORT=eager` makes `install` do nothing, so one suite runs both
 ways. `-p deferimport.pytest_plugin` runs a suite under
 `DEFERIMPORT_POLICY`. Rewritten bytecode is cached in

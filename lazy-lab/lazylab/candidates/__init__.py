@@ -12,10 +12,14 @@ Every way the lab makes an import lazy, by name.
 | `native-filter` | `sys.set_lazy_imports("all")` + filter | 3.15 |
 | `lazy-loader` | `importlib.util.LazyLoader` per target | any |
 | `dunder-import` | `builtins.__import__` returns proxies | any |
+| `deferimport` | the source the winners became: native on 3.15, flags on 3.14 | any, when on the path |
 """
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import os
 from typing import TYPE_CHECKING
 
 from . import ast_native, ast_proxy, dunder_import, lazy_loader, native_filter
@@ -32,6 +36,13 @@ def _eager(policy: Policy) -> None:
     pass
 
 
+def _deferimport(policy: Policy) -> None:
+    # The source the lab's winners became, judged the same way. Imported
+    # here because only the measurements put it on the path.
+    deferimport = importlib.import_module("deferimport")
+    deferimport.install(policy.spec(), cache=os.environ.get("LAZYLAB_CACHE") or None)
+
+
 CANDIDATES: dict[str, tuple[bool, Callable[[Policy], None]]] = {
     "eager": (True, _eager),
     "ast-native": (ast_native.AVAILABLE, ast_native.install),
@@ -42,6 +53,7 @@ CANDIDATES: dict[str, tuple[bool, Callable[[Policy], None]]] = {
     "native-filter": (native_filter.AVAILABLE, native_filter.install),
     "lazy-loader": (lazy_loader.AVAILABLE, lazy_loader.install),
     "dunder-import": (dunder_import.AVAILABLE, dunder_import.install),
+    "deferimport": (importlib.util.find_spec("deferimport") is not None, _deferimport),
 }
 
 

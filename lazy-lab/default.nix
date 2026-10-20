@@ -57,6 +57,8 @@ let
         cp -r ${src} lab
         cp -r ${sources.pymux}/tests pymux-tests
         chmod -R +w lab pymux-tests
+        # The source the lab's winners became, beside the lab on its path.
+        cp -r ${sources.deferimport}/deferimport lab/deferimport
         export HOME="$TMPDIR"
         export LANG=C.UTF-8
       '';
@@ -86,6 +88,7 @@ let
         mkdir pymux-source
         cp -r ${sources.pymux}/pymux ${sources.pymux}/tests ${sources.pymux}/pyproject.toml pymux-source
         chmod -R +w lab pymux-source
+        cp -r ${sources.deferimport}/deferimport lab/deferimport
         export HOME="$TMPDIR"
         export LANG=C.UTF-8
       '';
