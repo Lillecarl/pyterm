@@ -22,5 +22,8 @@
       devShells = forAllSystems (p: {
         default = p.shell;
       });
+      # For a project outside pyterm: `python3.pkgs.deferimport` in any
+      # nixpkgs. A file of its own, because it needs nothing of pyterm.
+      overlays.default = import ./overlay.nix;
     };
 }

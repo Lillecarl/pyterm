@@ -49,8 +49,20 @@ let
 
   testEnv = mkVirtualEnv "deferimport-test-env" { deferimport = [ "test" ]; };
 
+  # The package set extension `overlay.nix` installs, applied to this
+  # interpreter's own nixpkgs set.
+  nixpkgsEnv = python.withPackages (p: [
+    (import ./nix/python-overlay.nix p p).deferimport
+    p.pytest
+  ]);
+
   checks = callPackage ./nix/checks.nix {
-    inherit testEnv testSources ruff;
+    inherit
+      testEnv
+      nixpkgsEnv
+      testSources
+      ruff
+      ;
   };
 in
 package

@@ -493,7 +493,7 @@ rec {
   # A check is the verdict on a suite, and `checks.<name>.run` is the run it
   # judges: the log, and everything the suite left behind. `pyte/nix/suite.nix`
   # says why the two are separate.
-  checks = suites // lazyLab // {
+  checks = suites // {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
     #
@@ -628,20 +628,6 @@ rec {
         ];
       };
     };
-
-  # TEMPORARY: the lazy-import lab's checks. Beside `suites` and not in
-  # it, so `checks.all` never runs them. `lazy-lab/README.md`.
-  lazyLab = pkgs.callPackage ./lazy-lab {
-    inherit sources;
-    pythons = {
-      "314" = pkgs'.python3;
-      "315" = pkgs'.python315;
-    };
-    devEnvs = {
-      "314" = scopes.python3.devEnv;
-      "315" = scopes.python315.devEnv;
-    };
-  };
 
   sourceNames = [
     "pyte"
@@ -778,6 +764,9 @@ rec {
     deferimport-unit = deferimport.checks.unit;
     deferimport-unit-315 = scopes.python315.deferimport.checks.unit;
     deferimport-ruff = deferimport.checks.ruff;
+    # What a project outside pyterm gets from `deferimport/overlay.nix`.
+    deferimport-nixpkgs = deferimport.checks.nixpkgs;
+    deferimport-nixpkgs-315 = scopes.python315.deferimport.checks.nixpkgs;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.

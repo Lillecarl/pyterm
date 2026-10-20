@@ -21,6 +21,21 @@ cascades through every dependency and the standard library, where the
 `lazy` keyword makes one statement lazy and leaves what that module
 imports eager.
 
+## In another Nix project
+
+`overlay.nix` puts deferimport in every Python package set of a
+nixpkgs, and needs nothing of pyterm:
+
+    # a flake: inputs.deferimport.url = "github:Lillecarl/deferimport";
+    pkgs = import nixpkgs { overlays = [ inputs.deferimport.overlays.default ]; };
+    pkgs.python3.withPackages (p: [ p.deferimport ])
+
+Without a flake, `import "${deferimport}/overlay.nix"` is the same
+overlay. A package set built another way takes
+`nix/python-overlay.nix`, a set extension, or calls
+`nix/python-package.nix` itself. It takes the standard library alone,
+and Python 3.14 or newer.
+
 ## The two mechanisms
 
 - **3.15** has lazy imports of its own (PEP 810). The loader sets
@@ -51,8 +66,10 @@ import inside a `with` runs after the block, on 3.15 as well.
 
 ## Measured
 
-pyterm's `lazy-lab/` holds the candidates this was chosen from, and
-their numbers on pymux. With every import lazy but hypothesis and
+pyterm's `lazy-lab/`, last at pyterm
+[06664c3c](https://github.com/Lillecarl/pyterm/tree/06664c3cc3c45ff569508124090cd3941ee6c769/lazy-lab),
+holds the candidates this was chosen from, and their numbers on pymux.
+With every import lazy but hypothesis and
 asyncssh, the parser behind a shell's Tab costs 62% fewer instructions
 on 3.15 and 59% fewer on 3.14, and a frame of pymux +0.0% and +0.3%.
 

@@ -9,6 +9,9 @@
 # proxies. pyterm builds this check on both.
 {
   testEnv,
+  # The interpreter with the nixpkgs package of `python-package.nix`, the
+  # one `overlay.nix` gives a project outside pyterm, and pytest.
+  nixpkgsEnv,
   callPackage,
   testSources,
   ruff,
@@ -33,6 +36,16 @@ in
   unit = suite {
     name = "deferimport-unit";
     inputs = [ testEnv ];
+    env = { inherit selection; };
+    setup = prepare;
+  } "python -m pytest $selection -q -p no:cacheprovider";
+
+  # The same suite against the package another project gets from
+  # `overlay.nix`. The probes put only the tests on the path, so the
+  # package they import is the installed one.
+  nixpkgs = suite {
+    name = "deferimport-nixpkgs";
+    inputs = [ nixpkgsEnv ];
     env = { inherit selection; };
     setup = prepare;
   } "python -m pytest $selection -q -p no:cacheprovider";
