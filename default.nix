@@ -728,9 +728,9 @@ rec {
     # `charsets.h` is the list and this is what says the copy is right.
     # Lillecarl/pymux#111.
     pyte-xterm-tables = pyte.checks.xterm-tables;
-    # The key encoder, judged against kitty's own. Every difference has
-    # to be a named deviation. Lillecarl/pymux#684.
-    pyte-kitty-keys = pyte.checks.kitty-keys;
+    # The key encoder, judged against kitty's own, and each difference put
+    # to kitty, Ghostty and WezTerm. Lillecarl/pymux#684.
+    pyte-key-panel = pyte.checks.key-panel;
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
     ptyhost-unit = ptyhost.checks.unit;
