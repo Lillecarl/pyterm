@@ -49,6 +49,9 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "named-tuple-base": ([1, 2, "tuple"], {}),
     "star": (True, {}),
     "outside-fetch": (True, {}),
+    # Every proxy failed this before `lazylab/submodules.py`: pymux reads
+    # `anyio.to_thread`, which another module's import put there.
+    "submodule-side-effect": ("inner", {}),
     # Every proxy failed this as a cycle with itself, before `lazy_from`
     # learned to tell: multiprocessing's `from . import context`.
     "own-submodule": ("sub", {}),

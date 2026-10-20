@@ -141,6 +141,14 @@ result = m.thing() is load("heavy").Thing
 m = load("app.members")
 result = m.Thing is load("heavy").Thing
 """,
+    # `a.b` read off `a`, where only another module's lazy `import a.b`
+    # would have put it.
+    "submodule-side-effect": """
+try:
+    result = load("app.reads_inner").read()
+except Exception as e:
+    result = type(e).__name__
+""",
     # A package's `from . import sub`, used while the package loads.
     "own-submodule": """
 try:

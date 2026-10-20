@@ -23,6 +23,8 @@ import threading
 import types
 from typing import Any
 
+from . import submodules
+
 __all__ = ["LazyModuleType", "LazyProxy", "lazy_from", "lazy_mod", "lazy_mod_as"]
 
 #: The global a rewritten module counts its unresolved proxies in.
@@ -404,17 +406,21 @@ def lazy_mod(namespace, name, fullname, site):
         importlib.import_module(fullname)
         return sys.modules[top]
 
+    submodules.register_dotted(fullname)
     return LazyProxy(resolve, site, namespace, name, fullname)
 
 
 def lazy_mod_as(namespace, name, fullname, site):
     "Bind `import a.b as c`, or `import a`, to the module itself."
+    submodules.register_dotted(fullname)
     return LazyProxy(lambda: importlib.import_module(fullname), site, namespace, name, fullname)
 
 
 def lazy_from(namespace, name, target, attr, site):
     "Bind one name of `from target import attr`."
     display = f"{target}.{attr}"
+    submodules.register_dotted(target)
+    submodules.register(target, attr)
     made: list[LazyProxy] = []
 
     def resolve():
