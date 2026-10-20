@@ -110,6 +110,7 @@ class RewriteFinder:
     "Hands every source module the policy covers to a rewriting loader."
 
     _lazylab = True
+    loader: type[importlib.machinery.SourceFileLoader] = _RewriteLoader
 
     def __init__(self, transform: Transform, policy: Policy):
         self.transform = transform
@@ -129,14 +130,14 @@ class RewriteFinder:
         spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
         if spec is None or type(spec.loader) is not importlib.machinery.SourceFileLoader:
             return spec
-        spec.loader = _RewriteLoader(fullname, spec.origin, self)
+        spec.loader = self.loader(fullname, spec.origin, self)
         return spec
 
     def invalidate_caches(self):
         importlib.machinery.PathFinder.invalidate_caches()
 
 
-def install(transform: Transform, policy: Policy) -> RewriteFinder:
-    finder = RewriteFinder(transform, policy)
+def install(transform: Transform, policy: Policy, finder_class: type[RewriteFinder] = RewriteFinder) -> RewriteFinder:
+    finder = finder_class(transform, policy)
     sys.meta_path.insert(0, finder)
     return finder

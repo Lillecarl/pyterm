@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 
 from . import hook
-from .candidates import CANDIDATES, available, dunder_import, lazy_loader, native_filter
+from .candidates import CANDIDATES, available, dunder_import, lazy_loader, lazy_modules, native_filter
 from .policy import Policy, parse
 
 __all__ = ["Policy", "available", "install", "lazy_count", "parse"]
@@ -28,5 +28,10 @@ def lazy_count() -> int:
     deferred = sys.modules.get("deferimport.hook")
     own = deferred.STATS["lazy"] if deferred is not None else 0
     return (
-        hook.STATS["lazy"] + native_filter.STATS["lazy"] + lazy_loader.STATS["lazy"] + dunder_import.STATS["lazy"] + own
+        hook.STATS["lazy"]
+        + native_filter.STATS["lazy"]
+        + lazy_loader.STATS["lazy"]
+        + dunder_import.STATS["lazy"]
+        + lazy_modules.STATS["lazy"]
+        + own
     )

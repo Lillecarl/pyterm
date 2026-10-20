@@ -10,6 +10,8 @@ Every way the lab makes an import lazy, by name.
 | `ast-proxy-loads` | the same, and a bare read of a lazy global resolves it | any |
 | `ast-proxy-flags` | the same, with a flag per name that skips the call once resolved | any |
 | `native-filter` | `sys.set_lazy_imports("all")` + filter | 3.15 |
+| `lazy-modules` | loader sets `__lazy_modules__`, a frozenset, from the bytecode | 3.15 |
+| `lazy-modules-contains` | the same, an object asking the policy | 3.15 |
 | `lazy-loader` | `importlib.util.LazyLoader` per target | any |
 | `dunder-import` | `builtins.__import__` returns proxies | any |
 | `deferimport` | the source the winners became: native on 3.15, flags on 3.14 | any, when on the path |
@@ -22,7 +24,7 @@ import importlib.util
 import os
 from typing import TYPE_CHECKING
 
-from . import ast_native, ast_proxy, dunder_import, lazy_loader, native_filter
+from . import ast_native, ast_proxy, dunder_import, lazy_loader, lazy_modules, native_filter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,6 +53,8 @@ CANDIDATES: dict[str, tuple[bool, Callable[[Policy], None]]] = {
     "ast-proxy-loads": (ast_proxy.AVAILABLE, lambda policy: ast_proxy.install(policy, loads=True)),
     "ast-proxy-flags": (ast_proxy.AVAILABLE, lambda policy: ast_proxy.install(policy, flags=True)),
     "native-filter": (native_filter.AVAILABLE, native_filter.install),
+    "lazy-modules": (lazy_modules.AVAILABLE, lazy_modules.install),
+    "lazy-modules-contains": (lazy_modules.AVAILABLE, lambda policy: lazy_modules.install(policy, contains=True)),
     "lazy-loader": (lazy_loader.AVAILABLE, lazy_loader.install),
     "dunder-import": (dunder_import.AVAILABLE, dunder_import.install),
     "deferimport": (importlib.util.find_spec("deferimport") is not None, _deferimport),
