@@ -433,4 +433,18 @@ pyFinal: pyPrev: {
       old.nativeCheckInputs or [ ]
     );
   });
+
+  # Already the latest release (16.1). Two sync-connection tests
+  # that shut a socket for writing fail on 3.15 one run in two, a
+  # different one each time: a timing race, websockets issue 1569.
+  # nixpkgs lists one of them in `disabledTests`, which
+  # `unittestCheckHook` ignores, so here they are renamed out of
+  # discovery. Nothing the collection ships runs the sync client.
+  websockets = pyPrev.websockets.overridePythonAttrs (old: {
+    preCheck = (old.preCheck or "") + ''
+      substituteInPlace tests/sync/test_connection.py \
+        --replace-fail "def test_writing_in_recv_events_fails" "def skipped_writing_in_recv_events_fails" \
+        --replace-fail "def test_writing_in_send_context_fails" "def skipped_writing_in_send_context_fails"
+    '';
+  });
 }
