@@ -36,7 +36,7 @@ use smithay::desktop::{
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurface};
-use smithay::reexports::wayland_server::{Client, Display, ListeningSocket, Resource};
+use smithay::reexports::wayland_server::{Client, Display, DisplayHandle, ListeningSocket, Resource};
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -50,11 +50,12 @@ use smithay::wayland::fractional_scale::{
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
-    clear_data_device_selection, request_data_device_client_selection, set_data_device_selection,
+    clear_data_device_selection, request_data_device_client_selection, set_data_device_focus,
+    set_data_device_selection,
 };
 use smithay::wayland::selection::primary_selection::{
     PrimarySelectionHandler, PrimarySelectionState, clear_primary_selection,
-    request_primary_client_selection, set_primary_selection,
+    request_primary_client_selection, set_primary_focus, set_primary_selection,
 };
 use smithay::wayland::selection::{
     SelectionHandler, SelectionSource, SelectionTarget, ext_data_control, wlr_data_control,
@@ -272,6 +273,7 @@ struct State {
     toplevels: Vec<Toplevel>,
     next_id: u64,
     events: Vec<Event>,
+    display_handle: DisplayHandle,
 }
 
 /// A selection the compositor holds itself: each mime type and its
@@ -367,6 +369,16 @@ impl SeatHandler for State {
 
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
+    }
+
+    /// The window with the keyboard is offered the clipboard and the
+    /// primary selection. smithay offers a selection to a client only
+    /// through these two, so without them a paste in a window read
+    /// nothing. Lillecarl/pymux#708.
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        set_data_device_focus(&self.display_handle, seat, client.clone());
+        set_primary_focus(&self.display_handle, seat, client);
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
@@ -843,6 +855,7 @@ impl Compositor {
             toplevels: Vec::new(),
             next_id: 1,
             events: Vec::new(),
+            display_handle: handle.clone(),
         };
         Ok(Self {
             wire: Some(Wire { display, listener }),

@@ -10,14 +10,17 @@ from __future__ import annotations
 import os
 import select
 import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from pysmithay import Compositor
 
 TEXT = "text/plain;charset=utf-8"
+PASTE_CLIENT = Path(__file__).with_name("paste_client.py")
 
 
 def environment(compositor):
@@ -128,6 +131,30 @@ def test_python_answers_a_selection_held_with_none(compositor):
     finally:
         if process.poll() is None:
             process.kill()
+
+
+def test_the_window_with_the_keyboard_is_offered_the_clipboard(compositor):
+    "A window pastes what wl-copy copied, as Firefox in a pane does. Lillecarl/pymux#708."
+    holder = copy(compositor, "copied beside the window")
+    window = subprocess.Popen(
+        [sys.executable, "-X", "faulthandler", str(PASTE_CLIENT)],
+        env=environment(compositor),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        events = pump(compositor, lambda seen: any(event[0] == "toplevel" for event in seen))
+        (toplevel,) = [event[1] for event in events if event[0] == "toplevel"]
+        compositor.focus(toplevel)
+        pump(compositor, lambda _seen: window.poll() is not None)
+        stdout, stderr = window.communicate()
+        assert window.returncode == 0, stderr
+        assert stdout == b"copied beside the window"
+    finally:
+        for process in (window, holder):
+            if process.poll() is None:
+                process.kill()
+            process.wait()
 
 
 def test_a_large_selection_does_not_stall_the_compositor(compositor):
