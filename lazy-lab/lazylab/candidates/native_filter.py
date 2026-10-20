@@ -22,8 +22,9 @@ STATS = {"lazy": 0}
 
 
 def install(policy: Policy) -> None:
-    def chosen(importer: str, target: str, fromlist) -> bool:
-        if importer.partition(".")[0] == "lazylab":
+    def chosen(importer: str | None, target: str, fromlist) -> bool:
+        # 3.15 passes None for an import with no `__name__` in its globals.
+        if (importer or "").partition(".")[0] == "lazylab":
             return False
         lazy = policy(importer, target, tuple(fromlist) if fromlist else None)
         STATS["lazy"] += lazy
