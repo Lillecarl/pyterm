@@ -38,6 +38,14 @@ PRESETS = {
     "foreign": "importers=%s;deny=%s" % (_OURS, _OURS),
     # Every import in every module, down through the standard library.
     "everything": "everything",
+    # "everything", but for the packages that register on import, which
+    # pymux's suite found under it:
+    # - hypothesis: `strategies/__init__` checks that every strategy it
+    #   exports registered itself, and the modules that register have
+    #   not run.
+    # - asyncssh: `eddsa`, `rsa` and the rest register their key
+    #   algorithms on import, so `ssh-ed25519` was unknown.
+    "everything-but": "deny=hypothesis,asyncssh",
 }
 
 
