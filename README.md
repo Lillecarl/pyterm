@@ -13,6 +13,7 @@ fills from this one: "The repository of each source", at the end, says how.
 | `pyte` | Lillecarl/pyte | selectel/pyte | parse, and hold a screen |
 | `pysmithay` | Lillecarl/pysmithay | | a headless Wayland compositor, for GUI programs in a pane |
 | `pyterm-pytest` | Lillecarl/pyterm-pytest | | the test equipment the suites share |
+| `deferimport` | Lillecarl/deferimport | | make imports lazy, without a keyword |
 
 Each one's `main` is the export, and `archive/pre-josh/<branch>` holds every
 branch it had before.

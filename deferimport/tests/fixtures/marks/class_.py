@@ -1,0 +1,1 @@
+VALUE = "class_"

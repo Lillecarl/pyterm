@@ -72,6 +72,7 @@ let
     sources.ptyhost
     sources.pyterm-pytest
     sources.pysmithay
+    sources.deferimport
   ];
 
   /**
@@ -99,6 +100,7 @@ let
     "pyte-rs"
     "ptyhost"
     "txterm"
+    "deferimport"
     "maturin"
   ];
 
@@ -139,6 +141,13 @@ let
     pyterm-pytest = final.callPackage (sources.pyterm-pytest + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `pyterm-pytest-ruff` runs.
+      inherit (pkgs) ruff;
+    };
+
+    # Plain imports made lazy at import time. The standard library alone,
+    # so any source may take it.
+    deferimport = final.callPackage (sources.deferimport + "/package.nix") {
+      inherit (ps) mkProject;
       inherit (pkgs) ruff;
     };
 
@@ -316,6 +325,7 @@ let
         ptyhost
         pyterm-pytest
         libpymux
+        deferimport
         ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
@@ -465,6 +475,8 @@ rec {
 
   pyterm-pytest = default.pyterm-pytest;
 
+  deferimport = default.deferimport;
+
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
   #
@@ -565,6 +577,7 @@ rec {
       pymux = source "pymux" [ "pymux" ];
       pysmithay = source "pysmithay" [ "pysmithay" ];
       pyterm-pytest = source "pyterm-pytest" [ "pyterm_pytest" ];
+      deferimport = source "deferimport" [ "deferimport" ];
       pyterm = build {
         name = "pyterm";
         src = textOf ./.;
@@ -638,6 +651,7 @@ rec {
     "pymux"
     "pysmithay"
     "pyterm-pytest"
+    "deferimport"
   ];
 
   # The galleries of everything pymux draws, laid out for a person to
@@ -757,6 +771,13 @@ rec {
     pyterm-pytest-unit = pyterm-pytest.checks.unit;
     # The style of pyterm-pytest.
     pyterm-pytest-ruff = pyterm-pytest.checks.ruff;
+    # Lazy imports with no keyword: each mechanism against 3.15's own
+    # answers, a probe each in a fresh interpreter. Twice, because the
+    # mechanism follows the interpreter: 3.14 runs the proxies, 3.15 its
+    # native lazy imports and the proxies.
+    deferimport-unit = deferimport.checks.unit;
+    deferimport-unit-315 = scopes.python315.deferimport.checks.unit;
+    deferimport-ruff = deferimport.checks.ruff;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.

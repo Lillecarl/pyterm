@@ -1,6 +1,6 @@
 # Every source the collection builds, each one a directory.
 #
-# Seven are in this tree. Each `package.nix` picks its own files with
+# Eight are in this tree. Each `package.nix` picks its own files with
 # `lib.fileset`, so a `result` or a cache beside them changes no store path.
 #
 # Two come from outside, pinned in `flake.lock`: prompt-toolkit, because every
@@ -21,6 +21,7 @@ in
   pymux = ../pymux;
   pysmithay = ../pysmithay;
   pyterm-pytest = ../pyterm-pytest;
+  deferimport = ../deferimport;
   prompt-toolkit = asPath inputs.prompt-toolkit.outPath;
   pyproject-nix = inputs.pyproject-nix.outPath;
 }

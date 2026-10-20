@@ -11,6 +11,7 @@ let
   inherit (callPackage (sources.pyte + "/nix/suite.nix") { }) suite;
 
   ours = [
+    "deferimport"
     "ptterm"
     "ptyhost"
     "pymux"
