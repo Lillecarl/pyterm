@@ -106,6 +106,12 @@ bookmarks. Move `main` yourself.
 
 ## Finishing a piece of work
 
+**In a secondary workspace (`~/Code/pyterm-<name>`), stop before
+`jj bookmark set main`.** `main` belongs to the default workspace, and
+no other workspace moves it, rewrites it or rebases the default
+workspace's `@`. Commit there, then name your tip revision and hand it
+over. The steps below are for the default workspace.
+
     jj commit -m "..."
     nix run --file . lock-subtrees     # commits each source's flake.lock
     jj bookmark set main -r @-
