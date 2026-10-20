@@ -20,7 +20,9 @@ import importlib.machinery
 import importlib.util
 import marshal
 import os
+import symtable  # noqa: F401  (loaded before the hook: see `_NEVER`)
 import sys
+import tokenize  # noqa: F401  (loaded before the hook: see `_NEVER`)
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, override
 
@@ -36,8 +38,10 @@ __all__ = ["STATS", "RewriteFinder", "Transform", "install"]
 #: Modules the hook loaded, statements it made lazy, and cache hits.
 STATS = {"modules": 0, "lazy": 0, "cached": 0}
 
-#: Never rewritten: the lab itself, and what it needs to rewrite.
-_NEVER = ("lazylab", "ast", "importlib", "encodings", "marshal", "hashlib")
+#: Never rewritten: the lab itself, and what it needs to rewrite. Each is
+#: imported above, so it is loaded before the hook installs: on 3.15
+#: `tokenize` was not, and decoding a source rewrote it re-entrantly.
+_NEVER = ("lazylab", "ast", "importlib", "encodings", "marshal", "hashlib", "tokenize", "symtable")
 
 _VERSION = b"lazylab-1"
 
