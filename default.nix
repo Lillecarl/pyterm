@@ -38,16 +38,24 @@ let
   # closure for it alone: nothing the collection ships reaches it.
   aimock = pkgs.callPackage ./pkgs/aimock { nodejs = pkgs.nodejs_22; };
 
-  # The collection builds on two interpreters, and only the 3.15
-  # one is bent: its packages build from source against 3.15.0
-  # final where the cache holds no build of them, while the
-  # default python stays exactly as nixpkgs tested it. The bends
-  # themselves live in `nix/python-bends.nix`, composed here into
+  # The collection builds on two interpreters. Both take the pins of
+  # `nix/python-pins.nix`, the few packages it needs newer than
+  # nixpkgs has; otherwise the default python stays as nixpkgs tested
+  # it. Only the 3.15 one is bent besides: its packages build from
+  # source against 3.15.0 final where the cache holds no build of
+  # them. The bends live in `nix/python-bends.nix`. Both compose into
   # the interpreter's own package scope.
+  pins = pkgs.callPackage ./nix/python-pins.nix { };
   pkgs' = pkgs.extend (final: prev: {
+    python3 = prev.python3.override (old: {
+      packageOverrides = lib.composeExtensions (old.packageOverrides or (_: _: { })) pins;
+    });
     python315 = prev.python315.override (old: {
-      packageOverrides = lib.composeExtensions (old.packageOverrides or (_: _: { }))
-        (pkgs.callPackage ./nix/python-bends.nix { });
+      packageOverrides = lib.composeManyExtensions [
+        (old.packageOverrides or (_: _: { }))
+        pins
+        (pkgs.callPackage ./nix/python-bends.nix { })
+      ];
     });
   });
 
