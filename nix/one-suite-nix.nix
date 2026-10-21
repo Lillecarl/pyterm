@@ -1,71 +1,28 @@
-# Every source's `nix/suite.nix` is the same file, and this says so.
+# prompt-toolkit's `nix/suite.nix` is the root's `nix/shared/suite.nix`.
 #
-# There are nine copies, one per source, and they are byte for byte the
-# same. They exist because a source has to stand alone: josh exports each
-# one as its own repository, with its own `default.nix`, so it cannot
-# import a file from a sibling directory by path.
-#
-# **The cost is that a change to the rule is a change to nine files**,
-# and the copies can drift without anything noticing. Landing the
-# `couldNotRun` rule met that: one copy changed, the derivation that was
-# supposed to fail built happily, because each source reads its own copy.
-#
-# This is not the fix. Lillecarl/pymux#367 is the question of where the
-# file should live, and it is shape. This turns a silent drift into a red
-# gate in the meantime, and one edit undoes it.
+# Every source holds a copy, because a source has to stand alone: josh
+# exports each one as its own repository, so it cannot import a file of a
+# sibling by path. `sync-sources` writes the copies of this repository's
+# sources, and `checks.pyterm-sources-in-step` holds them. prompt-toolkit
+# is a fork with a repository of its own, so sync writes nothing there, and
+# this is the check that its copy has not drifted. Lillecarl/pymux#367.
 {
   callPackage,
   sources,
 }:
 let
-  # Any of the nine would do, and this check is what says so. pyte's is
-  # the one the header of each copy and `CLAUDE.md` both point at.
-  inherit (callPackage (sources.pyte + "/nix/suite.nix") { }) suite;
-
-  # Named rather than taken from `sources` wholesale: `pyproject-nix` is in
-  # there too and has none of these.
-  named = [
-    "deferimport"
-    "prompt-toolkit"
-    "ptterm"
-    "ptyhost"
-    "pymux"
-    "pysmithay"
-    "pyte"
-    "pyterm-pytest"
-    "txterm"
-  ];
+  inherit (callPackage ./shared/suite.nix { }) suite;
 
   # A path joined and not interpolated: a source in this tree is a path,
   # and "${path}" copies its whole directory, caches and all, to the store.
-  copies = map (name: {
-    inherit name;
-    path = sources.${name} + "/nix/suite.nix";
-  }) named;
-
-  first = builtins.head copies;
+  copy = sources.prompt-toolkit + "/nix/suite.nix";
 in
 suite { name = "pyterm-one-suite-nix"; } ''
-  drifted=0
-  ${builtins.concatStringsSep "\n" (
-    map (one: ''
-      if cmp -s ${first.path} ${one.path}; then
-        echo "${one.name}: the same"
-      else
-        echo "${one.name}: DIFFERS from ${first.name}"
-        diff -u ${first.path} ${one.path} || true
-        drifted=1
-      fi
-    '') (builtins.tail copies)
-  )}
-
-  if [ "$drifted" != "0" ]; then
-    echo ""
-    echo "The ${toString (builtins.length copies)} copies have to stay the same file."
-    echo "Lillecarl/pymux#367 is where they should live instead."
+  if ! cmp -s ${./shared/suite.nix} ${copy}; then
+    echo "prompt-toolkit's nix/suite.nix differs from nix/shared/suite.nix:"
+    diff -u ${./shared/suite.nix} ${copy} || true
+    echo "Change it in the fork as well, then move the pin."
     exit 1
   fi
-
-  echo ""
-  echo "nix/suite.nix is the same file in all ${toString (builtins.length copies)} sources."
+  echo "prompt-toolkit's nix/suite.nix is the root's."
 ''

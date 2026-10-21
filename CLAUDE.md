@@ -170,7 +170,8 @@ one that is a gate. Run the one for what you touched before you land.
 **A check is two derivations.** `checks.<name>` is the verdict, and
 `checks.<name>.run` is the run it judges: the log, and everything the suite
 left behind. The run does not fail because the suite failed, so the output of
-a red run is still there to read. `pyte/nix/suite.nix` says why.
+a red run is still there to read. `nix/shared/suite.nix` says why, and
+`sync-sources` copies it into each source.
 
 **A package definition holds the package.** The suites that judge it live in
 that repository's `nix/checks.nix`, which declares its own inputs. Nothing

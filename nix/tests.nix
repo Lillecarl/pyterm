@@ -3,7 +3,7 @@
 # `checks.all` is the gate. `checks.all.run` is the report: a directory with
 # every suite's own output linked under it, and a summary of how each one
 # ended. The two are separate for the same reason every other check is (see
-# `pyte/nix/suite.nix`): nix takes the output of a build that failed away, so
+# `nix/shared/suite.nix`): nix takes the output of a build that failed away, so
 # a report that failed would take itself with it.
 #
 # `suites` is the checks of the collection, by name. Each one carries its run

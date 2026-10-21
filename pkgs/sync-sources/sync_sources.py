@@ -40,6 +40,7 @@ SHARED: Final = {
     "default.nix": "default.nix",
     "shell.nix": "shell.nix",
     "compat.nix": "nix/compat.nix",
+    "suite.nix": "nix/suite.nix",
     "pages.yml": ".github/workflows/pages.yml",
 }
 

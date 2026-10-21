@@ -30,6 +30,7 @@ let
     "default.nix"
     "shell.nix"
     "nix/compat.nix"
+    "nix/suite.nix"
     ".github/workflows/pages.yml"
   ];
   copies = lib.concatMapStringsSep "\n" (name: ''

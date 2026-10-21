@@ -491,8 +491,8 @@ rec {
   # here.
   #
   # A check is the verdict on a suite, and `checks.<name>.run` is the run it
-  # judges: the log, and everything the suite left behind. `pyte/nix/suite.nix`
-  # says why the two are separate.
+  # judges: the log, and everything the suite left behind.
+  # `nix/shared/suite.nix` says why the two are separate.
   checks = suites // {
     # Every suite that is a gate, at once. `checks.all.run` is the report:
     # each one's output linked by name, and a summary of how each ended.
@@ -686,14 +686,13 @@ rec {
   # A suite is named `<package>-<what it covers>`, and `unit` is the one that
   # needs nothing but python.
   suites = {
-    # The one check that belongs to the collection and to no package:
-    # only the root can see all eight copies of `nix/suite.nix` at
-    # once. Lillecarl/pymux#367.
+    # prompt-toolkit's copy of `nix/suite.nix`, which `sync-sources`
+    # does not write, is the root's. Lillecarl/pymux#367.
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
     };
-    # Each source's copy of `ruff.toml` and of the `.gitignore` is the
-    # root's.
+    # Each source's copy of `ruff.toml`, of `nix/suite.nix` and of the
+    # rest of `nix/shared` is the root's.
     pyterm-sources-in-step = pkgs.callPackage ./nix/sources-in-step.nix {
       inherit sources sync-sources;
     };
