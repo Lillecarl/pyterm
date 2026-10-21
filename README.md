@@ -274,6 +274,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
+    nix build --file . checks.pymux-images  # what images cost, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
     nix build --file . checks.pymux-busy    # what a pane nobody looks at costs
     nix build --file . checks.pymux-keystroke # a keystroke, in instructions
@@ -725,6 +726,23 @@ against a frame of 55k. Now the frame's plan is worked out once and read.
     PYMUX_FRAME_INCLUDE=strip nix build --file . checks.pymux-frame
     PYMUX_FRAME_TOLERANCE=2 nix build --file . checks.pymux-frame
     cp result/frame-budgets.txt pymux/tests/frame-budgets.txt
+
+### What images cost
+
+`checks.pymux-images` counts the image paths the same way. pyte reads a kitty
+and a sixel transmission and draws a screen of text over a placement. pymux
+draws a client's first frame of the pane, the next one, and one after the pane
+scrolled a row, for a kitty and a sixel client. Three of the yazi photographs
+give the sizes: an icon, a square and a panorama.
+
+**Every count is taken twice.** "(pure)" is the Python that `PYTERM_PURE=1`
+keeps. "(rust)" installs the kernels first, and a kernel runs no bytecode, so
+that count is the Python around them. A "(rust)" count near its "(pure)" one is
+a path that never reaches its kernel.
+
+    PYMUX_IMAGES_INCLUDE=panorama nix build --file . checks.pymux-images
+    PYMUX_IMAGES_TOLERANCE=2 nix build --file . checks.pymux-images
+    cp result/image-budgets.txt pymux/tests/image-budgets.txt
 
 ### What a scrollback costs to hold
 

@@ -842,6 +842,12 @@ rec {
     # costs. It holds each count to a budget, so a change that makes a
     # frame much more expensive fails here instead of being felt later.
     pymux-frame = pymux.checks.frame;
+    # What images cost, counted the same way: pyte reading a
+    # transmission and drawing text over a placement, and pymux
+    # cropping and re-encoding each image for a kitty and a sixel
+    # client. Every count is taken in pure Python and again with the
+    # Rust kernels, whose own work no count can see.
+    pymux-images = pymux.checks.images;
     # What one keystroke costs, counted rather than timed: the key
     # going out to the pane's pty, the answer parsed, and the
     # renderer's diff and escape sequences coming back. It is the
