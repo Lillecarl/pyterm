@@ -50,7 +50,16 @@ def _attach(module: types.ModuleType) -> None:
     # never reaches the module's own `__getattr__`.
     if getattr(cls, "_deferimport_pending", False) or "__path__" not in module.__dict__:
         return
-    module.__class__ = type("PendingSubmodules", (cls,), {"__getattr__": _getattr, "_deferimport_pending": True})
+    try:
+        pending = type("PendingSubmodules", (cls,), {"__getattr__": _getattr, "_deferimport_pending": True})
+    except TypeError:
+        # A module type that may not be subclassed: apsw's `APSWModule`
+        # is one. Its pending submodules import now, as an eager import
+        # would have done.
+        for name in sorted(PENDING.pop(module.__name__, ())):
+            importlib.import_module("%s.%s" % (module.__name__, name))
+        return
+    module.__class__ = pending
 
 
 class _Attach:
