@@ -776,6 +776,9 @@ rec {
     # tests that judge the screen rather than the widget moved to
     # `pyte-unit` and `pyte-xcms`. Lillecarl/pymux#11.
     ptterm-unit = ptterm.checks.unit;
+    # The same unit suite on pyte's Rust row and kernels, which pymux
+    # runs on. Lillecarl/pymux#470.
+    ptterm-rs-unit = ptterm.checks.rs-unit;
     # The style of ptterm: the selected lint rules, the layout at
     # width 120, and the future import in every file.
     ptterm-ruff = ptterm.checks.ruff;
