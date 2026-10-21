@@ -82,6 +82,34 @@ reaches the same things.
 what git tracks, so it never sees the ignored `./prompt-toolkit`, and its pure
 evaluation means `builtins.getEnv` sees nothing.
 
+### What `default.nix` holds
+
+Each source is an attribute of its own, and so are these:
+
+    nix build --file . prompt-toolkit     # the fork, from ./prompt-toolkit or the pin
+    nix build --file . pyte-rs            # pyte's Rust kernels
+    nix build --file . prompt-toolkit-rs  # prompt-toolkit's Rust kernels
+    nix build --file . pymux-rs           # pymux's image kernels
+    nix build --file . devEnv             # the virtualenv of the dev shell and the suites
+    nix build --file . shell              # the dev shell itself
+    nix build --file . docs.pymux         # one source's docs site
+    nix build --file . aimock             # the mock model API the agent CLIs talk to
+    nix run --file . prompt-toolkit-ci    # prompt-toolkit's own CI, on the checkout
+
+`prompt-toolkit-pyrefly` is a stricter typing pass over the changed code of the
+prompt-toolkit checkout, and `prompt-toolkit-review` judges one upstream pull
+request, base against head. Like `prompt-toolkit-ci` they are programs that
+judge the checkout as it is, not sandbox verdicts. `homeManagerModules` holds
+the module the next section describes. `scopes` holds the whole collection once
+per interpreter: `scopes.python315.pymux` is pymux on Python 3.15.
+
+A python set outside this repository takes the collection with the builders:
+`mkPythonSet` and `mkProject` build the set, `overlay` adds this collection's
+packages to it, and `nixpkgsRootsOn` names what they need from nixpkgs on one
+interpreter. That one is `nixpkgsRootsFor` with `projectRoots`, the directories
+of every `pyproject.toml` here, and `suppliedNames`, the packages this
+collection supplies and nixpkgs must not.
+
 ## Configuring pymux with home-manager
 
 pymux reads `$XDG_CONFIG_HOME/pymux/pymux.conf` at startup, and `~/.pymux.conf`
@@ -258,9 +286,19 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pyte-unit     # the screen, and nothing but python
     nix build --file . checks.pyte-ruff     # the lint rules, the layout, the future import
     nix build --file . checks.pyte-xcms     # colour specs, against the real Xlib
+    nix build --file . checks.pyte-xterm-tables # character sets, against xterm's charsets.h
+    nix build --file . checks.pyte-key-panel # the key encoder, against kitty, Ghostty and WezTerm
+    nix build --file . checks.pyte-rs-unit  # pyte's suite, on the Rust row
+    nix build --file . checks.pyte-rs-parity # the Rust kernels, against the Python they replace
+    nix build --file . checks.pyte-rs-lint  # their Rust, by rustfmt and clippy
+    nix build --file . checks.prompt-toolkit-unit # the suite prompt-toolkit ships
+    nix build --file . checks.prompt-toolkit-rs-unit # the same, on the Rust row
+    nix build --file . checks.prompt-toolkit-rs-parity # its kernels, against the Python
+    nix build --file . checks.prompt-toolkit-rs-lint # their Rust, by rustfmt and clippy
     nix build --file . checks.ptyhost-unit  # real programs on real ptys
     nix build --file . checks.ptyhost-ruff  # the lint rules, the layout, the future import
     nix build --file . checks.ptterm-unit   # nothing but python
+    nix build --file . checks.ptterm-rs-unit # the same, on pyte's Rust row and kernels
     nix build --file . checks.ptterm-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.ptterm-panel  # against seven other terminals
     nix build --file . checks.ptterm-esctest # the conformance suite, on a pty
@@ -273,6 +311,12 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.txterm-esctest # the same suite, in a Textual pane
     nix build --file . checks.pymux-unit
     nix build --file . checks.pymux-ruff   # the lint rules, the layout, the future import
+    nix build --file . checks.pymux-types  # the types, by a static checker
+    nix build --file . checks.pymux-wayland # the compositor for panes with no display
+    nix build --file . checks.pymux-audio  # sound, through a real PipeWire
+    nix build --file . checks.pymux-openssh # the ssh:// client, against a real sshd
+    nix build --file . checks.pymux-rs-parity # the image kernels, against the Python
+    nix build --file . checks.pymux-rs-lint # their Rust, by rustfmt and clippy
     nix build --file . checks.pymux-frame   # what a frame costs, in instructions
     nix build --file . checks.pymux-images  # what images cost, in instructions
     nix build --file . checks.pymux-leaks   # what is still alive after a teardown
@@ -281,14 +325,35 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-latency # the same keystroke, in milliseconds
     nix build --file . checks.pymux-turns   # the same keystroke, in loop turns
     nix build --file . checks.pymux-profile # where the time of a frame goes
+    nix build --file . checks.pymux-profile-starts # that the profiler still runs
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
     nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
     nix build --file . checks.pymux-vttest-pictures # the same, of vttest
+    nix build --file . checks.pymux-image-exercise # an image moved and resized, step by step
+    nix build --file . checks.pymux-chrome-pictures # what pymux draws around a pane
+    nix build --file . checks.pymux-theme-pictures # every theme, in six terminals
+    nix build --file . checks.pymux-window-pane-pictures # a Wayland window in a pane
+    nix build --file . checks.pymux-upgrade-pictures # every view, before and after upgrade-server
+    nix build --file . checks.pymux-scenarios # yazi and claude-code, bare and in a pane
     nix build --file . checks.pymux-element  # what <pymux-pane> decides, in node
+    nix build --file . checks.pysmithay-unit # the compositor, against real Wayland clients
+    nix build --file . checks.pysmithay-lint # its Rust, by rustfmt and clippy
+    nix build --file . checks.pysmithay-ruff # its Python's style
+    nix build --file . checks.pyterm-pytest-unit # the equipment the suites share
+    nix build --file . checks.pyterm-pytest-ruff # its style
+    nix build --file . checks.deferimport-unit # lazy imports, against 3.15's own answers
+    nix build --file . checks.deferimport-unit-315 # the same, on 3.15
+    nix build --file . checks.deferimport-ruff # its style
+    nix build --file . checks.deferimport-nixpkgs # what deferimport/overlay.nix gives a project
+    nix build --file . checks.deferimport-nixpkgs-315 # the same, on 3.15
+    nix build --file . checks.aimock-fixtures # the mock model API answers every wire format
     nix build --file . checks.pyterm-home-manager # the module, judged by pymux
+    nix build --file . checks.pyterm-sources-in-step # each source's copies of nix/shared
+    nix build --file . checks.pyterm-one-suite-nix # prompt-toolkit's copy of suite.nix
+    nix build --file . checks.pyterm-readme-names # this file names every check and attribute
     nix build --file . checks.all            # every one that is a gate
 
 Every run happens in the build sandbox. The ptys, the sockets and the processes

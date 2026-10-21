@@ -696,6 +696,24 @@ rec {
     pyterm-sources-in-step = pkgs.callPackage ./nix/sources-in-step.nix {
       inherit sources sync-sources;
     };
+    # The README names every check and every attribute here.
+    # Lillecarl/pymux#475.
+    pyterm-readme-names = pkgs.callPackage ./nix/readme-names.nix {
+      readme = ./README.md;
+      checks = lib.attrNames checks;
+      # The keys of this file, read without evaluating a value.
+      attributes = lib.attrNames (import ./. { inherit inputs system pkgs sourceOverrides; });
+      skip = [
+        # A scratch measurement, removed with Lillecarl/pymux#258.
+        "pymux-wire"
+        # What this file is built from, and what it builds the rest with.
+        "pkgs"
+        "sources"
+        "suites"
+        "default"
+        "sourceNames"
+      ];
+    };
     # The mock the agent CLIs are driven against: the server comes up and
     # every wire format answers from a fixture. It gates the fixtures and the
     # package, not the agents -- their binaries are not this collection's to
