@@ -20,6 +20,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import anyio
 import anyio.abc
@@ -27,10 +28,11 @@ from ptyhost import Process
 from ptyhost.backends import Backend
 from ptyhost.backends.posix import spawn_of
 from ptyhost.held import backend_of
-from pyte.cells import PLAIN_APPEARANCE, Cell, appearance_of
+from pyte.cells import PLAIN_APPEARANCE, Appearance, appearance_of
 from pyte.environment import preparing
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
 from pyte.placeholders import PLACEHOLDER
+from pyte.runs import runs_of
 from pyte.screen import Screen
 from pyte.streams import GroundTimer, Stream
 from rich.segment import Segment
@@ -42,6 +44,9 @@ from textual.widget import Widget
 
 from .keys import data_of
 from .style import style_of
+
+if TYPE_CHECKING:
+    from pyte.page import Row
 
 __all__ = ["Terminal"]
 
@@ -440,48 +445,63 @@ class Terminal(Widget, can_focus=True):
         cursor_column: int | None,
         ground: Style,
     ) -> Strip:
-        "One row of the page, built from its cells."
+        "One row of the page, as a strip."
         emulator = self.emulator
-        row: dict[int, Cell] = emulator.page.data_buffer.get(number, {})
-        # DECSCNM reverses the whole screen: every cell of it, and the
-        # blank ones as well.
-        reverse_video = emulator.has_reverse_video
-
-        segments: list[Segment] = []
-        text: list[str] = []
-        current: Style | None = None
-
-        for column in range(width):
-            cell = row.get(column)
-            if cell is None:
-                char = " "
-                appearance = PLAIN_APPEARANCE
-            elif column == width - 1 and cell.width > 1:
-                # A double width character cannot stand in the last
-                # column: its second half would be a column the row does
-                # not have, and the strip would be one cell too wide.
-                char = " "
-                appearance = cell.appearance
-            else:
-                char = _visible_char(cell.char)
-                appearance = cell.appearance
-
-            style = style_of(appearance)
-            reverse = appearance.rendition.reverse ^ reverse_video ^ (column == cursor_column)
-            if reverse != appearance.rendition.reverse:
-                style = _turned(style, reverse)
-
-            if style is not current:
-                if text:
-                    segments.append(Segment("".join(text), current))
-                    text = []
-                current = style
-            text.append(char)
-
-        if text:
-            segments.append(Segment("".join(text), current))
-
+        row = emulator.page.data_buffer.get(number)
+        segments = segments_of_row(row, width, emulator.has_reverse_video, cursor_column)
         # The style of the widget goes underneath, and the style of a
         # cell over it. A cell says only what a program asked for, so
         # everything else is the ground the widget paints.
         return Strip(segments, width).apply_style(ground)
+
+
+def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursor_column: int | None) -> list[Segment]:
+    """
+    One row as Rich segments, `width` columns wide: one segment per run
+    of `pyte.runs`, joined where two neighbours draw the same way.
+
+    `reverse_video` is DECSCNM, which reverses every cell, the blank ones
+    as well. A run the cursor stands in, or one the right edge cuts, is
+    built from its cells: a plain run may hold a combining character, so
+    its text is not one character per column. Lillecarl/pymux#521.
+    """
+    segments: list[Segment] = []
+
+    def add(text: str, appearance: Appearance, cursor: bool = False) -> None:
+        style = style_of(appearance)
+        reverse = appearance.rendition.reverse ^ reverse_video ^ cursor
+        if reverse != appearance.rendition.reverse:
+            style = _turned(style, reverse)
+        if segments and segments[-1].style is style:
+            segments[-1] = Segment(segments[-1].text + text, style)
+        else:
+            segments.append(Segment(text, style))
+
+    def blanks(start: int, end: int) -> None:
+        if cursor_column is not None and start <= cursor_column < end:
+            if cursor_column > start:
+                add(" " * (cursor_column - start), PLAIN_APPEARANCE)
+            add(" ", PLAIN_APPEARANCE, cursor=True)
+            start = cursor_column + 1
+        if end > start:
+            add(" " * (end - start), PLAIN_APPEARANCE)
+
+    at = 0
+    for run in runs_of(row) if row else ():
+        if run.start >= width:
+            break
+        blanks(at, run.start)
+        cursor = cursor_column is not None and run.start <= cursor_column < run.end
+        if not run.plain:
+            # A double width character cannot stand in the last column:
+            # its second half would be a column the row does not have,
+            # and the strip would be one cell too wide.
+            add(" " if run.end > width else _visible_char(run.text), run.appearance, cursor)
+        elif run.end <= width and not cursor:
+            add(run.text, run.appearance)
+        else:
+            for column in range(run.start, min(run.end, width)):
+                add(row[column].char, run.appearance, column == cursor_column)
+        at = min(run.end, width)
+    blanks(at, width)
+    return segments
