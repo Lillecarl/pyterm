@@ -51,6 +51,9 @@ CASES = [
     Case("gg", "abc\nd#[e|]#f", "gg", "#[a|]#bc\ndef"),
     Case("gg-indented", "  abc\nd#[e|]#f", "gg", "#[ |]# abc\ndef"),
     Case("mm", "#[(|]#a b)", "mm", "(a b#[)|]#"),
+    # A document with no syntax: off a bracket, `mm` stays.
+    Case("mm-off-a-bracket", "#[a|]#()", "mm", "#[a|]#()"),
+    Case("mm-select", "#[(|]#a)", "vmm", "#[(a)|]#", Mode.SELECT),
     # Selections.
     Case("x", "#[a|]#bc\ndef", "x", "#[abc\n|]#def"),
     Case("xx", "#[a|]#bc\ndef\nghi", "xx", "#[abc\ndef\n|]#ghi"),

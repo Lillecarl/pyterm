@@ -262,27 +262,23 @@ _BRACKETS = {"(": ")", "[": "]", "{": "}", "<": ">"}
 _CLOSERS = {v: k for k, v in _BRACKETS.items()}
 
 
-def match_bracket(text: str, rng: Range) -> Range:
+def match_bracket(text: str, rng: Range, extend: bool) -> Range:
     """`mm` -- jump to the bracket matching the one under the cursor.
 
-    If the cursor is not on a bracket, Helix looks forward on the line for the
-    nearest one first; this does the same.
+    Helix's `find_matching_bracket_plaintext`, for a document with no syntax
+    tree: a cursor on anything but a bracket stays where it is.
     """
     pos = rng.cursor(text)
-    line = char_to_line(text, pos)
-    _, line_end = line_bounds(text, line)
-
-    scan = pos
-    while scan < line_end and text[scan] not in _BRACKETS and text[scan] not in _CLOSERS:
-        scan += 1
-    if scan >= line_end or scan >= len(text):
+    ch = text[pos] if pos < len(text) else ""
+    if ch in _BRACKETS:
+        target = _find_close(text, pos, ch, _BRACKETS[ch])
+    elif ch in _CLOSERS:
+        target = _find_open(text, pos, _CLOSERS[ch], ch)
+    else:
         return rng
-
-    ch = text[scan]
-    target = _find_close(text, scan, ch, _BRACKETS[ch]) if ch in _BRACKETS else _find_open(text, scan, _CLOSERS[ch], ch)
     if target is None:
         return rng
-    return Range.point(target).put_cursor(text, target, True)
+    return rng.put_cursor(text, target, extend)
 
 
 def _find_close(text: str, start: int, open_ch: str, close_ch: str) -> int | None:

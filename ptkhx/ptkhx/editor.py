@@ -753,7 +753,7 @@ class Editor:
         if not rest:
             if key == "m":
                 text = self.text
-                self._move_each(lambda rng: mv.match_bracket(text, rng))
+                self._move_each(lambda rng: mv.match_bracket(text, rng, self.extend))
             elif key in ("i", "a", "s", "d", "r"):
                 self._pending = ("m", key)
             return None
