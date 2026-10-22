@@ -63,9 +63,9 @@ let
     Every `pyproject.toml` project this collection builds, as the
     directories that hold them.
 
-    Seven are a source each. The eighth is libpymux,
-    which is a project inside the repository of pymux: a caller that
-    only drives a server takes that one and none of the rest.
+    Each is a source, but libpymux, which is a project inside the
+    repository of pymux: a caller that only drives a server takes that
+    one and none of the rest.
 
     `nixpkgsRootsFor` reads the dependency declarations out of these,
     so a set that holds our packages knows what they ask nixpkgs for.
@@ -81,6 +81,7 @@ let
     sources.pyterm-pytest
     sources.pysmithay
     sources.deferimport
+    sources.ptkhx
   ];
 
   /**
@@ -109,6 +110,7 @@ let
     "ptyhost"
     "txterm"
     "deferimport"
+    "ptkhx"
     "maturin"
   ];
 
@@ -169,6 +171,13 @@ let
     # spelling every dependency of it resolves to.
     prompt-toolkit = final.callPackage sources.prompt-toolkit {
       inherit (ps) mkProject;
+    };
+
+    # Helix's modal editing for a prompt_toolkit buffer. Its oracle check
+    # runs real Helix, through ptyhost and pyte. Lillecarl/pymux#749.
+    ptkhx = final.callPackage (sources.ptkhx + "/package.nix") {
+      inherit (ps) mkProject;
+      inherit (pkgs) ruff helix;
     };
 
     # The floor: the parser, the screen and everything under them. Both
@@ -334,6 +343,7 @@ let
         pyterm-pytest
         libpymux
         deferimport
+        ptkhx
         ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
@@ -485,6 +495,8 @@ rec {
 
   deferimport = default.deferimport;
 
+  ptkhx = default.ptkhx;
+
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pymux#190.
   #
@@ -586,6 +598,7 @@ rec {
       pysmithay = source "pysmithay" [ "pysmithay" ];
       pyterm-pytest = source "pyterm-pytest" [ "pyterm_pytest" ];
       deferimport = source "deferimport" [ "deferimport" ];
+      ptkhx = source "ptkhx" [ "ptkhx" ];
       pyterm = build {
         name = "pyterm";
         src = textOf ./.;
@@ -646,6 +659,7 @@ rec {
     "pysmithay"
     "pyterm-pytest"
     "deferimport"
+    "ptkhx"
   ];
 
   # The galleries of everything pymux draws, laid out for a person to
@@ -789,6 +803,10 @@ rec {
     deferimport-unit = deferimport.checks.unit;
     deferimport-unit-315 = scopes.python315.deferimport.checks.unit;
     deferimport-ruff = deferimport.checks.ruff;
+    # Helix's keymap, against ptkhx and against real Helix on a pty.
+    ptkhx-unit = ptkhx.checks.unit;
+    ptkhx-oracle = ptkhx.checks.oracle;
+    ptkhx-ruff = ptkhx.checks.ruff;
     # What a project outside pyterm gets from `deferimport/overlay.nix`.
     deferimport-nixpkgs = deferimport.checks.nixpkgs;
     deferimport-nixpkgs-315 = scopes.python315.deferimport.checks.nixpkgs;

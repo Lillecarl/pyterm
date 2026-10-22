@@ -14,6 +14,7 @@ fills from this one: "The repository of each source", at the end, says how.
 | `pysmithay` | Lillecarl/pysmithay | | a headless Wayland compositor, for GUI programs in a pane |
 | `pyterm-pytest` | Lillecarl/pyterm-pytest | | the test equipment the suites share |
 | `deferimport` | Lillecarl/deferimport | | make imports lazy, without a keyword |
+| `ptkhx` | Lillecarl/ptkhx | | Helix's modal editing, for a prompt_toolkit buffer |
 
 Each one's `main` is the export, and `archive/pre-josh/<branch>` holds every
 branch it had before.
@@ -349,6 +350,9 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.deferimport-ruff # its style
     nix build --file . checks.deferimport-nixpkgs # what deferimport/overlay.nix gives a project
     nix build --file . checks.deferimport-nixpkgs-315 # the same, on 3.15
+    nix build --file . checks.ptkhx-unit # Helix's keymap, on ptkhx (PTKHX_TESTS narrows it)
+    nix build --file . checks.ptkhx-oracle # the same cases through real Helix on a pty
+    nix build --file . checks.ptkhx-ruff # its style
     nix build --file . checks.aimock-fixtures # the mock model API answers every wire format
     nix build --file . checks.pyterm-home-manager # the module, judged by pymux
     nix build --file . checks.pyterm-sources-in-step # each source's copies of nix/shared

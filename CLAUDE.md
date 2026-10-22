@@ -17,8 +17,10 @@ each one claims one job:
 | `pymux` | arrange several of them |
 | `pysmithay` | a headless Wayland compositor, for a GUI program in a pane |
 | `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
+| `ptkhx` | Helix's modal editing, for a prompt-toolkit buffer |
+| `deferimport` | make imports lazy, without a keyword |
 
-The eighth is `pyterm-pytest`, the test equipment the suites share.
+`pyterm-pytest` is one more: the test equipment the suites share.
 
 `pysmithay` is Rust only and Linux only: a pymux feature built on it has
 to be absent, not broken, where it cannot load.

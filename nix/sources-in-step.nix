@@ -12,6 +12,7 @@ let
 
   ours = [
     "deferimport"
+    "ptkhx"
     "ptterm"
     "ptyhost"
     "pymux"
