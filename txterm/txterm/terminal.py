@@ -26,8 +26,7 @@ import anyio
 import anyio.abc
 from ptyhost import Process
 from ptyhost.backends import Backend
-from ptyhost.backends.posix import spawn_of
-from ptyhost.held import backend_of
+from ptyhost.backends.posix import PosixBackend, spawn_of
 from pyte.cells import PLAIN_APPEARANCE, Appearance, appearance_of
 from pyte.environment import preparing
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
@@ -119,7 +118,7 @@ def create_backend(
     # "CSI 16 t" gives it. The screen holds that number, so the screen
     # passes it down and the pty layer claims nothing about pixels.
     spawn = spawn_of(command, preparing(environment), directory)
-    return backend_of(spawn, (ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT))
+    return PosixBackend(spawn, cell=(ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT))
 
 
 class Terminal(Widget, can_focus=True):
