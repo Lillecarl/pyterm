@@ -674,7 +674,7 @@ class Editor:
         elif key == "`":
             self._map_selection(str.upper)
         elif key == "J":
-            self._join_lines()
+            self._join_lines(select_space=True)
 
         # --- cursors -----------------------------------------------------
         elif key == ",":
@@ -1181,7 +1181,12 @@ class Editor:
             # which is the end of the line it just made.
             self.selection = written.transform(lambda rng: Range.point(rng.end if below else rng.end - 1))
 
-    def _join_lines(self) -> None:
+    def _join_lines(self, *, select_space: bool = False) -> None:
+        """`J`, and with `select_space` `Alt-J`, which selects each space it put in.
+
+        Helix's `join_selections_impl`: a line joined onto one that holds
+        nothing but blanks takes no space.
+        """
         text = self.text
         last = line_count(text) - 1
         targets: set[int] = set()
@@ -1203,8 +1208,18 @@ class Editor:
             nxt = end + 1
             while nxt < len(text) and text[nxt] in " \t":
                 nxt += 1
-            edits.append((end, nxt, " "))
+            blank = nxt == line_bounds(text, line + 1)[1]
+            edits.append((end, nxt, "" if blank else " "))
         self._splice(edits)
+        if select_space:
+            spaces: list[Range] = []
+            removed = 0
+            for start, end, separator in edits:
+                if separator:
+                    spaces.append(Range.point(start - removed))
+                removed += end - start - len(separator)
+            if spaces:
+                self.selection = Selection.of(spaces)
 
     def _indent(self, sign: int) -> None:
         text = self.text

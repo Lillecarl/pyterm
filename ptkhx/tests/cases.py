@@ -108,6 +108,10 @@ CASES = [
     Case("~", "#[aB|]#c", "~", "#[Ab|]#c"),
     # The selection stays where it was.
     Case("J", "#[a|]#bc\ndef", "J", "#[a|]#bc def"),
+    # A line of nothing but blanks joins with no space.
+    Case("J-blank-line", "#[a|]#b\n  \ncd", "J", "#[a|]#b\ncd"),
+    Case("A-J", "#[a|]#b\ncd", "<A-J>", "ab#[ |]#cd"),
+    Case("A-J-blank-line", "#[a|]#\n\nb", "<A-J>", "#[a|]#\nb"),
     Case("u", "#[a|]#bc", "du", "#[a|]#bc"),
     Case("U", "#[a|]#bc", "duU", "#[b|]#c"),
     # Helix indents a document the way it is already indented, and plain
