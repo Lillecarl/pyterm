@@ -28,7 +28,7 @@ EXPECTED = {
     "base-index": ("base_index", 1),
     "history-limit": ("history_limit", 5000),
     "mouse": ("enable_mouse_support", True),
-    "mode-keys": ("mode_keys_vi_mode", True),
+    "mode-keys": ("mode_keys", "vi"),
     "default-terminal": ("default_terminal", "xterm-256color"),
     # The one that holds a "#", a ":" and a trailing space. It says
     # whether the quoting survived the whole way.
