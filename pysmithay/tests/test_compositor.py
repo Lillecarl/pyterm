@@ -41,6 +41,15 @@ def pump(compositor, until, timeout=10.0):
     return seen
 
 
+def sockets_in(directory: str) -> set[str]:
+    """
+    The sockets in a directory. Not every name: a Wayland client makes
+    its shared memory as a file there and removes it at once, and a
+    listing between the two sees it.
+    """
+    return {path.name for path in Path(directory).iterdir() if path.is_socket()}
+
+
 def launch(compositor, *command):
     env = dict(os.environ, WAYLAND_DISPLAY=compositor.socket_name)
     return subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -94,14 +103,14 @@ def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
     first = launch(compositor, sys.executable, str(CLIENT))
     pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
 
-    before = set(os.listdir(os.environ["XDG_RUNTIME_DIR"]))
+    before = sockets_in(os.environ["XDG_RUNTIME_DIR"])
     tag, fd = compositor.connect()
     assert tag != 0
     env = dict(os.environ, WAYLAND_SOCKET=str(fd))
     second = subprocess.Popen([sys.executable, str(CLIENT)], env=env, pass_fds=[fd])
     os.close(fd)
     earlier = pump(compositor, lambda seen: ("toplevel", 2, tag) in seen)
-    assert set(os.listdir(os.environ["XDG_RUNTIME_DIR"])) == before
+    assert sockets_in(os.environ["XDG_RUNTIME_DIR"]) == before
 
     pump(compositor, lambda seen: all(("closed", id) in earlier + seen for id in (1, 2)))
     first.wait(10)
