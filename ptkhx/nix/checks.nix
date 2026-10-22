@@ -47,6 +47,30 @@ in
     setup = prepare;
   } "python -m pytest $selection -q -p no:cacheprovider -m oracle";
 
+  # Random key sequences in real Helix and in ptkhx. Not a gate: it finds
+  # differences faster than they get fixed. `PTKHX_HUNT` says how many
+  # examples, and each one starts Helix; `PTKHX_HUNT_SEED` draws another
+  # set, so several hunts run at once.
+  hunt =
+    let
+      value = builtins.getEnv "PTKHX_HUNT";
+      examples = if value == "" then "100" else value;
+      seed = builtins.getEnv "PTKHX_HUNT_SEED";
+    in
+    suite {
+      name = "ptkhx-hunt";
+      inputs = [
+        testEnv
+        helix
+      ];
+      # Rerun whenever the count or the seed changes.
+      env = { inherit examples seed; };
+      setup = prepare + ''
+        export PTKHX_HUNT="$examples"
+        export PTKHX_HUNT_SEED="$seed"
+      '';
+    } "python -m pytest tests/hunt_against_helix.py -q -p no:cacheprovider";
+
   # The selected rules, the layout at width 120, and the future import in
   # every file. `ruff.toml` in the pyterm root says what each rule is for.
   ruff = suite {

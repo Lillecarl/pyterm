@@ -19,7 +19,8 @@ dependencies = [
 docs = ["sphinx", "myst-parser", "furo"]
 # The oracle runs real Helix on a pty through ptyhost and reads its
 # screen back through pyte. Both sit under ptkhx's own floor.
-test = ["pytest", "ptyhost", "pyte"]
+# Hypothesis draws the random key sequences of the hunt.
+test = ["pytest", "ptyhost", "pyte", "hypothesis"]
 
 [project.urls]
 Homepage = "https://github.com/Lillecarl/ptkhx"

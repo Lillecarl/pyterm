@@ -542,6 +542,7 @@ rec {
           terminal: shot: pkgs.lib.nameValuePair "pymux-pictures-${terminal}" { run = shot; }
         ) suites.pymux-pictures.shots
         // removeAttrs suites [
+        "ptkhx-hunt"
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
@@ -807,6 +808,9 @@ rec {
     ptkhx-unit = ptkhx.checks.unit;
     ptkhx-oracle = ptkhx.checks.oracle;
     ptkhx-ruff = ptkhx.checks.ruff;
+    # Not a gate: random key sequences, which find differences from
+    # Helix faster than they get fixed.
+    ptkhx-hunt = ptkhx.checks.hunt;
     # What a project outside pyterm gets from `deferimport/overlay.nix`.
     deferimport-nixpkgs = deferimport.checks.nixpkgs;
     deferimport-nixpkgs-315 = scopes.python315.deferimport.checks.nixpkgs;
