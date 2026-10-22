@@ -1253,10 +1253,7 @@ class Editor:
         self.selection = self.selection.transform_iter(select)
 
     def _surround_add(self, kind: str) -> None:
-        pair = _pair_for(kind)
-        if pair is None:
-            return
-        open_ch, close_ch = pair
+        open_ch, close_ch = _surround_pair(kind)
         self._snapshot()
         text = self.text
         edits: list[Edit] = []
@@ -1275,16 +1272,10 @@ class Editor:
         self.selection = Selection(tuple(wrapped), primary).normalize()
 
     def _surround_delete(self, kind: str) -> None:
-        pair = _pair_for(kind)
-        if pair is None:
-            return
-        self._surround_edit(pair, ("", ""))
+        self._surround_edit(_surround_pair(kind), ("", ""))
 
     def _surround_replace(self, old: str, new: str) -> None:
-        old_pair, new_pair = _pair_for(old), _pair_for(new)
-        if old_pair is None or new_pair is None:
-            return
-        self._surround_edit(old_pair, new_pair)
+        self._surround_edit(_surround_pair(old), _surround_pair(new))
 
     def _surround_edit(self, pair: tuple[str, str], replacement: tuple[str, str]) -> None:
         """Rewrite the brackets around every cursor. `md` and `mr`.
@@ -1512,6 +1503,33 @@ _PAIRS = {
 
 def _pair_for(kind: str) -> tuple[str, str] | None:
     return _PAIRS.get(kind)
+
+
+#: Helix's `match_brackets::BRACKETS`, and the quotes `PAIRS` adds.
+_SURROUND_PAIRS = (
+    ("(", ")"),
+    ("{", "}"),
+    ("[", "]"),
+    ("<", ">"),
+    ("‘", "’"),
+    ("“", "”"),
+    ("«", "»"),
+    ("「", "」"),
+    ("（", "）"),
+    ('"', '"'),
+    ("'", "'"),
+    ("`", "`"),
+)
+
+
+def _surround_pair(char: str) -> tuple[str, str]:
+    """Helix's `get_pair`, which `ms`, `md` and `mr` use: the pair `char`
+    belongs to, or `char` on both sides. Not the textobject's aliases: `msb`
+    surrounds with `b`."""
+    for pair in _SURROUND_PAIRS:
+        if char in pair:
+            return pair
+    return (char, char)
 
 
 def _word_bounds(text: str, pos: int, *, long: bool) -> tuple[int, int]:

@@ -115,6 +115,11 @@ CASES = [
     Case(">", "    x\n#[a|]#bc", ">", "    x\n    #[a|]#bc"),
     Case("ms(", "#[ab|]#c", "ms(", "#[(ab)|]#c"),
     Case("md(", "(a#[b|]#c)", "md(", "a#[b|]#c"),
+    # A character that is no bracket surrounds as itself, on both sides.
+    Case("ms-any", "#[a|]#", "msw", "#[waw|]#"),
+    Case("ms-b", "#[a|]#", "msb", "#[bab|]#"),
+    Case("md-any", "wa#[b|]#w", "mdw", "a#[b|]#"),
+    Case("mr-any", "(a#[b|]#)", "mr(w", "wa#[b|]#w"),
     Case("mr([", "(a#[b|]#c)", "mr([", "[a#[b|]#c]"),
     # Leaving insert puts each cursor on what follows what was typed.
     Case("s then c", "#[a b a|]#", "sa<ret>cx<esc>", "x#[ |]#b x#(|)#"),
