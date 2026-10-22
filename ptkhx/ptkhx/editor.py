@@ -1570,7 +1570,8 @@ def _find_enclosing(text: str, pos: int, open_ch: str, close_ch: str) -> tuple[i
 
     depth = 0
     open_idx = None
-    for i in range(pos, -1, -1):
+    # A shell line's cursor may stand one past the last character.
+    for i in range(min(pos, len(text) - 1), -1, -1):
         if text[i] == close_ch and i != pos:
             depth += 1
         elif text[i] == open_ch:
