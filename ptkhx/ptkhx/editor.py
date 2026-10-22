@@ -16,10 +16,9 @@ selection over what it wrote.
 
 Divergences from Helix proper, all deliberate:
 
-* No `/`, `?`, `n`, `N`. Those open a prompt inside a prompt, which is a
-  different piece of machinery again. `s`, `S`, `K` and `Alt-K` do read a regex,
-  but they read it *here* -- see `_Reading` -- and show it through the
-  `{helix_pending}` prompt field rather than by opening a second buffer.
+* Every regex is read *here* -- `s`, `S`, `K`, `Alt-K`, `/` and `?` -- see
+  `_Reading`, and a host shows it from `pending` rather than by opening a
+  second buffer.
 * No `&` (align selections in columns). It aligns code by visual column, and a
   shell command line has no columns to align.
 * Movement is by code point rather than grapheme cluster, and `C` counts
@@ -38,7 +37,8 @@ Divergences from Helix proper, all deliberate:
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -91,7 +91,7 @@ class _Find:
 
 @dataclass
 class _Reading:
-    """A regex being typed for `s`, `S`, `K` or `Alt-K`.
+    """A regex being typed for `s`, `S`, `K`, `Alt-K`, `/` or `?`.
 
     `base` is the selection the command was invoked on, kept so that every
     keystroke re-derives the result from it rather than from the last preview.
@@ -104,7 +104,7 @@ class _Reading:
     pattern: str = ""
 
     #: What the `{helix_pending}` prompt field shows while this is being typed.
-    LABELS = {"s": "select:", "S": "split:", "K": "keep:", "K!": "remove:"}
+    LABELS = {"s": "select:", "S": "split:", "K": "keep:", "K!": "remove:", "/": "search:", "?": "rsearch:"}
 
     @property
     def label(self) -> str:
@@ -116,6 +116,10 @@ class Editor:
     text: str = ""
     selection: Selection = field(default_factory=lambda: Selection.point(0))
     mode: Mode = Mode.NORMAL
+    #: Refuse every key that would change the text or enter insert mode, for
+    #: text a person reads and selects but does not own: pymux's copy mode.
+    #: Helix itself has no such mode, so no oracle judges it.
+    read_only: bool = False
 
     #: Yank registers, each holding one string *per cursor*. A yank with three
     #: cursors keeps three fragments, and pasting them back with three cursors
@@ -293,6 +297,30 @@ class Editor:
 
     def feed(self, key: str) -> Request | None:
         """Handle one canonical key token. See `keys.parse_keys`."""
+        if self.read_only:
+            return self._feed_read_only(key)
+        return self._feed(key)
+
+    def _feed_read_only(self, key: str) -> Request | None:
+        """`feed`, with a key that edits undone whole.
+
+        Undone after the fact rather than refused by name: every editing
+        command goes through `_splice` or insert mode, and a list of the keys
+        that do would go stale with the next command. Its register write and
+        its undo step go too, so a refused key leaves no trace.
+        """
+        before = (self.text, self.selection, self.mode, dict(self.registers), list(self._undo), list(self._redo))
+        request = self._feed(key)
+        if (
+            self.text != before[0]
+            or self.mode is Mode.INSERT
+            or len(self._undo) != len(before[4])
+            or len(self._redo) != len(before[5])
+        ):
+            self.text, self.selection, self.mode, self.registers, self._undo, self._redo = before
+        return request
+
+    def _feed(self, key: str) -> Request | None:
         try:
             if self._reading is not None:
                 return self._feed_reading(key)
@@ -392,7 +420,7 @@ class Editor:
     # -------------------------------------------------- normal/select mode --
 
     def _feed_reading(self, key: str) -> Request | None:
-        """One key of a regex being typed for `s`, `S`, `K` or `Alt-K`.
+        """One key of a regex being typed for `s`, `S`, `K`, `Alt-K`, `/` or `?`.
 
         The selection is re-derived on every keystroke, so what the pattern
         will do is on screen before Enter commits it -- which is the only
@@ -409,6 +437,8 @@ class Editor:
             # Whatever the preview settled on *is* the answer: it was applied
             # to `base` on the last keystroke and is already the selection.
             self._reading = None
+            if reading.kind in _SEARCHES and reading.pattern:
+                self.registers["/"] = [reading.pattern]
             return None
         if key == "<backspace>":
             if not reading.pattern:
@@ -433,20 +463,33 @@ class Editor:
         if not reading.pattern:
             self.selection = base
             return
-        try:
-            pattern = re.compile(reading.pattern)
-        except re.error:
+        pattern = compile_regex(reading.pattern)
+        if pattern is None:
             # Half a regex is not an error, it is a regex you are in the middle
             # of typing. `[a-` shows the selection unchanged and says nothing.
             self.selection = base
             return
-        result = {
-            "s": _select_matches,
-            "S": _split_on_matches,
-            "K": _keep_matching,
-            "K!": _remove_matching,
-        }[reading.kind](self.text, base, pattern)
+        if reading.kind in _SEARCHES:
+            result = _search(self.text, base, pattern, forward=reading.kind == "/", extend=self.extend)
+        else:
+            result = {
+                "s": _select_matches,
+                "S": _split_on_matches,
+                "K": _keep_matching,
+                "K!": _remove_matching,
+            }[reading.kind](self.text, base, pattern)
         self.selection = base if result is None else result
+
+    def _search_again(self, *, forward: bool) -> None:
+        "`n` and `N`: the last search, from the primary, as often as the count says."
+        last = self.registers.get("/")
+        pattern = compile_regex(last[0]) if last else None
+        if pattern is None:
+            return
+        for _ in range(self.count):
+            found = _search(self.text, self.selection, pattern, forward=forward, extend=self.extend)
+            if found is not None:
+                self.selection = found
 
     def _feed_normal(self, key: str) -> Request | None:
         if self._pending:
@@ -539,8 +582,12 @@ class Editor:
             self.selection = self.selection.set_primary(self.selection.primary_index + count)
         elif key == "(":
             self.selection = self.selection.set_primary(self.selection.primary_index - count)
-        elif key in ("s", "S", "K"):
+        elif key in ("s", "S", "K", "/", "?"):
             self._start_reading(key)
+        elif key == "n":
+            self._search_again(forward=True)
+        elif key == "N":
+            self._search_again(forward=False)
 
         # --- changes -----------------------------------------------------
         elif key == "i":
@@ -1327,6 +1374,50 @@ def _pos_at(text: str, line: int, column: int) -> int:
     """The index at `(line, column)`, clamped to the end of that line."""
     start, end = line_bounds(text, line)
     return min(start + column, end)
+
+
+#: The `_Reading` kinds that search: `/` forward, `?` backward.
+_SEARCHES = frozenset("/?")
+
+
+def compile_regex(source: str) -> re.Pattern | None:
+    """A regex the way Helix's prompts build one, or `None` while it is half typed.
+
+    Smart case: a pattern with no capital letter ignores case. Multi-line:
+    `^` and `$` match at every line. Helix's `regex_prompt` sets both, for
+    `/` and `s` alike.
+    """
+    flags = re.MULTILINE
+    if not any(char.isupper() for char in source):
+        flags |= re.IGNORECASE
+    try:
+        return re.compile(source, flags)
+    except re.error:
+        return None
+
+
+def _search(text: str, selection: Selection, pattern: re.Pattern, *, forward: bool, extend: bool) -> Selection | None:
+    """Helix's `search_impl`: the next match after the primary, or the last one before it.
+
+    Forward starts at the primary's end and backward ends at its start, so a
+    match the primary already covers is skipped. It wraps around the document.
+    The match takes the primary's place, or with `extend` joins the selection
+    as the new primary, and keeps the primary's direction.
+    """
+    primary = selection.primary
+    if forward:
+        match = pattern.search(text, primary.end) or pattern.search(text)
+    else:
+        match = _last(pattern.finditer(text, 0, primary.start)) or _last(pattern.finditer(text, primary.start))
+    if match is None or match.end() == 0:
+        return None
+    rng = Range(match.start(), match.end()).with_direction(primary.direction)
+    return selection.push(rng) if extend else selection.replace_primary(rng)
+
+
+def _last(matches: Iterator[re.Match]) -> re.Match | None:
+    last = deque(matches, maxlen=1)
+    return last[0] if last else None
 
 
 def _select_matches(text: str, selection: Selection, pattern: re.Pattern) -> Selection | None:

@@ -154,6 +154,8 @@ class HelixBindings:
         keys on and off.
     :param csi_u_enter: bind the CSI-u Enter of the kitty keyboard
         protocol, with Shift, Alt or Ctrl, as a new line.
+    :param read_only: every editor refuses the keys that change its
+        text, for a buffer a person only reads and selects in.
     """
 
     def __init__(
@@ -164,8 +166,10 @@ class HelixBindings:
         confirm_completion: Callable[[], bool] = lambda: True,
         filter: Filter | bool = True,
         csi_u_enter: bool = False,
+        read_only: bool = False,
     ) -> None:
         self.initial_mode = initial_mode
+        self.read_only = read_only
         self.accept = accept
         self.confirm_completion = confirm_completion
         self.filter = to_filter(filter)
@@ -192,7 +196,11 @@ class HelixBindings:
         "The editor of `buffer`, made in the initial mode on first use."
         editor = self._editors.get(buffer)
         if editor is None:
-            editor = Editor(text=buffer.text, selection=Selection.point(buffer.cursor_position))
+            editor = Editor(
+                text=buffer.text,
+                selection=Selection.point(buffer.cursor_position),
+                read_only=self.read_only,
+            )
             editor.mode = self.initial_mode
             editor.reset_transient()
             self._editors[buffer] = editor
@@ -235,7 +243,9 @@ class HelixBindings:
         else:
             # Outside insert mode a new text means something replaced the
             # buffer whole, and there is no edit to carry a selection through.
-            if buffer.text != editor.text:
+            # A cursor the host moved, with a click or its own search, starts
+            # a fresh range there.
+            if buffer.text != editor.text or buffer.cursor_position != editor.caret:
                 editor.range = Range.point(buffer.cursor_position)
             editor.text = buffer.text
         editor.ensure_invariants()

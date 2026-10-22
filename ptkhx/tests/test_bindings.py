@@ -9,7 +9,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, to_filter
 from prompt_toolkit.key_binding.key_processor import KeyPress, _Flush
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Layout, Window
@@ -116,6 +116,50 @@ def test_a_filter_hands_the_keys_back():
     on[0] = False
     typist.type("x")
     assert typist.buffer.text == "abx"
+
+
+def a_reader(text: str) -> Typist:
+    "A read-only buffer in normal mode, as pymux's copy mode is."
+    typist = Typist(text, helix=HelixBindings(initial_mode=Mode.NORMAL, read_only=True))
+    typist.buffer.read_only = to_filter(True)
+    return typist
+
+
+def test_a_read_only_editor_moves_and_selects():
+    typist = a_reader("hello world")
+    typist.type("ww")
+    assert typist.helix.selection_spans(typist.buffer) == [(6, 11)]
+
+
+def test_a_read_only_editor_refuses_every_edit():
+    "Each would raise EditReadOnlyBuffer, had it reached the buffer."
+    typist = a_reader("hello world")
+    for keys in ("d", "cx", "ix", "ax", "o", "rx", "p", "J", ">", "~", "u", "<A-d>"):
+        typist.type(keys)
+        assert typist.buffer.text == "hello world", keys
+        assert typist.mode is Mode.NORMAL, keys
+
+
+def test_a_refused_edit_leaves_the_selection():
+    typist = a_reader("hello world")
+    typist.type("w")
+    typist.type("d")
+    assert typist.helix.selection_spans(typist.buffer) == [(0, 6)]
+
+
+def test_search_reads_a_read_only_buffer():
+    typist = a_reader("one two\nthree two")
+    typist.type("/two<ret>n")
+    assert typist.helix.selection_spans(typist.buffer) == [(14, 17)]
+
+
+def test_a_cursor_the_host_moved_is_where_the_next_key_starts():
+    "A click moves the buffer's cursor and nothing of the editor's."
+    typist = a_reader("one two three")
+    typist.type("w")
+    typist.buffer.cursor_position = 8
+    typist.type("e")
+    assert typist.helix.selection_spans(typist.buffer) == [(8, 13)]
 
 
 def test_each_buffer_has_its_own_editor():

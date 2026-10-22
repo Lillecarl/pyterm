@@ -67,6 +67,30 @@ CASES = [
     Case("s", "#[a b a|]#", "sa<ret>", "#[a|]# b #(a|)#"),
     Case("S", "#[a,b|]#", "S,<ret>", "#[a|]#,#(b|)#"),
     Case(",", "#[a b a|]#", "sa<ret>,", "#[a|]# b a"),
+    # A regex ignores case unless it holds a capital, and `^` is every line.
+    Case("s-smart-case", "#[aA|]#", "sa<ret>", "#[a|]##(A|)#"),
+    Case("s-capital", "#[aA|]#", "sA<ret>", "a#[A|]#"),
+    Case("s-multiline", "#[ab\nab|]#", "s^a<ret>", "#[a|]#b\n#(a|)#b"),
+    # Search starts after the primary and wraps.
+    Case("/", "#[a|]#bc abc", "/b<ret>", "a#[b|]#c abc"),
+    Case("/-several", "#[a|]#bc abc", "/bc<ret>", "a#[bc|]# abc"),
+    Case("/-wraps", "abc a#[b|]#c", "/b<ret>", "a#[b|]#c abc"),
+    Case("/-esc", "#[a|]#bc", "/b<esc>", "#[a|]#bc"),
+    Case("/-smart-case", "ab#[c|]# ABC", "/b<ret>", "abc A#[B|]#C"),
+    Case("/-capital", "#[a|]#Bc abc", "/B<ret>", "a#[B|]#c abc"),
+    Case("?", "abc a#[b|]#c", "?b<ret>", "a#[b|]#c abc"),
+    Case("?-wraps", "a#[b|]#c abc", "?b<ret>", "abc a#[b|]#c"),
+    Case("n", "#[a|]#xa xa", "/x<ret>n", "axa #[x|]#a"),
+    Case("N", "#[a|]#x ax ax", "/x<ret>nN", "a#[x|]# ax ax"),
+    Case("2n", "#[a|]#x ax ax", "/x<ret>2n", "ax ax a#[x|]#"),
+    Case("/-select", "#[a|]#xax", "v/x<ret>", "#(a|)##[x|]#ax", Mode.SELECT),
+    Case("/-line", "#[a|]#bc\nabc", "/^a<ret>", "abc\n#[a|]#bc"),
+    # Across lines.
+    Case("gl-multiline", "#[a|]#bc\ndef", "gl", "ab#[c|]#\ndef"),
+    Case("end-multiline", "#[a|]#bc\ndef", "<end>", "ab#[c|]#\ndef"),
+    Case("x-last-line", "abc\n#[d|]#ef", "x", "abc\n#[def|]#"),
+    # The selection keeps its length, so it ends inside the joined line.
+    Case("J-multiline", "#[a|]#b\ncd\nef", "xJ", "#[ab |]#cd\nef"),
     # Changes.
     Case("d", "#[a|]#bc", "d", "#[b|]#c"),
     Case("wd", "#[h|]#ello world", "wd", "#[w|]#orld"),
