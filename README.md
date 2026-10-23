@@ -548,6 +548,14 @@ the list again is one command:
 gate: it finds them faster than they get fixed, and each one needs a decision
 about whether to follow kitty or xterm. `checks.all` leaves it out.
 
+`checks.ptkhx-hunt` hunts for differences between ptkhx and real Helix: random
+key sequences, played in `hx` on a pty and in ptkhx. It is not a gate either,
+for the same reason. Each example starts Helix and takes a second or two, so
+`PTKHX_HUNT` sets how many, and `PTKHX_HUNT_SEED` draws another set, so several
+hunts can run at once:
+
+    PTKHX_HUNT=60 PTKHX_HUNT_SEED=7 nix build --impure --file . checks.ptkhx-hunt.run
+
 [esctest2][esctest2] judges a terminal from the inside: it runs as a program in
 that terminal, writes control sequences and reads the reports that come back.
 Two checks run it, and the difference between them is the point.
