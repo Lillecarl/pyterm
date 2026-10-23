@@ -155,6 +155,7 @@ CASES = [
     Case("ms-any", "#[a|]#", "msw", "#[waw|]#"),
     Case("ms-b", "#[a|]#", "msb", "#[bab|]#"),
     Case("md-any", "wa#[b|]#w", "mdw", "a#[b|]#"),
+    Case("md-at-the-end", "#[(a)|]#", "md(", "#[(a)|]#"),
     Case("mr-any", "(a#[b|]#)", "mr(w", "wa#[b|]#w"),
     Case("mr([", "(a#[b|]#c)", "mr([", "[a#[b|]#c]"),
     # Leaving insert puts each cursor on what follows what was typed.

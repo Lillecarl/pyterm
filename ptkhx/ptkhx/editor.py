@@ -1367,6 +1367,10 @@ class Editor:
         """
         found = set()
         for rng in self.selection:
+            # Helix's `find_nth_pairs_pos` again, and one range it gives up on
+            # gives up the command.
+            if len(self.text) < 2 or rng.end >= len(self.text):
+                return
             enclosing = _find_enclosing(self.text, rng.cursor(self.text), *pair)
             if enclosing is not None:
                 found.add(enclosing)
