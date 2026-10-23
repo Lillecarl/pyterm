@@ -98,6 +98,9 @@ CASES = [
     Case("d", "#[a|]#bc", "d", "#[b|]#c"),
     Case("wd", "#[h|]#ello world", "wd", "#[w|]#orld"),
     Case("c", "#[ab|]#c", "cx<esc>", "x#[c|]#"),
+    # Whole lines change into one empty line where they stood.
+    Case("c-whole-lines", "a\n#[b|]#\nc", "xc<esc>", "a\n#[\n|]#c"),
+    Case("c-the-last-line-break", "#[\n|]#", "c<esc>", "#[\n|]#"),
     Case("i", "a#[b|]#c", "ix<esc>", "ax#[b|]#c"),
     # Appending extends the selection over what was typed.
     Case("a", "a#[b|]#c", "ax<esc>", "a#[bx|]#c"),

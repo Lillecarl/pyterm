@@ -21,6 +21,9 @@ Divergences from Helix proper, all deliberate:
   second buffer.
 * No `&` (align selections in columns). It aligns code by visual column, and a
   shell command line has no columns to align.
+* `>` indents by four spaces. Helix guesses the indent from the document and
+  falls back to a tab where nothing is indented, and on a command line a tab
+  is the key that completes.
 * Movement is by code point rather than grapheme cluster, and `C` counts
   columns in characters rather than in display cells. Both only show up on
   wide and combining characters.
@@ -1083,9 +1086,29 @@ class Editor:
             self.mode = Mode.NORMAL
 
     def _change(self, *, yank: bool) -> None:
-        """`c` -- delete, then leave a caret where each selection was."""
+        """`c` -- delete, then leave a caret where each selection was.
+
+        Whole lines, as `x` selects them, are changed into one empty line above
+        where they stood: Helix opens a line there rather than joining what
+        was before them to what came after."""
+        whole_lines = self._whole_lines()
         self._delete(yank=yank)
-        self.enter_insert_at(self.selection.transform(lambda rng: Range.point(rng.start)))
+        if whole_lines:
+            self._open_line(below=False)
+        else:
+            self.enter_insert_at(self.selection.transform(lambda rng: Range.point(rng.start)))
+
+    def _whole_lines(self) -> bool:
+        "Helix's `selection_is_linewise`: each range runs from a line's start to past its line break."
+        text = self.text
+        for rng in self.selection:
+            if "\n" not in text[rng.start : rng.end]:
+                return False
+            start_line, end_line = rng.line_range(text)
+            end = line_to_char(text, end_line + 1) if end_line + 1 < line_count(text) else len(text)
+            if rng.start != line_to_char(text, start_line) or rng.end != end:
+                return False
+        return True
 
     def _yank(self) -> None:
         self._register_write(self.pending_register, self.selection.fragments(self.text))
