@@ -49,6 +49,8 @@ CASES = [
     # Both land on the first column, blank or not.
     Case("ge-indented", "ab#[c|]#\n  def", "ge", "abc\n#[ |]# def"),
     Case("gg", "abc\nd#[e|]#f", "gg", "#[a|]#bc\ndef"),
+    # Not onto the empty line after the last line break.
+    Case("ge-final-line-break", "#[a|]#\nb\n", "ge", "a\n#[b|]#\n"),
     Case("gg-indented", "  abc\nd#[e|]#f", "gg", "#[ |]# abc\ndef"),
     Case("mm", "#[(|]#a b)", "mm", "(a b#[)|]#"),
     # A document with no syntax: off a bracket, `mm` stays.
@@ -112,6 +114,8 @@ CASES = [
     Case("a-at-the-end", "a#[\n|]#", "a<esc>", "a#[\n|]#\n\n"),
     Case("A", "a#[b|]#c\nd", "Ax<esc>", "abcx#[\n|]#d"),
     Case("o", "a#[b|]#c", "ox<esc>", "abc\nx#[|]#"),
+    # The indent in whole levels: one space is none.
+    Case("o-a-space", "#[ |]#\n", "ox<esc>", " \nx#[\n|]#"),
     Case("O", "a#[b|]#c", "Ox<esc>", "x#[\n|]#abc"),
     Case("yp", "#[a|]#bc", "yp", "a#[a|]#bc"),
     Case("yP", "a#[b|]#c", "yP", "a#[b|]#bc"),

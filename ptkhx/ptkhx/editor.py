@@ -21,9 +21,9 @@ Divergences from Helix proper, all deliberate:
   second buffer.
 * No `&` (align selections in columns). It aligns code by visual column, and a
   shell command line has no columns to align.
-* `>` indents by four spaces. Helix guesses the indent from the document and
-  falls back to a tab where nothing is indented, and on a command line a tab
-  is the key that completes.
+* An indent level is four spaces, for `>` and for the indent `o` carries over.
+  Helix guesses the level from the document and falls back to a tab where
+  nothing is indented, and on a command line a tab is the key that completes.
 * Movement is by code point rather than grapheme cluster, and `C` counts
   columns in characters rather than in display cells. Both only show up on
   wide and combining characters.
@@ -599,7 +599,9 @@ class Editor:
             self.enter_insert_at(self.selection.transform(lambda rng: Range(rng.start, rng.end)))
             self._room_at_the_end()
         elif key == "I":
-            self.enter_insert_at(self.selection.transform(lambda rng: Range.point(self._insert_start(rng.cursor(text)))))
+            self.enter_insert_at(
+                self.selection.transform(lambda rng: Range.point(self._insert_start(rng.cursor(text))))
+            )
         elif key == "A":
             self.enter_insert_at(
                 self.selection.transform(
@@ -731,7 +733,9 @@ class Editor:
             line = int(self._count) if self._count else 1
             self.range = mv.goto_line(text, self.range, line, extend)
         elif key == "e":
-            self.range = mv.goto_line(text, self.range, line_count(text), extend)
+            # Not onto the empty line after a final line break.
+            last = line_count(text) - (1 if text.endswith("\n") else 0)
+            self.range = mv.goto_line(text, self.range, max(last, 1), extend)
         elif key == "h":
             self._move_each(lambda rng: mv.goto_line_start(text, rng, extend))
         elif key == "l":
@@ -1215,7 +1219,12 @@ class Editor:
         def make(_index: int, rng: Range) -> Edit:
             line = char_to_line(text, rng.cursor(text))
             start, end = line_bounds(text, line)
-            indent = text[start : self._first_nonblank(start)]
+            # Helix's fallback with no syntax, `indent_level_for_line`: the
+            # line's blanks in whole levels, so a lone space gives none.
+            width = 0
+            for char in text[start : self._first_nonblank(start)]:
+                width = width + len(INDENT) - width % len(INDENT) if char == "\t" else width + 1
+            indent = INDENT * (width // len(INDENT))
             if below:
                 return (end, end, "\n" + indent)
             return (start, start, indent + "\n")
