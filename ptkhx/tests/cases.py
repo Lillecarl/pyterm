@@ -67,11 +67,17 @@ CASES = [
     Case("miw", "ab#[c|]# def", "miw", "#[abc|]# def"),
     Case("mi(", "(a#[b|]#c)", "mi(", "(#[abc|]#)"),
     Case("ma(", "(a#[b|]#c)", "ma(", "#[(abc)|]#"),
+    # Not with a range that reaches the end of the document.
+    Case("mi(-at-the-end", "#[(a)|]#", "mi(", "#[(a)|]#"),
     # Several cursors.
     Case("C", "#[a|]#bc\ndef", "C", "#(a|)#bc\n#[d|]#ef"),
     # The first match is the primary.
     Case("s", "#[a b a|]#", "sa<ret>", "#[a|]# b #(a|)#"),
     Case("S", "#[a,b|]#", "S,<ret>", "#[a|]#,#(b|)#"),
+    # An empty match splits too: each piece runs to the next line's start.
+    Case("S-empty-match", "#[a\nb|]#\nc", "S^<ret>", "#[a\n|]##(b|)#\nc"),
+    # Every regex prompt keeps its pattern for `n`.
+    Case("s-then-n", "#[ab|]# ab", "sb<ret>n", "ab a#[b|]#"),
     Case(",", "#[a b a|]#", "sa<ret>,", "#[a|]# b a"),
     # A regex ignores case unless it holds a capital, and `^` is every line.
     Case("s-smart-case", "#[aA|]#", "sa<ret>", "#[a|]##(A|)#"),

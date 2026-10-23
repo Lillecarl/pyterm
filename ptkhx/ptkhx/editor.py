@@ -441,7 +441,9 @@ class Editor:
             # Whatever the preview settled on *is* the answer: it was applied
             # to `base` on the last keystroke and is already the selection.
             self._reading = None
-            if reading.kind in _SEARCHES and reading.pattern:
+            # Every regex prompt of Helix's keeps its pattern in `/`, so `n`
+            # repeats an `s` as well as a `/`.
+            if reading.pattern:
                 self.registers["/"] = [reading.pattern]
             return None
         if key == "<backspace>":
@@ -1313,7 +1315,9 @@ class Editor:
                         end += 1
                 return [Range(start, end)]
             pair = _pair_for(kind)
-            if pair is None:
+            # Helix's `find_nth_pairs_pos` gives up on a document shorter than
+            # two characters and on a range that reaches its end.
+            if pair is None or len(text) < 2 or rng.end >= len(text):
                 return [rng]
             found = _find_enclosing(text, pos, *pair)
             if found is None:
@@ -1504,20 +1508,20 @@ def _select_matches(text: str, selection: Selection, pattern: re.Pattern) -> Sel
 
 
 def _split_on_matches(text: str, selection: Selection, pattern: re.Pattern) -> Selection | None:
-    """`S` -- what is *between* the matches, as separate cursors."""
+    """`S` -- what is *between* the matches, as separate cursors.
+
+    Helix's `split_on_matches`: an empty piece between two matches is a
+    cursor too, and the text is matched whole, as `_select_matches` says.
+    """
     found: list[Range] = []
     for rng in selection:
         if rng.is_empty:
             found.append(rng)
             continue
         at = rng.start
-        for match in pattern.finditer(rng.slice(text)):
-            if match.end() == match.start():
-                continue
-            end = rng.start + match.start()
-            if end > at:
-                found.append(Range(at, end))
-            at = rng.start + match.end()
+        for match in pattern.finditer(text, rng.start, rng.end):
+            found.append(Range(at, match.start()))
+            at = match.end()
         if at < rng.end:
             found.append(Range(at, rng.end))
     return Selection.of(found) if found else None
