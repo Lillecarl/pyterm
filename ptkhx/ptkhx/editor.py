@@ -56,6 +56,7 @@ from .selection import (
     line_count,
     line_to_char,
     next_grapheme,
+    prev_grapheme,
 )
 
 INDENT = "    "
@@ -1215,7 +1216,8 @@ class Editor:
         self.mode = Mode.INSERT
 
         def make(_index: int, rng: Range) -> Edit:
-            line = char_to_line(text, rng.cursor(text))
+            # Helix's `open`: below the range's last character, above its first.
+            line = char_to_line(text, prev_grapheme(text, rng.end) if below else rng.start)
             start, end = line_bounds(text, line)
             # Helix's fallback with no syntax, `indent_level_for_line`: the
             # line's blanks in whole levels, so a lone space gives none.
@@ -1491,13 +1493,13 @@ def _select_matches(text: str, selection: Selection, pattern: re.Pattern) -> Sel
     """
     found: list[Range] = []
     for rng in selection:
-        offset = rng.start
-        for match in pattern.finditer(rng.slice(text)):
-            # Zero-width matches would each become a bare caret and there can
-            # be one between every pair of characters, so `.*` would select
-            # nothing an unbounded number of times.
-            if match.end() > match.start():
-                found.append(Range(offset + match.start(), offset + match.end()))
+        # Over the whole text, so `^` sees where lines really start, as
+        # Helix's `regex_input_at` does.
+        for match in pattern.finditer(text, rng.start, rng.end):
+            # Helix keeps an empty match as a cursor, but not one just past the
+            # selection, where `$` or `^` matched at its end.
+            if match.end() > match.start() or match.start() != rng.end:
+                found.append(Range(match.start(), match.end()))
     return Selection.of(found) if found else None
 
 

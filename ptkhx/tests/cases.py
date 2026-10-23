@@ -77,6 +77,9 @@ CASES = [
     Case("s-smart-case", "#[aA|]#", "sa<ret>", "#[a|]##(A|)#"),
     Case("s-capital", "#[aA|]#", "sA<ret>", "a#[A|]#"),
     Case("s-multiline", "#[ab\nab|]#", "s^a<ret>", "#[a|]#b\n#(a|)#b"),
+    # An empty match is a cursor, unless it sits just past the selection.
+    Case("s-empty-match", "#[aa|]#\nb", "s^<ret>", "#[a|]#a\nb"),
+    Case("s-empty-matches", "#[a\nb|]#", "s^<ret>", "#[a|]#\n#(b|)#"),
     # Search starts after the primary and wraps.
     Case("/", "#[a|]#bc abc", "/b<ret>", "a#[b|]#c abc"),
     Case("/-several", "#[a|]#bc abc", "/bc<ret>", "a#[bc|]# abc"),
@@ -115,6 +118,10 @@ CASES = [
     Case("a-at-the-end", "a#[\n|]#", "a<esc>", "a#[\n|]#\n\n"),
     Case("A", "a#[b|]#c\nd", "Ax<esc>", "abcx#[\n|]#d"),
     Case("o", "a#[b|]#c", "ox<esc>", "abc\nx#[|]#"),
+    # Below the range's last character: on the empty line after the last
+    # line break that is the line above it.
+    Case("o-under-the-last-line", "#[\n|]#", "jo<esc>", "\n#[\n|]#"),
+    Case("o-below-a-selection", "#[a\nb|]#\nc", "o<esc>", "a\nb\n#[\n|]#c"),
     # The indent in whole levels: one space is none.
     Case("o-a-space", "#[ |]#\n", "ox<esc>", " \nx#[\n|]#"),
     Case("O", "a#[b|]#c", "Ox<esc>", "x#[\n|]#abc"),
