@@ -733,9 +733,7 @@ class Editor:
             line = int(self._count) if self._count else 1
             self.range = mv.goto_line(text, self.range, line, extend)
         elif key == "e":
-            # Not onto the empty line after a final line break.
-            last = line_count(text) - (1 if text.endswith("\n") else 0)
-            self.range = mv.goto_line(text, self.range, max(last, 1), extend)
+            self.range = mv.goto_line(text, self.range, line_count(text), extend)
         elif key == "h":
             self._move_each(lambda rng: mv.goto_line_start(text, rng, extend))
         elif key == "l":

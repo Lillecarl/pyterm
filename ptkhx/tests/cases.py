@@ -51,6 +51,7 @@ CASES = [
     Case("gg", "abc\nd#[e|]#f", "gg", "#[a|]#bc\ndef"),
     # Not onto the empty line after the last line break.
     Case("ge-final-line-break", "#[a|]#\nb\n", "ge", "a\n#[b|]#\n"),
+    Case("3gg-final-line-break", "#[a|]#\nb\n", "3gg", "a\n#[b|]#\n"),
     Case("gg-indented", "  abc\nd#[e|]#f", "gg", "#[ |]# abc\ndef"),
     Case("mm", "#[(|]#a b)", "mm", "(a b#[)|]#"),
     # A document with no syntax: off a bracket, `mm` stays.

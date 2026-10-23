@@ -253,8 +253,12 @@ def goto_first_nonblank(text: str, rng: Range, extend: bool) -> Range:
 
 
 def goto_line(text: str, rng: Range, line: int, extend: bool) -> Range:
-    """1-based, like `:goto`. Lands on the line's first column, blank or not, as Helix's `gg` and `ge` do."""
-    line = max(0, min(line - 1, line_count(text) - 1))
+    """1-based, like `:goto`. Lands on the line's first column, blank or not, as Helix's `gg` and `ge` do.
+
+    Never onto the empty line after a final line break: Helix's `max_line`.
+    """
+    last = line_count(text) - (2 if text.endswith("\n") else 1)
+    line = max(0, min(line - 1, last))
     return rng.put_cursor(text, line_to_char(text, line), extend)
 
 
