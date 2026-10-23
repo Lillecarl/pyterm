@@ -162,6 +162,14 @@ def test_a_cursor_the_host_moved_is_where_the_next_key_starts():
     assert typist.helix.selection_spans(typist.buffer) == [(8, 13)]
 
 
+def test_insert_text_types_at_every_cursor():
+    "For a host whose Enter breaks the line, where the editor's accepts it."
+    typist = Typist()
+    typist.type("a b a<esc>%sa<ret>i")
+    typist.helix.insert_text(typist.buffer, "\n")
+    assert typist.buffer.text == "\na b \na"
+
+
 def test_each_buffer_has_its_own_editor():
     helix = HelixBindings()
     one, two = Typist(helix=helix), Typist(helix=helix)

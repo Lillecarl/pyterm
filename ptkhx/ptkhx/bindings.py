@@ -260,6 +260,12 @@ class HelixBindings:
         elif buffer.cursor_position != editor.caret:
             buffer.cursor_position = editor.caret
 
+    def insert_text(self, buffer: Buffer, text: str) -> None:
+        "Type `text` at every cursor of `buffer`'s editor, and show it."
+        editor = self.editor_for(buffer)
+        editor.insert_text(text)
+        self._sync_out(buffer, editor)
+
     def adopt(self, buffer: Buffer) -> None:
         "Read the buffer again, after something replaced it whole."
         editor = self.editor_for(buffer)

@@ -371,9 +371,14 @@ class Editor:
             self.selection = self.selection.transform(lambda rng: Range(rng.anchor, self._insert_target(key, rng)))
             return None
         if is_printable(key):
-            self._edit_each(lambda _i, rng: (self.caret_of(rng), self.caret_of(rng), key))
+            self.insert_text(key)
             return None
         return None
+
+    def insert_text(self, text: str) -> None:
+        """Type `text` at every cursor, as insert mode does: for a host whose
+        Enter is a line break, where the editor's own Enter accepts the line."""
+        self._edit_each(lambda _i, rng: (self.caret_of(rng), self.caret_of(rng), text))
 
     def _insert_target(self, key: str, rng: Range) -> int:
         """Where one caret goes for an arrow key pressed in insert mode."""
