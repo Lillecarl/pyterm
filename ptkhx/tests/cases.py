@@ -102,11 +102,17 @@ CASES = [
     # Appending extends the selection over what was typed.
     Case("a", "a#[b|]#c", "ax<esc>", "a#[bx|]#c"),
     Case("I", "  a#[b|]#c", "Ix<esc>", "  x#[a|]#bc"),
+    # A line of blanks has no first character that is not one.
+    Case("I-blank-line", " #[ |]#\nb", "I<esc>", "#[ |]# \nb"),
+    # A range that reaches the end of a file that ends in a line break.
+    # A selected line break is written twice, and the second is dropped.
+    Case("a-at-the-end", "a#[\n|]#", "a<esc>", "a#[\n|]#\n\n"),
     Case("A", "a#[b|]#c\nd", "Ax<esc>", "abcx#[\n|]#d"),
     Case("o", "a#[b|]#c", "ox<esc>", "abc\nx#[|]#"),
     Case("O", "a#[b|]#c", "Ox<esc>", "x#[\n|]#abc"),
     Case("yp", "#[a|]#bc", "yp", "a#[a|]#bc"),
     Case("yP", "a#[b|]#c", "yP", "a#[b|]#bc"),
+    Case("P-leaves-select", "#[a|]#b", "vP", "#[a|]#b"),
     Case("r", "#[ab|]#c", "rx", "#[xx|]#c"),
     Case("~", "#[aB|]#c", "~", "#[Ab|]#c"),
     # The selection stays where it was.
@@ -120,6 +126,8 @@ CASES = [
     # Helix indents a document the way it is already indented, and plain
     # text with no indent at all with a tab. This one has four spaces.
     Case(">", "    x\n#[a|]#bc", ">", "    x\n    #[a|]#bc"),
+    Case(">-blank-line", "    x\n#[\n|]#y", ">", "    x\n#[\n|]#y"),
+    Case(">-leaves-select", "    x\n#[a|]#bc", "v>", "    x\n    #[a|]#bc"),
     Case("ms(", "#[ab|]#c", "ms(", "#[(ab)|]#c"),
     Case("md(", "(a#[b|]#c)", "md(", "a#[b|]#c"),
     # A character that is no bracket surrounds as itself, on both sides.

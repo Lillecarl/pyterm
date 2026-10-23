@@ -594,10 +594,9 @@ class Editor:
             self.enter_insert_at(self.selection.transform(lambda rng: Range(rng.end, rng.start)))
         elif key == "a":
             self.enter_insert_at(self.selection.transform(lambda rng: Range(rng.start, rng.end)))
+            self._room_at_the_end()
         elif key == "I":
-            self.enter_insert_at(
-                self.selection.transform(lambda rng: Range.point(self._first_nonblank(rng.cursor(text))))
-            )
+            self.enter_insert_at(self.selection.transform(lambda rng: Range.point(self._insert_start(rng.cursor(text)))))
         elif key == "A":
             self.enter_insert_at(
                 self.selection.transform(
@@ -616,10 +615,13 @@ class Editor:
             self._yank()
         elif key == "p":
             self._paste(after=True)
+            self._leave_select()
         elif key == "P":
             self._paste(after=False)
+            self._leave_select()
         elif key == "R":
             self._replace_with_yank()
+            self._leave_select()
         elif key == "u":
             self.undo()
         elif key == "U":
@@ -802,6 +804,27 @@ class Editor:
         while start < end and self.text[start] in " \t":
             start += 1
         return start
+
+    def _insert_start(self, pos: int) -> int:
+        "Where `I` puts a cursor: the first non-blank, or on a blank line its start, as Helix's fallback."
+        start, end = line_bounds(self.text, char_to_line(self.text, pos))
+        first = self._first_nonblank(pos)
+        return start if first == end else first
+
+    def _room_at_the_end(self) -> None:
+        """Helix's `append_mode`: a last range that reaches the end of the
+        document gets a line break after it to type in front of.
+
+        Only where the document already ends in one. A shell line ends in none,
+        and its cursor stands past the end instead, so `a` on its last character
+        must not add a line to the command."""
+        last = self.selection[len(self.selection) - 1]
+        if self.text.endswith("\n") and not last.is_empty and last.end == len(self.text):
+            self.text += "\n"
+
+    def _leave_select(self) -> None:
+        if self.mode is Mode.SELECT:
+            self.mode = Mode.NORMAL
 
     def _extend_line_below(self, count: int) -> None:
         text = self.text
@@ -1228,11 +1251,14 @@ class Editor:
             start_line, end_line = rng.line_range(text)
             lines.update(range(start_line, end_line + 1))
         self._snapshot()
+        self._leave_select()
         edits: list[Edit] = []
         for line in sorted(lines):
-            start, _ = line_bounds(text, line)
+            start, end = line_bounds(text, line)
             if sign > 0:
-                edits.append((start, start, INDENT))
+                # Helix indents no line that holds only blanks.
+                if text[start:end].strip():
+                    edits.append((start, start, INDENT))
                 continue
             width = 0
             while width < len(INDENT) and start + width < len(text) and text[start + width] == " ":
