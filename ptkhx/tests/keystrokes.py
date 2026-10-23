@@ -19,9 +19,10 @@ ALPHABET = "ab (x).\n"
 #: What a typed character, a find or a replace takes.
 CHARACTERS = "ab (x)."
 
-#: Commands of one key, or one fixed sequence.
+#: Commands of one key, or one fixed sequence. Not `>`, whose indent is
+#: a documented difference (`editor.py`).
 PLAIN = (
-    *"hjklwWeEbBxX;v_,C%)(nNuUyPpR~`J>d",
+    *"hjklwWeEbBxX;v_,C%)(nNuUyPpR~`Jd",
     "<lt>",
     "<esc>",
     *("<A-%s>" % key for key in ";:.Cs_-,`dJ"),
@@ -50,8 +51,10 @@ def _token(char: str) -> str:
 
 characters = st.sampled_from(CHARACTERS).map(_token)
 
+#: What is typed in insert mode. Not Enter, which accepts the line in
+#: ptkhx's own editor and is a line break only through its host.
 typed = st.lists(
-    st.one_of(characters, st.sampled_from(["<ret>", "<backspace>"])),
+    st.one_of(characters, st.just("<backspace>")),
     max_size=4,
 ).map("".join)
 
