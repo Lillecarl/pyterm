@@ -1065,13 +1065,8 @@ class Editor:
         old = self.text
         if old == new_text:
             return
-        limit = min(len(old), len(new_text))
-        prefix = 0
-        while prefix < limit and old[prefix] == new_text[prefix]:
-            prefix += 1
-        suffix = 0
-        while suffix < limit - prefix and old[len(old) - 1 - suffix] == new_text[len(new_text) - 1 - suffix]:
-            suffix += 1
+        prefix = _common_prefix(old, new_text)
+        suffix = _common_suffix(old, new_text, min(len(old), len(new_text)) - prefix)
         self._replace(prefix, len(old) - suffix, new_text[prefix : len(new_text) - suffix])
 
     def _delete(self, *, yank: bool) -> None:
@@ -1382,6 +1377,36 @@ class Editor:
             edits.append((open_idx, open_idx + 1, replacement[0]))
             edits.append((close_idx, close_idx + 1, replacement[1]))
         self._splice(edits)
+
+
+#: How many characters `_common_prefix` compares at once. pymux's copy mode
+#: holds a whole scrollback, megabytes, and a loop of one character at a time
+#: over that cost every key typed in insert mode.
+_BLOCK = 4096
+
+
+def _common_prefix(one: str, other: str) -> int:
+    "How many characters the two start with alike: a block at a time, in C, then by character."
+    limit = min(len(one), len(other))
+    at = 0
+    while at + _BLOCK <= limit and one[at : at + _BLOCK] == other[at : at + _BLOCK]:
+        at += _BLOCK
+    while at < limit and one[at] == other[at]:
+        at += 1
+    return at
+
+
+def _common_suffix(one: str, other: str, limit: int) -> int:
+    "How many characters, at most `limit`, the two end with alike."
+    at = 0
+    while (
+        at + _BLOCK <= limit
+        and one[len(one) - at - _BLOCK : len(one) - at] == other[len(other) - at - _BLOCK : len(other) - at]
+    ):
+        at += _BLOCK
+    while at < limit and one[len(one) - 1 - at] == other[len(other) - 1 - at]:
+        at += 1
+    return at
 
 
 def _positions_after(applied: list[Edit], positions: list[int]) -> dict[int, int]:
