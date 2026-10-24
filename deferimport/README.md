@@ -26,12 +26,17 @@ imports eager.
 `overlay.nix` puts deferimport in every Python package set of a
 nixpkgs, and needs nothing of pyterm:
 
-    # a flake: inputs.deferimport.url = "github:Lillecarl/deferimport";
-    pkgs = import nixpkgs { overlays = [ inputs.deferimport.overlays.default ]; };
+    # a flake:
+    inputs.deferimport = { url = "github:Lillecarl/deferimport"; flake = false; };
+
+    pkgs = import nixpkgs { overlays = [ (import "${inputs.deferimport}/overlay.nix") ]; };
     pkgs.python3.withPackages (p: [ p.deferimport ])
 
-Without a flake, `import "${deferimport}/overlay.nix"` is the same
-overlay. A package set built another way takes
+`flake = false` keeps your `flake.lock` to deferimport alone. As a
+flake, deferimport has pyterm as an input, so `overlays.default` adds
+pyterm and its inputs to your lock. A build never fetches them, but
+`nix flake archive` does. Without a
+flake, `import "${deferimport}/overlay.nix"` is the same overlay. A package set built another way takes
 `nix/python-overlay.nix`, a set extension, or calls
 `nix/python-package.nix` itself. It takes the standard library alone,
 and Python 3.14 or newer.
