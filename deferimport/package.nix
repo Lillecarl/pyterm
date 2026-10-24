@@ -49,10 +49,25 @@ let
 
   testEnv = mkVirtualEnv "deferimport-test-env" { deferimport = [ "test" ]; };
 
+  # A project outside pyterm gets this directory and nothing beside it,
+  # so the overlay is imported from a copy of it: a path that reaches
+  # out of it fails to evaluate here, not in the exported repository.
+  standalone = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./overlay.nix
+      ./nix
+      ./deferimport
+      ./pyproject.toml
+      ./README.md
+      ./LICENSE
+    ];
+  };
+
   # The package set extension `overlay.nix` installs, applied to this
   # interpreter's own nixpkgs set.
   nixpkgsEnv = python.withPackages (p: [
-    (import ./nix/python-overlay.nix p p).deferimport
+    (import "${standalone}/nix/python-overlay.nix" p p).deferimport
     p.pytest
   ]);
 
