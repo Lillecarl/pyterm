@@ -1,5 +1,5 @@
 """
-3.14: resolve a lazy global where it is read, the way 3.15's
+Before 3.15: resolve a lazy global where it is read, the way 3.15's
 `LOAD_GLOBAL` does.
 
 A proxy resolves itself when an attribute is fetched off it, and then
@@ -19,19 +19,24 @@ left alone in a function: the extra frame lasts only until the first
 call rebinds the name, and resolving every call cost a frame of pymux
 6%.
 
-`symtable` says which reads are of the global. On 3.14 list, set and
-dict comprehensions have no table of their own (PEP 709); a generator
-expression, a function, a lambda and a class each do; and an annotation
-scope sits beside them as `__annotate__`. 3.15 spells the anonymous ones
-`<lambda>` and `<genexpr>`. Annotations are never rewritten. A scope
-whose table cannot be found is left alone: a leak there is possible, a
-wrong rewrite is not.
+`symtable` says which reads are of the global. From 3.12 list, set and
+dict comprehensions have no table of their own (PEP 709), and before it
+each has one, like a generator expression; a function, a lambda and a
+class each do; and on 3.14 an annotation scope sits beside them as
+`__annotate__`. 3.15 spells the anonymous ones `<lambda>` and
+`<genexpr>`. A scope whose table cannot be found is left alone: a leak
+there is possible, a wrong rewrite is not.
+
+Annotations are never rewritten. Before 3.14 one at module or class
+level runs at import, so a hint may hold the proxy until the name
+resolves -- what 3.14 gives `get_type_hints` too.
 """
 
 from __future__ import annotations
 
 import ast
 import symtable
+import sys
 
 from .proxy import done
 
@@ -39,6 +44,10 @@ __all__ = ["FORCE", "wrap_reads"]
 
 #: The global a rewritten read calls.
 FORCE = "__deferimport_force__"
+
+#: Whether list, set and dict comprehensions share their function's table
+#: (PEP 709). Before 3.12 each has its own, named like `listcomp`.
+INLINED = sys.version_info >= (3, 12)
 
 
 def _targets(generators: list[ast.comprehension]) -> set[str]:
@@ -153,7 +162,9 @@ class _Reads(ast.NodeTransformer):
             self.tables.pop()
         return node
 
-    def _comprehension(self, node):
+    def _comprehension(self, node: ast.ListComp | ast.SetComp | ast.DictComp):
+        if not INLINED:
+            return self._scoped(node, type(node).__name__.lower())
         self.shadow.append(_targets(node.generators))
         try:
             return self.generic_visit(node)
@@ -165,18 +176,25 @@ class _Reads(ast.NodeTransformer):
     visit_DictComp = _comprehension
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp):
+        return self._scoped(node, "genexpr")
+
+    def _scoped(self, node: ast.GeneratorExp | ast.ListComp | ast.SetComp | ast.DictComp, name: str):
         # The first iterable runs in the enclosing scope, the rest in the
-        # generator's own.
+        # comprehension's own.
         first = node.generators[0]
         first.iter = self.visit(first.iter)
-        child = self._child("function", "genexpr", node.lineno)
+        child = self._child("function", name, node.lineno)
         self.tables.append(child)
         self.shadow.append(_targets(node.generators))
         try:
             first.ifs = [self.visit(value) for value in first.ifs]
             for generator in node.generators[1:]:
                 self.visit(generator)
-            node.elt = self.visit(node.elt)
+            if isinstance(node, ast.DictComp):
+                node.key = self.visit(node.key)
+                node.value = self.visit(node.value)
+            else:
+                node.elt = self.visit(node.elt)
         finally:
             self.shadow.pop()
             self.tables.pop()

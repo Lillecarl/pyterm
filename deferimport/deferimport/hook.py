@@ -22,7 +22,7 @@ import sys
 import tokenize  # noqa: F401  (loaded before the hook: see `_NEVER`)
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, override
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from . import select
 
@@ -30,6 +30,15 @@ if TYPE_CHECKING:
     import types
 
     from .policy import Policy
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    _Method = TypeVar("_Method")
+
+    def override(method: _Method, /) -> _Method:
+        return method
+
 
 __all__ = ["STATS", "Finder", "Transform", "cache_directory", "install"]
 

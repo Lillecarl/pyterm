@@ -1,5 +1,5 @@
 """
-3.14: a lazy `import a.b` still makes `a.b` reachable, as on 3.15.
+Before 3.15: a lazy `import a.b` still makes `a.b` reachable, as on 3.15.
 
 Eagerly, `import a.b` leaves `b` as an attribute of `a`, and code
 elsewhere reads `a.b` trusting that somebody imported it: pymux reads

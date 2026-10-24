@@ -77,7 +77,7 @@ def eligible(tree: ast.Module, package: str | None) -> list[Site]:
             # One that reaches past the top fails as written, eagerly.
             try:
                 target = importlib.util.resolve_name(relative, package)
-            except ImportError, ValueError:
+            except (ImportError, ValueError):
                 continue
         else:
             target = relative

@@ -39,7 +39,7 @@ pyterm and its inputs to your lock. A build never fetches them, but
 flake, `import "${deferimport}/overlay.nix"` is the same overlay. A package set built another way takes
 `nix/python-overlay.nix`, a set extension, or calls
 `nix/python-package.nix` itself. It takes the standard library alone,
-and Python 3.14 or newer.
+and Python 3.11 or newer.
 
 ## The two mechanisms
 
@@ -47,7 +47,7 @@ and Python 3.14 or newer.
   `__lazy_modules__` to an object that asks the policy at each import,
   and rewrites nothing: a module compiles from the bytecode its
   installer wrote. The policy sees the target, never the fromlist.
-- **3.14** has none, so each module is rewritten before it compiles,
+- **3.11 to 3.14** have none, so each module is rewritten before it compiles,
   and each import becomes a proxy that rebinds its
   name on first use, and the reads a proxy would leak are rewritten to
   resolve it first. A module that holds one gets a class of its own,
@@ -57,11 +57,14 @@ Both pass pymux's whole suite with every import lazy but two packages
 that register on import, and they answer every probe in
 `tests/test_parity.py` as 3.15 does, but:
 
-- **A first call from inside a function**, on 3.14, to a callee that
+- **A first call from inside a function**, before 3.15, to a callee that
   reads its caller's frame sees the proxy as that caller. The first
   call rebinds the name; resolving every call cost a frame of pymux 6%.
-- **`typing.get_type_hints`**, on 3.14, evaluates a string annotation in
+- **`typing.get_type_hints`**, before 3.15, evaluates a string annotation in
   the module's globals, where an unresolved name is still the proxy.
+- **An annotation at module or class level**, before 3.14, runs at import
+  without `from __future__ import annotations`, so `__annotations__` may
+  hold the proxy until the name resolves.
 
 ## What not to make lazy
 
@@ -100,7 +103,7 @@ package's answer to that.
 
 `DEFERIMPORT=eager` makes `install` do nothing, so one suite runs both
 ways. `-p deferimport.pytest_plugin` runs a suite under
-`DEFERIMPORT_POLICY`. On 3.14, rewritten bytecode is cached in
+`DEFERIMPORT_POLICY`. Before 3.15, rewritten bytecode is cached in
 `DEFERIMPORT_CACHE`, by default the user's cache directory.
 
 <!-- The lines below are pyterm's nix/shared/readme-tail.md, written by sync-sources. -->

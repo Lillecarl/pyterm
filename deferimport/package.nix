@@ -14,6 +14,11 @@
   callPackage,
   # The linter and formatter that the `ruff` check runs.
   ruff,
+  # The floor `pyproject.toml` names and the versions up to the
+  # collection's own, which a project outside pyterm may run it on.
+  python311,
+  python312,
+  python313,
 }:
 let
   package =
@@ -64,20 +69,23 @@ let
     ];
   };
 
-  # The package set extension `overlay.nix` installs, applied to this
+  # The package set extension `overlay.nix` installs, applied to an
   # interpreter's own nixpkgs set.
-  nixpkgsEnv = python.withPackages (p: [
-    (import "${standalone}/nix/python-overlay.nix" p p).deferimport
-    p.pytest
-  ]);
+  nixpkgsEnvOn =
+    interpreter:
+    interpreter.withPackages (p: [
+      (import "${standalone}/nix/python-overlay.nix" p p).deferimport
+      p.pytest
+    ]);
 
   checks = callPackage ./nix/checks.nix {
-    inherit
-      testEnv
-      nixpkgsEnv
-      testSources
-      ruff
-      ;
+    inherit testEnv testSources ruff;
+    nixpkgsEnv = nixpkgsEnvOn python;
+    olderEnvs = {
+      "311" = nixpkgsEnvOn python311;
+      "312" = nixpkgsEnvOn python312;
+      "313" = nixpkgsEnvOn python313;
+    };
   };
 in
 package

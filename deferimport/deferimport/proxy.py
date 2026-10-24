@@ -1,5 +1,5 @@
 """
-3.14: a stand-in for a module or a member, imported on first use.
+Before 3.15: a stand-in for a module or a member, imported on first use.
 
 A proxy rebinds the name it was bound to once it resolves, so after its
 first use a read of that name is the real object. Three things make

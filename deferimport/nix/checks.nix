@@ -12,6 +12,10 @@
   # The interpreter with the nixpkgs package of `python-package.nix`, the
   # one `overlay.nix` gives a project outside pyterm, and pytest.
   nixpkgsEnv,
+  # The same, on each interpreter from the floor up to the collection's,
+  # by version: "311".
+  olderEnvs,
+  lib,
   callPackage,
   testSources,
   ruff,
@@ -31,24 +35,27 @@ let
     export HOME="$TMPDIR"
     export LANG=C.UTF-8
   '';
+
+  pytest =
+    name: env:
+    suite {
+      inherit name;
+      inputs = [ env ];
+      env = { inherit selection; };
+      setup = prepare;
+    } "python -m pytest $selection -q -p no:cacheprovider";
 in
-{
-  unit = suite {
-    name = "deferimport-unit";
-    inputs = [ testEnv ];
-    env = { inherit selection; };
-    setup = prepare;
-  } "python -m pytest $selection -q -p no:cacheprovider";
+# The same suite on each older interpreter: `nixpkgs-311` and so on.
+lib.mapAttrs' (
+  version: env: lib.nameValuePair "nixpkgs-${version}" (pytest "deferimport-nixpkgs-${version}" env)
+) olderEnvs
+// {
+  unit = pytest "deferimport-unit" testEnv;
 
   # The same suite against the package another project gets from
   # `overlay.nix`. The probes put only the tests on the path, so the
   # package they import is the installed one.
-  nixpkgs = suite {
-    name = "deferimport-nixpkgs";
-    inputs = [ nixpkgsEnv ];
-    env = { inherit selection; };
-    setup = prepare;
-  } "python -m pytest $selection -q -p no:cacheprovider";
+  nixpkgs = pytest "deferimport-nixpkgs" nixpkgsEnv;
 
   # The selected rules, the layout at width 120, and the future import in
   # every file but the fixtures, which are what the probes import and

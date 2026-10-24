@@ -1,5 +1,5 @@
 """
-3.14: the rewrite of each import the policy picks into a proxy.
+Before 3.15: the rewrite of each import the policy picks into a proxy.
 
 `import a.b` becomes `a = __deferimport__.mod("a", "a.b", site)`, and so
 on for each spelling; `loads.py` then rewrites the reads of the names

@@ -350,6 +350,9 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.deferimport-ruff # its style
     nix build --file . checks.deferimport-nixpkgs # what deferimport/overlay.nix gives a project
     nix build --file . checks.deferimport-nixpkgs-315 # the same, on 3.15
+    nix build --file . checks.deferimport-nixpkgs-311 # the same, on 3.11, its floor
+    nix build --file . checks.deferimport-nixpkgs-312 # the same, on 3.12
+    nix build --file . checks.deferimport-nixpkgs-313 # the same, on 3.13
     nix build --file . checks.ptkhx-unit # Helix's keymap, on ptkhx (PTKHX_TESTS narrows it)
     nix build --file . checks.ptkhx-oracle # the same cases through real Helix on a pty
     nix build --file . checks.ptkhx-ruff # its style

@@ -158,7 +158,14 @@ let
     # so any source may take it.
     deferimport = final.callPackage (sources.deferimport + "/package.nix") {
       inherit (ps) mkProject;
-      inherit (pkgs) ruff;
+      # The interpreters below the collection's that it supports, each
+      # from nixpkgs, where a project outside pyterm takes it.
+      inherit (pkgs)
+        ruff
+        python311
+        python312
+        python313
+        ;
     };
 
     # The toolkit under ptterm and pymux, and the one source here that is
@@ -814,6 +821,12 @@ rec {
     # What a project outside pyterm gets from `deferimport/overlay.nix`.
     deferimport-nixpkgs = deferimport.checks.nixpkgs;
     deferimport-nixpkgs-315 = scopes.python315.deferimport.checks.nixpkgs;
+    # The same on each interpreter from deferimport's floor, 3.11, up to
+    # the collection's: the proxies, with comprehension scopes of their
+    # own before 3.12.
+    deferimport-nixpkgs-311 = deferimport.checks.nixpkgs-311;
+    deferimport-nixpkgs-312 = deferimport.checks.nixpkgs-312;
+    deferimport-nixpkgs-313 = deferimport.checks.nixpkgs-313;
     # The suite prompt-toolkit ships. ptterm and pymux are both built on
     # this fork, so a change to it that breaks the library breaks them,
     # and nothing here said so until this ran.
