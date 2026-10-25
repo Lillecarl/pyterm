@@ -278,6 +278,19 @@ written in TypeScript and compiled at build time, with the declarations
 generated beside it. It needs no `unsafe-inline`, because every rule it draws
 goes through the CSSOM. Lillecarl/pymux#461, Lillecarl/pymux#466.
 
+## Driving pymux from an agent
+
+    nix run --file . pymux-mcp                  # an MCP server on stdio
+    nix run --file . pymux-mcp -- --openapi     # its operations as OpenAPI 3.1
+
+`pymux-mcp` gives an agent two MCP tools, whatever the number of
+operations: a harness sends every tool's definition on every turn. `pymux`
+runs one operation, and `pymux_describe` lists them or answers one's JSON
+Schema. It lives in `pymux/pymux-mcp/`, over libpymux alone.
+
+`.mcp.json` here starts it for Claude Code in this checkout, and
+`.claude/settings.json` allows it. Lillecarl/pymux#760.
+
 ## Tests
 
 A package exposes its own tests through `passthru.checks`. This repository gives

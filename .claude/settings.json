@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
     "wrapty@skills-dir": true
-  }
+  },
+  "enabledMcpjsonServers": ["pymux"]
 }

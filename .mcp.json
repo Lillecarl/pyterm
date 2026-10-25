@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pymux": {
+      "command": "nix",
+      "args": ["run", "--file", ".", "pymux-mcp"]
+    }
+  }
+}
