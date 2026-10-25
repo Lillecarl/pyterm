@@ -295,6 +295,7 @@ let
     # of the terminal.
     pymux-mcp = final.callPackage (sources.pymux + "/pymux-mcp") {
       inherit (ps) mkProject;
+      nerdFont = pkgs.nerd-fonts.jetbrains-mono;
     };
 
     pymux = final.callPackage (sources.pymux + "/package.nix") {
