@@ -21,6 +21,7 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "bare-read-identity": (True, {}),
     "isinstance": ([True, True], {}),
     "except-clause": ("caught", {}),
+    "match-class": ("a Thing", {}),
     "f-string": ("heavy!", {}),
     "concatenate": ("heavy!", {}),
     # An import made for its side effect is lost: deny it.

@@ -74,6 +74,11 @@ try:
 except Exception as e:
     result = type(e).__name__
 """,
+    # `case Thing():` with Thing still lazy: CPython takes only a type
+    # there. The MCP SDK's server loop matches this way.
+    "match-class": """
+result = load("app.members").matched(load("heavy").Thing())
+""",
     # A string constant formatted before anything resolved it.
     "f-string": """
 result = load("app.members").formatted()

@@ -54,10 +54,14 @@ def wrapped(source: str, names=("X",)) -> str:
             "def f():\n    X = 1\n\n    def g():\n        return X\n    return g",
             "def f():\n    X = 1\n\n    def g():\n        return X\n    return g",
         ),
-        # Annotations and patterns are never rewritten.
+        # Annotations and patterns are never rewritten. A class a pattern
+        # names is resolved before the match, because CPython takes only a
+        # type there.
         ("def f(a: X) -> X:\n    pass", "def f(a: X) -> X:\n    pass"),
         ("y: X = X", "y: X = F(X)"),
-        ("match y:\n    case X():\n        pass", "match y:\n    case X():\n        pass"),
+        ("match y:\n    case X():\n        pass", "F(X)\nmatch y:\n    case X():\n        pass"),
+        ("match y:\n    case X() | [X()]:\n        pass", "F(X)\nmatch y:\n    case X() | [X()]:\n        pass"),
+        ("match y:\n    case Z():\n        pass", "match y:\n    case Z():\n        pass"),
         # A name nobody made lazy.
         ("y = Z", "y = Z"),
     ],

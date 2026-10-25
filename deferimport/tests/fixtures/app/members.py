@@ -32,3 +32,11 @@ def formatted():
 
 def concatenated():
     return NAME + "!"
+
+
+def matched(value):
+    match value:
+        case Thing():
+            return "a Thing"
+        case _:
+            return "something else"

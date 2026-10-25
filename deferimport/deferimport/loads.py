@@ -95,13 +95,36 @@ class _Reads(ast.NodeTransformer):
             out.extend(new if isinstance(new, list) else [new])
         return out
 
+    def _resolved(self, node: ast.Name) -> ast.IfExp:
+        self.wrapped += 1
+        force = ast.Call(func=ast.Name(FORCE, ast.Load()), args=[node], keywords=[])
+        read = ast.IfExp(test=ast.Name(done(node.id), ast.Load()), body=ast.Name(node.id, ast.Load()), orelse=force)
+        return ast.copy_location(read, node)
+
     def visit_Name(self, node: ast.Name):
         if isinstance(node.ctx, ast.Load) and self._is_lazy_global(node.id):
-            self.wrapped += 1
-            force = ast.Call(func=ast.Name(FORCE, ast.Load()), args=[node], keywords=[])
-            read = ast.IfExp(test=ast.Name(done(node.id), ast.Load()), body=ast.Name(node.id, ast.Load()), orelse=force)
-            return ast.copy_location(read, node)
+            return self._resolved(node)
         return node
+
+    def visit_Match(self, node: ast.Match):
+        """
+        `case Thing():` takes a name and no expression, and CPython refuses
+        anything there but a type. So each lazy class a pattern names is
+        resolved by a statement before the `match`, which rebinds the
+        global the pattern then reads.
+        """
+        node.subject = self.visit(node.subject)
+        named = dict.fromkeys(
+            pattern.cls.id
+            for case in node.cases
+            for pattern in ast.walk(case.pattern)
+            if isinstance(pattern, ast.MatchClass)
+            and isinstance(pattern.cls, ast.Name)
+            and self._is_lazy_global(pattern.cls.id)
+        )
+        node.cases = [self.visit(case) for case in node.cases]
+        resolve = [ast.copy_location(ast.Expr(self._resolved(ast.Name(name, ast.Load()))), node) for name in named]
+        return [*resolve, node] if resolve else node
 
     def visit_Call(self, node: ast.Call):
         table = self.tables[-1]
@@ -202,6 +225,7 @@ class _Reads(ast.NodeTransformer):
 
     def visit_match_case(self, node: ast.match_case):
         # A pattern takes a name, never an expression: `case Point():`.
+        # `visit_Match` resolves a lazy class a pattern names.
         if node.guard is not None:
             node.guard = self.visit(node.guard)
         node.body = self._visit_list(node.body)
