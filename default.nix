@@ -63,9 +63,9 @@ let
     Every `pyproject.toml` project this collection builds, as the
     directories that hold them.
 
-    Each is a source, but libpymux, which is a project inside the
-    repository of pymux: a caller that only drives a server takes that
-    one and none of the rest.
+    Each is a source, but libpymux and pymux-mcp, which are projects
+    inside the repository of pymux: a caller that only drives a server
+    takes those and none of the rest.
 
     `nixpkgsRootsFor` reads the dependency declarations out of these,
     so a set that holds our packages knows what they ask nixpkgs for.
@@ -73,6 +73,7 @@ let
   projectRoots = [
     sources.pymux
     (sources.pymux + "/libpymux")
+    (sources.pymux + "/pymux-mcp")
     sources.txterm
     sources.ptterm
     sources.pyte
@@ -99,6 +100,7 @@ let
   suppliedNames = [
     "pymux"
     "libpymux"
+    "pymux-mcp"
     "ptterm"
     "prompt-toolkit"
     "prompt-toolkit-rs"
@@ -289,6 +291,12 @@ let
       inherit (ps) mkProject;
     };
 
+    # The MCP server an agent harness starts, over libpymux and nothing
+    # of the terminal.
+    pymux-mcp = final.callPackage (sources.pymux + "/pymux-mcp") {
+      inherit (ps) mkProject;
+    };
+
     pymux = final.callPackage (sources.pymux + "/package.nix") {
       inherit (ps) mkProject;
       # The one that draws, which its checks need for kitty.
@@ -364,6 +372,12 @@ let
         # `<pymux-pane>` compiled, which is a thing to reach on its own:
         # a front end built with node links it and never the venv.
         inherit (set.pymux) element;
+      };
+
+      # `pymux-mcp` as a harness starts it: a virtualenv, so the command
+      # is in `bin` with libpymux, the MCP SDK and pydantic beside it.
+      pymux-mcp = set.mkVirtualEnv "pymux-mcp" { pymux-mcp = [ ]; } // {
+        inherit (set.pymux-mcp) meta;
       };
 
       # pymux with `pymux web`, which serves a pane to a browser.
@@ -479,6 +493,10 @@ rec {
   # and does not draw one. It is the one package here that carries no
   # toolkit and no parser.
   libpymux = default.libpymux;
+
+  # `pymux-mcp`, for an agent harness: two MCP tools over every
+  # operation libpymux has.
+  pymux-mcp = default.pymux-mcp;
 
   txterm = default.txterm;
 
