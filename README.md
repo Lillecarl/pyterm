@@ -1166,8 +1166,8 @@ before the server starts, which is the wrong moment: a person turns debug
 logging on because a server is already misbehaving, and a restart takes the
 thing they wanted to look at with it. `set-option log-level debug` reaches a
 server that is already running, and writes a line saying when it changed, so the
-log itself records the moment. pymux has no `show-options`, so the level is in
-the first paragraph of `counters` and `profile`:
+log itself records the moment. `show-options log-level` reads it back, and so
+does the first paragraph of `counters` and `profile`:
 
     log /home/you/.local/state/pymux/server.log, at debug
 
