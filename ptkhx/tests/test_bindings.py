@@ -118,6 +118,15 @@ def test_a_filter_hands_the_keys_back():
     assert typist.buffer.text == "abx"
 
 
+def test_a_host_is_told_each_command_and_never_the_text():
+    "What a host counts, as pymux's action log does."
+    typist = Typist()
+    told: list[str] = []
+    typist.helix.on_command = lambda _buffer, keys: told.append(keys)
+    typist.type("secret<esc>3wggfxg<esc>s.<ret>i")
+    assert told == ["w", "gg", "f", "s", "i"]
+
+
 def a_reader(text: str) -> Typist:
     "A read-only buffer in normal mode, as pymux's copy mode is."
     typist = Typist(text, helix=HelixBindings(initial_mode=Mode.NORMAL, read_only=True))

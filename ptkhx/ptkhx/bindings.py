@@ -176,6 +176,9 @@ class HelixBindings:
         #: prompt_toolkit removes no binding once a registry is merged, so
         #: a host that unloads turns them off here.
         self.enabled = True
+        #: Told the keys of each normal-mode command a key finished, with
+        #: its buffer (`Editor.finished`), for a host that counts them.
+        self.on_command: Callable[[Buffer, str], None] | None = None
         self.selection_style = FALLBACK_SELECTION_STYLE
         self.secondary_cursor_style = SECONDARY_CURSOR_STYLE
         self._editors: weakref.WeakKeyDictionary[Buffer, Editor] = weakref.WeakKeyDictionary()
@@ -421,6 +424,8 @@ class HelixBindings:
         self._wire_clipboard(editor, event.app)
         request = editor.feed(token)
         self._sync_out(buffer, editor)
+        if editor.finished is not None and self.on_command is not None:
+            self.on_command(buffer, editor.finished)
         if request is not None:
             self._handle(request, event)
 

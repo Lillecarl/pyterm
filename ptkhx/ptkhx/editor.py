@@ -133,6 +133,11 @@ class Editor:
     registers: dict[str, list[str]] = field(default_factory=dict)
     #: Set by `"x`, consumed by the next yank/delete/paste.
     pending_register: str | None = None
+    #: The keys of the normal-mode command the last key finished, such as
+    #: `w` or `gg`, for a host that counts what a person uses. The character
+    #: after `f`, `t`, `r` or `"` is left off. None for a key that finished
+    #: none: a count, half a command, or anything typed or read as text.
+    finished: str | None = None
 
     #: Reached through callbacks so the pure tests stay pure: the ptk layer
     #: swaps in the application's clipboard.
@@ -325,6 +330,7 @@ class Editor:
         return request
 
     def _feed(self, key: str) -> Request | None:
+        self.finished = None
         try:
             if self._reading is not None:
                 return self._feed_reading(key)
@@ -521,6 +527,7 @@ class Editor:
         finally:
             if not self._pending:
                 self._count = ""
+                self.finished = key
 
     #: Keys that swallow the next keystroke whole rather than dispatching it.
     _ARG_PREFIXES = frozenset({"f", "F", "t", "T", "r", '"'})
@@ -545,6 +552,8 @@ class Editor:
         finally:
             if not self._pending:
                 self._count = ""
+                if key != "<esc>":
+                    self.finished = pending[0] if pending[0] in self._ARG_PREFIXES else "".join(pending) + key
 
     def _command(self, key: str) -> Request | None:
         text, count, extend = self.text, self.count, self.extend
