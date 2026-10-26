@@ -22,8 +22,8 @@ from pymux.config import client_options_in
 from pymux.main import Pymux
 
 #: What the check asked the module to write, and what each one has to be
-#: once pymux has read it. The names on the left are attributes of `Pymux`
-#: or of its arrangement; `read` says where to find each one.
+#: once pymux has read it, by the attribute each option holds its value
+#: in; `read` asks the option itself.
 EXPECTED = {
     "base-index": ("base_index", 1),
     "history-limit": ("history_limit", 5000),
@@ -52,11 +52,14 @@ EXPECTED_FOR_CLIENT = [
 ]
 
 
-def read(pymux, name):
-    "Where a value lands. `base-index` is the one that is not on Pymux."
+def read(pymux, option, name):
+    "Where a value lands, as its option reads it. `base-index` is the arrangement's."
     if name == "base_index":
         return pymux.arrangement.base_index
-    return getattr(pymux, name)
+    for table in pymux.option_tables.values():
+        if option in table:
+            return table[option].read(pymux)
+    raise KeyError(option)
 
 
 def main(path):
@@ -66,11 +69,9 @@ def main(path):
     problems = list(pymux.startup_errors)
 
     for option, (name, wanted) in sorted(EXPECTED.items()):
-        got = read(pymux, name)
+        got = read(pymux, option, name)
         if got != wanted:
-            problems.append(
-                "%s: pymux read %r, and the module asked for %r" % (option, got, wanted)
-            )
+            problems.append("%s: pymux read %r, and the module asked for %r" % (option, got, wanted))
 
     # The binding the check put in `extraConfig`. It proves that the lines
     # after the settings arrive as commands and not as text. A bare
@@ -83,8 +84,7 @@ def main(path):
     announced = sorted(client_options_in(path))
     if announced != EXPECTED_FOR_CLIENT:
         problems.append(
-            "clientSettings: a client would announce %r, and the module "
-            "asked for %r" % (announced, EXPECTED_FOR_CLIENT)
+            "clientSettings: a client would announce %r, and the module asked for %r" % (announced, EXPECTED_FOR_CLIENT)
         )
 
     if problems:
