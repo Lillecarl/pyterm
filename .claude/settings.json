@@ -2,5 +2,18 @@
   "enabledPlugins": {
     "wrapty@skills-dir": true
   },
-  "enabledMcpjsonServers": ["pymux"]
+  "enabledMcpjsonServers": ["pymux"],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|mcp__plugin_pyedit_pyedit__run",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ruff-after-edit.py"
+          }
+        ]
+      }
+    ]
+  }
 }

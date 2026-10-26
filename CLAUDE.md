@@ -106,6 +106,10 @@ update <input>` moves a pin in the root's.
 commit on no bookmark, and `jj git push` pushes nothing, because it pushes
 bookmarks. Move `main` yourself.
 
+**ruff runs after every edit.** `.claude/hooks/ruff-after-edit.py` applies
+ruff's safe fixes and the formatter to each `.py` file that Edit, Write or
+an applied pyedit run wrote, and reports only what it could not fix.
+
 ## Finishing a piece of work
 
 **In a secondary workspace (`~/Code/pyterm-<name>`), stop before
