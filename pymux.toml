@@ -1,0 +1,13 @@
+# Link rules for `show-urls` (prefix o) in a pane under this
+# repository. `pymux/pymux/link_rules.py` says how they are found.
+
+# Every issue of the collection lives in Lillecarl/pymux, so a bare
+# number means one of those.
+[[links]]
+match = '(?<![\w/])#(\d+)\b'
+url = "https://github.com/Lillecarl/pymux/issues/{1}"
+
+# An issue named with its repository.
+[[links]]
+match = '\b(?P<owner>[\w-]+)/(?P<repo>[\w.-]+)#(?P<n>\d+)\b'
+url = "https://github.com/{owner}/{repo}/issues/{n}"
