@@ -699,7 +699,7 @@ rec {
       {
         name = "panes";
         title = "A terminal, without and with pymux";
-        text = "Every fixture photographed twice: the program bare in the terminal, and the same program in a pane. The difference between the two is what pymux adds, and the still checks are judged against the recorded counts of exactly these differences.";
+        text = "Every fixture photographed twice: the program bare in the terminal, and the same program in a pane. The difference between the two is what pymux adds, and the still checks are judged against the recorded counts of exactly these differences. Beside them, pillow.png is the pane as pymux draws it itself (capture-pane --png), in the same font and cell; it is judged by nothing, because no two renderers draw a glyph alike.";
         run = checks.pymux-pictures.run;
       }
       {
