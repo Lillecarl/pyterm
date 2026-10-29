@@ -351,6 +351,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-theme-pictures # every theme, in six terminals
     nix build --file . checks.pymux-window-pane-pictures # a Wayland window in a pane
     nix build --file . checks.pymux-upgrade-pictures # every view, before and after upgrade-server
+    nix build --file . checks.pymux-terminal-state # each terminal's modes, attached and after a detach
     nix build --file . checks.pymux-scenarios # yazi and claude-code, bare and in a pane
     nix build --file . checks.pymux-element  # what <pymux-pane> decides, in node
     nix build --file . checks.pysmithay-unit # the compositor, against real Wayland clients
