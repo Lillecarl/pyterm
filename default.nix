@@ -579,6 +579,7 @@ rec {
         "pymux-window-pane-pictures"
         "pymux-image-exercise"
         "pymux-latency"
+        "pymux-loop-stalls"
         "pymux-profile"
         "pymux-scenarios"
         "pymux-theme-pictures"
@@ -905,6 +906,9 @@ rec {
     # A real Firefox in a window pane, switched away from and back to.
     # Not a gate yet. Lillecarl/pymux#753.
     pymux-firefox = pymux.checks.firefox;
+    # How long the loop stalls while a window pane plays video. Not a
+    # gate. Lillecarl/pymux#632.
+    pymux-loop-stalls = pymux.checks.loopStalls;
     # Sound through a real PipeWire. Lillecarl/pymux#657.
     pymux-audio = pymux.checks.audio;
     # The types of pymux, held by a static checker rather than by a run:

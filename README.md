@@ -340,6 +340,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-latency # the same keystroke, in milliseconds
     nix build --file . checks.pymux-turns   # the same keystroke, in loop turns
     nix build --file . checks.pymux-profile # where the time of a frame goes
+    nix build --file . checks.pymux-loop-stalls.run # how late the loop runs while a window pane plays video (not a gate)
     nix build --file . checks.pymux-profile-starts # that the profiler still runs
     nix build --file . checks.pymux-pty     # a real pty, a server and a client
     nix build --file . checks.pymux-integrated # the same, in one process
