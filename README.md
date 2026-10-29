@@ -327,6 +327,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-ruff   # the lint rules, the layout, the future import
     nix build --file . checks.pymux-types  # the types, by a static checker
     nix build --file . checks.pymux-wayland # the compositor for panes with no display
+    nix build --file . checks.pymux-firefox # a real Firefox in a window pane, switched away and back (not a gate)
     nix build --file . checks.pymux-audio  # sound, through a real PipeWire
     nix build --file . checks.pymux-openssh # the ssh:// client, against a real sshd
     nix build --file . checks.pymux-rs-parity # the image kernels, against the Python

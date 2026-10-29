@@ -575,6 +575,7 @@ rec {
         "ptterm-fuzz"
         "ptterm-vttest"
         "pymux-chrome-pictures"
+        "pymux-firefox"
         "pymux-window-pane-pictures"
         "pymux-image-exercise"
         "pymux-latency"
@@ -901,6 +902,9 @@ rec {
     # `wayland` extra that every other pymux suite leaves out.
     # Lillecarl/pymux#383.
     pymux-wayland = pymux.checks.wayland;
+    # A real Firefox in a window pane, switched away from and back to.
+    # Not a gate yet. Lillecarl/pymux#753.
+    pymux-firefox = pymux.checks.firefox;
     # Sound through a real PipeWire. Lillecarl/pymux#657.
     pymux-audio = pymux.checks.audio;
     # The types of pymux, held by a static checker rather than by a run:
