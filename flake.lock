@@ -34,11 +34,11 @@
     "prompt-toolkit": {
       "flake": false,
       "locked": {
-        "lastModified": 1793235495,
-        "narHash": "sha256-e5WHgUxL1vLJxXW9FeM7J1OhVQOUmqXBdHvtafePRlU=",
+        "lastModified": 1793236227,
+        "narHash": "sha256-tB5/JJ8yQbnvMZvTTwR0Iz+Rt3/T0ABA3qvyRqxT9A8=",
         "owner": "Lillecarl",
         "repo": "python-prompt-toolkit",
-        "rev": "f0e95a2cea5fe152093f67494fcc78cf964c46ff",
+        "rev": "3d261c49e2c1f7973bacfee986799e8ba90a3a30",
         "type": "github"
       },
       "original": {
