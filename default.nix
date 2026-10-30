@@ -582,6 +582,7 @@ rec {
         "pymux-loop-stalls"
         "pymux-profile"
         "pymux-scenarios"
+        "pymux-scrolling"
         "pymux-theme-pictures"
         "pymux-vttest-pictures"
         "pymux-wire"
@@ -979,6 +980,9 @@ rec {
     # the third of the three numbers Lillecarl/pymux#8 asked for, and
     # the only one an instruction count cannot give.
     pymux-latency = pymux.checks.latency;
+    # A wheel step, down and up, beside a pane that streams. Not a gate,
+    # for the same reason.
+    pymux-scrolling = pymux.checks.scrolling;
     # How many turns of the event loop one keystroke costs. The number
     # in between the other two: an instruction count sees work and no
     # waiting, a millisecond sees the waiting and belongs to one
