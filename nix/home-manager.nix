@@ -21,7 +21,7 @@
 # **Three options carry the configuration, and no more.** `settings` writes
 # `set-option` lines, `clientSettings` writes `set-client-option` lines, and
 # `extraConfig` writes everything else. There is no typed option per pymux
-# setting, because `pymux/pymux/options.py` already names every one of them.
+# setting, because `pymux/pymux/options/options.py` already names every one of them.
 # A second list here would go stale, and a person would have to learn which
 # Nix name means which pymux name. This way `settings.prefix = "C-a"` is
 # `set-option prefix C-a`, spelled the way pymux spells it.
@@ -108,7 +108,7 @@ in
       };
       description = ''
         One `set-option` line for each entry. The names are pymux's own,
-        from `pymux/pymux/options.py`.
+        from `pymux/pymux/options/options.py`.
 
         `true` and `false` become `on` and `off`, a number becomes
         itself, and a string is quoted. `null` writes no line.
@@ -134,7 +134,7 @@ in
       };
       description = ''
         One `set-client-option` line for each entry. The names are
-        pymux's own, from `pymux/pymux/options.py`.
+        pymux's own, from `pymux/pymux/options/options.py`.
 
         These belong to the terminal a person is sitting at, not to the
         server: the theme, and whether it is drawn the other way round.

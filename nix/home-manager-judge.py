@@ -19,7 +19,7 @@ import sys
 
 from pymux.commands import handle_command
 from pymux.config import client_options_in
-from pymux.main import Pymux
+from pymux.core.main import Pymux
 
 #: What the check asked the module to write, and what each one has to be
 #: once pymux has read it, by the attribute each option holds its value
