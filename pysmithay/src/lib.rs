@@ -41,8 +41,8 @@ use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Tr
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, SurfaceData, get_parent,
-    send_surface_state, with_states,
+    CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes, SurfaceData,
+    get_parent, send_surface_state, with_states,
 };
 use smithay::wayland::fractional_scale::{
     FractionalScaleHandler, FractionalScaleManagerState, with_fractional_scale,
@@ -1412,6 +1412,21 @@ impl Compositor {
             |_, _| Some(output.clone()),
         );
         self.flush()
+    }
+
+    /// Whether the window, its popups included, asked to be told when
+    /// to draw next and was not told yet: it has drawn, and waits.
+    fn wants_frame(&self, id: u64) -> PyResult<bool> {
+        let mut wants = false;
+        self.toplevel(id)?.window.with_surfaces(|_, states| {
+            wants |= !states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .current()
+                .frame_callbacks
+                .is_empty();
+        });
+        Ok(wants)
     }
 
     /// The ids of the windows that are open, oldest first.

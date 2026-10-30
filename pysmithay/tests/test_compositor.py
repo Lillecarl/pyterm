@@ -99,6 +99,24 @@ def test_the_second_frame_names_only_what_changed(compositor):
     assert compositor.toplevels() == []
 
 
+def test_a_window_that_drew_wants_a_frame_until_it_is_told(compositor):
+    "The probe asks for a frame with its first buffer, and waits for it."
+    client = launch(compositor, sys.executable, str(CLIENT))
+    seen = []
+    deadline = time.monotonic() + 10
+    # Not `pump`, which tells every window that committed.
+    while not commits(seen):
+        assert time.monotonic() < deadline, seen
+        select.select(compositor.fds(), [], [], 0.1)
+        seen.extend(compositor.dispatch())
+    assert compositor.wants_frame(1)
+    compositor.frame_done(1, 0)
+    assert not compositor.wants_frame(1)
+
+    pump(compositor, lambda seen: ("closed", 1) in seen)
+    client.wait(10)
+
+
 def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
     first = launch(compositor, sys.executable, str(CLIENT))
     pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
