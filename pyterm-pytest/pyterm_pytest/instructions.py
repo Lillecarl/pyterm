@@ -18,32 +18,32 @@ Two things move a count that is not a change in the code:
 - The seed of the hash. `PYTHONHASHSEED` decides the order of a set,
   and an order decides a branch. The check pins it.
 
-**`ptterm/tests/instructions.py` is the same file**, and the two are
-not shared on purpose. A test helper is not part of a package, so
-nothing installs it, and each check's sandbox holds only the tests of
-the repository it judges. Copying twenty lines is cheaper than making
-one of these repositories depend on the other's test tree.
+`sys.monitoring` turns off the specialisation of the interpreter while
+it counts, so the count is of plain bytecode. That is what makes it
+stable; it also means the count is not a time and does not become one.
+
+Standard library only: ptterm, txterm and pymux each count with it.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 
 __all__ = ["count_instructions"]
 
-#: The tool that this module registers as. `sys.monitoring` holds a few
-#: slots and gives each a number; a profiler is the honest one to take,
-#: and nothing else in a test run uses it.
+#: `sys.monitoring` holds a few slots and gives each a number; a
+#: profiler is the honest one to take, and nothing else in a test run
+#: uses it.
 _TOOL = sys.monitoring.PROFILER_ID
 
 
-def count_instructions(work) -> int:
+def count_instructions(work: Callable[[], object]) -> int:
     """
     Run `work` and return the bytecode instructions it took.
 
-    The count covers everything the call reaches, so it holds the work
-    of pymux and of prompt_toolkit and of the standard library under
-    them. It does not hold the work of a C extension, which runs no
+    The count covers everything the call reaches, the standard library
+    included. It does not hold the work of a C extension, which runs no
     bytecode.
     """
     counted = 0
@@ -52,7 +52,7 @@ def count_instructions(work) -> int:
         nonlocal counted
         counted += 1
 
-    sys.monitoring.use_tool_id(_TOOL, "pymux-instructions")
+    sys.monitoring.use_tool_id(_TOOL, "pyterm-instructions")
     try:
         sys.monitoring.register_callback(_TOOL, sys.monitoring.events.INSTRUCTION, one_instruction)
         sys.monitoring.set_events(_TOOL, sys.monitoring.events.INSTRUCTION)
