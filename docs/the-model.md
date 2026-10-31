@@ -126,10 +126,10 @@ program's output for the picture fixtures.
 Three classes carry it, and one of them is for anybody outside.
 
     Terminal            the widget. A `FloatContainer` holding:
-      terminal_window     the screen. A `_Window`, which keeps the
+      terminal_window     the screen. A `TerminalWindow`, which keeps the
                           bottom of the screen in view from the
                           screen's own numbers, drawing
-        _TerminalControl  a `UIControl`. It feeds the stream what the
+        TerminalControl  a `UIControl`. It feeds the stream what the
                           program wrote, and turns the screen into the
                           rows prompt_toolkit asks for
       copy_window         what replaces the screen while a person
@@ -263,7 +263,7 @@ child writes to its pty; `ptyhost.Process` reads it and hands it to
 `ptterm.Terminal`, which feeds `pyte.Stream`, which changes
 `pyte.Screen`. The screen is now different, so pymux asks every client
 for a frame (`Pymux.invalidate`). In that frame,
-`_TerminalControl.create_content` turns the rows of the screen into
+`TerminalControl.create_content` turns the rows of the screen into
 prompt_toolkit content, `ptterm/style.py` spells each cell, and
 prompt_toolkit writes the cells of the frame into its own `Screen`.
 The renderer compares that with the frame before it and writes the
