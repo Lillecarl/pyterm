@@ -16,6 +16,16 @@
   ```
 */
 _pyFinal: pyPrev: {
+  # A selector callback of anyio's raw sockets sets the result of a
+  # waiter that a cancel earlier in the same loop pass already ended,
+  # and the loop reports `InvalidStateError`. A peer link that is
+  # cancelled as the owner's packet arrives hits it on every
+  # shutdown under load (`test_a_target_here_names_the_pane_there`).
+  # Unfixed in anyio's main as of 4.15.1. Lillecarl/pymux#759.
+  anyio = pyPrev.anyio.overridePythonAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./patches/anyio-ready-after-cancel.patch ];
+  });
+
   # Async connections, and async callbacks that run on the event loop,
   # arrived in 3.52; 3.54 fixes leaks and crashes in error handling.
   # Lillecarl/pymux#722.
