@@ -357,7 +357,7 @@ class Terminal(Widget, can_focus=True):
             report = mouse_report(emulator, action, where.x, where.y)
             if report is not None:
                 event.stop()
-                emulator.reply_csi(report)
+                emulator.reply(report)
         elif action in WHEEL_ARROWS and emulator.wheel_sends_arrows:
             event.stop()
             self.process.write_input(emulator.encode_key(WHEEL_ARROWS[action]) * ARROWS_PER_WHEEL_STEP)
