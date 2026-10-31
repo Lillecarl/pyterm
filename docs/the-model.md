@@ -101,7 +101,7 @@ for a renderer. That is why two widgets can share it.
       GraphicsState         images a program sent, for kitty graphics
 
 The protocol lives in modules of its own, and none of them touch a
-screen: `sequences.py` and `escape.py` spell sequences, `modes.py`,
+screen: `sequences/` and `escape.py` spell sequences, `modes.py`,
 `parameters.py`, `osc.py` and the `keys/` package name what they carry,
 `colors.py` and `xcms.py` do colour arithmetic, `terminfo.py` writes
 the entry a pane is told about.

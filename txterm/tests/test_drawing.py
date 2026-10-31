@@ -16,7 +16,8 @@ from no_backend import NoBackend
 from pyte import escape
 from pyte.modes import PrivateMode
 from pyte.osc import Osc
-from pyte.sequences import csi, osc, set_mode
+from pyte.sequences.csi import csi, set_mode
+from pyte.sequences.strings import osc
 from rich.color import Color
 from rich.style import Style
 

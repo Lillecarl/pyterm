@@ -10,7 +10,7 @@ from __future__ import annotations
 from no_backend import NoBackend
 from pyte.modes import PrivateMode
 from pyte.mouse import ARROWS_PER_WHEEL_STEP
-from pyte.sequences import set_mode
+from pyte.sequences.csi import set_mode
 from textual import events
 
 from txterm import Terminal, TerminalApp

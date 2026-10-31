@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 from pyte import escape
-from pyte.sequences import csi
+from pyte.sequences.csi import csi
 from textual import events
 
 from txterm.keys import KEY_DATA, data_of

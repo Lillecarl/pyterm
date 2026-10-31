@@ -21,7 +21,8 @@ from __future__ import annotations
 from no_backend import NoBackend
 from pyte import escape
 from pyte.modes import PrivateMode
-from pyte.sequences import Sharp, csi, reset_mode, set_mode, sharp
+from pyte.sequences.csi import csi, reset_mode, set_mode
+from pyte.sequences.escapes import Sharp, sharp
 
 from txterm import Terminal, TerminalApp
 

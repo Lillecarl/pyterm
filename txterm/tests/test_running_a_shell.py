@@ -18,7 +18,7 @@ import sys
 
 import anyio
 from pyte.modes import PrivateMode
-from pyte.sequences import set_mode
+from pyte.sequences.csi import set_mode
 
 from txterm import Terminal, TerminalApp
 
