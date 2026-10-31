@@ -38,6 +38,7 @@ from pyte.streams import GroundTimer, Stream
 from rich.segment import Segment
 from rich.style import Style
 from textual import events
+from textual.geometry import Region
 from textual.message import Message
 from textual.strip import Strip
 from textual.widget import Widget
@@ -241,6 +242,13 @@ class Terminal(Widget, can_focus=True):
         #: to a row, so a change to any of it empties the whole memory.
         self._drawn_under: tuple | None = None
 
+        #: What each visible row `y` was last drawn as: the row of the
+        #: page, its write count and the cursor column on it. A frame
+        #: asks Textual for the rows whose answer moved and no others.
+        #: Textual keeps the strip of every row it is not asked for, so a
+        #: row missed here is a wrong screen. Lillecarl/pymux#127.
+        self._shown: dict[int, tuple[int, int, int | None]] = {}
+
         #: Whether the program has been forked yet.
         #:
         #: Not `_running`: Textual keeps the state of the message pump
@@ -263,7 +271,7 @@ class Terminal(Widget, can_focus=True):
         self._process = Process(
             backend=self._backend,
             receive=self._ground_timer.feed,
-            invalidate=self.refresh,
+            invalidate=self.refresh_changed,
             done_callback=lambda: self.post_message(self.Exited(self)),
             # A pane that nobody is looking at parses when the loop has
             # nothing better to do. Focus is what "looking at" means.
@@ -448,23 +456,56 @@ class Terminal(Widget, can_focus=True):
         # history.
         number = emulator.line_offset + y
         cursor_column = self._cursor_column(y)
-        if cursor_column is None:
-            # The row the cursor stands on is the one row whose answer
-            # depends on something outside it, so it is never kept.
-            # A row with no count of its own carries the one that
-            # `touch_everything` last set, so a reset or a page swap
-            # moves every row at once and costs nothing to say.
-            version = emulator.written_at.get(number, emulator.everything_at)
-            if self._drawn_at.get(number) == version:
-                return self._drawn[number]
-        else:
-            version = None
+        # A row with no count of its own carries the one that
+        # `touch_everything` last set, so a reset or a page swap moves
+        # every row at once and costs nothing to say.
+        version = emulator.written_at.get(number, emulator.everything_at)
+        self._shown[y] = (number, version, cursor_column)
+        # The row the cursor stands on is the one row whose answer
+        # depends on something outside it, so it is never kept.
+        if cursor_column is None and self._drawn_at.get(number) == version:
+            return self._drawn[number]
 
         strip = self._build(number, width, cursor_column, ground)
-        if version is not None:
+        if cursor_column is None:
             self._drawn[number] = strip
             self._drawn_at[number] = version
         return strip
+
+    def refresh_changed(self) -> None:
+        """
+        Ask Textual to draw again the rows whose answer moved since they
+        were drawn, and no others.
+
+        A row's answer is the row of the page it shows, the write count
+        of that row and the cursor on it. A scroll moves the first, a
+        write the second, and a cursor that moves changes the third on
+        two rows. What reaches every row at once, the width, DECSCNM or
+        the ground, refreshes the whole widget.
+        """
+        width = self.size.width
+        emulator = self.emulator
+        if (width, emulator.has_reverse_video, self.visual_style.rich_style) != self._drawn_under:
+            self.refresh()
+            return
+        line_offset = emulator.line_offset
+        written_at = emulator.written_at
+        everything_at = emulator.everything_at
+        shown = self._shown
+        changed = []
+        for y in range(self.size.height):
+            number = line_offset + y
+            if shown.get(y) != (number, written_at.get(number, everything_at), self._cursor_column(y)):
+                changed.append(Region(0, y, width, 1))
+        if changed:
+            self.refresh(*changed)
+
+    def on_focus(self) -> None:
+        "The cursor appears: a focused pane draws it."
+        self.refresh()
+
+    def on_blur(self) -> None:
+        self.refresh()
 
     def _build(
         self,

@@ -35,6 +35,8 @@ docs = ["sphinx", "myst-parser", "furo"]
 test = [
     "pytest",
     "anyio",
+    # `count_instructions`, for what a frame costs.
+    "pyterm-pytest",
 ]
 
 [project.urls]

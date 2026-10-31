@@ -23,6 +23,10 @@ from pyte import escape
 from pyte.modes import PrivateMode
 from pyte.sequences.csi import csi, reset_mode, set_mode
 from pyte.sequences.escapes import Sharp, sharp
+from pyterm_pytest.instructions import count_instructions
+from rich.style import Style
+from textual.geometry import Region
+from textual.strip import Strip
 
 from txterm import Terminal, TerminalApp
 
@@ -85,6 +89,91 @@ async def test_the_same_rows_come_out_either_way():
             kept = frame(one, forget=False)
             built = frame(other, forget=True)
             assert kept == built, "chunk %d (%r)" % (number, chunk[:40])
+
+
+def through_textual(terminal: Terminal, refresh) -> list[list[tuple[str, Style | None]]]:
+    """
+    A frame the way Textual draws one: `refresh` names what to draw
+    again, and Textual's own line cache answers every row it was not
+    told about.
+    """
+    refresh()
+    return [
+        [(segment.text, segment.style) for segment in strip] for strip in terminal.render_lines(Region(0, 0, *SIZE))
+    ]
+
+
+async def test_textual_draws_the_same_frames_when_told_only_the_rows_that_changed():
+    """
+    `refresh_changed` names a row to Textual only when its answer moved.
+    A row it misses is a row Textual hands back from its cache, stale. So
+    one widget refreshes what changed, one refreshes everything, and
+    every frame has to match. Lillecarl/pymux#127.
+    """
+    naming = TerminalApp(backend=NoBackend())
+    everything = TerminalApp(backend=NoBackend())
+
+    async with naming.run_test(size=SIZE) as one_pilot, everything.run_test(size=SIZE) as other_pilot:
+        one = naming.query_one(Terminal)
+        other = everything.query_one(Terminal)
+        # Focused, so the cursor is drawn and moves between rows.
+        one.focus()
+        other.focus()
+        await one_pilot.pause()
+        await other_pilot.pause()
+
+        for number, chunk in enumerate([*CHUNKS, csi(escape.CUP, 3, 7), csi(escape.CUP, 9, 2)]):
+            one.stream.feed(chunk)
+            other.stream.feed(chunk)
+
+            named = through_textual(one, one.refresh_changed)
+            whole = through_textual(other, other.refresh)
+            assert named == whole, "chunk %d (%r)" % (number, chunk[:40])
+
+
+async def test_one_written_row_is_the_one_row_textual_asks_for():
+    app = TerminalApp(backend=NoBackend())
+    async with app.run_test(size=SIZE):
+        terminal = app.query_one(Terminal)
+        terminal.stream.feed("first\r\nsecond\r\nthird" + csi(escape.CUP, 9, 1))
+        through_textual(terminal, terminal.refresh_changed)
+
+        asked = []
+        render_line = terminal.render_line
+
+        def counting(y: int) -> Strip:
+            asked.append(y)
+            return render_line(y)
+
+        terminal.render_line = counting
+        terminal.stream.feed(csi(escape.CUP, 2, 1) + "again" + csi(escape.CUP, 9, 1))
+        through_textual(terminal, terminal.refresh_changed)
+        assert asked == [1]
+
+
+async def test_a_frame_after_one_row_costs_a_fraction_of_a_whole_frame():
+    """
+    What the region refresh buys, in instructions: Textual's work per row
+    it is asked for is most of a frame, and a row nobody named costs it
+    nothing.
+    """
+    size = (160, 50)
+    app = TerminalApp(backend=NoBackend())
+    async with app.run_test(size=size):
+        terminal = app.query_one(Terminal)
+
+        def frame(refresh) -> None:
+            refresh()
+            terminal.render_lines(Region(0, 0, *size))
+
+        terminal.stream.feed("".join("row %d\r\n" % n for n in range(size[1] - 1)))
+        frame(terminal.refresh)
+
+        terminal.stream.feed(csi(escape.CUP, 2, 1) + "again" + csi(escape.CUP, 9, 1))
+        named = count_instructions(lambda: frame(terminal.refresh_changed))
+        terminal.stream.feed(csi(escape.CUP, 2, 1) + "twice" + csi(escape.CUP, 9, 1))
+        whole = count_instructions(lambda: frame(terminal.refresh))
+        assert named * 3 < whole, (named, whole)
 
 
 async def test_a_row_that_nothing_wrote_is_the_object_that_was_drawn():
