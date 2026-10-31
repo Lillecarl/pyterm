@@ -30,6 +30,7 @@ from ptyhost.backends.posix import spawn_backend
 from pyte.cells import PLAIN_APPEARANCE, Appearance, appearance_of
 from pyte.environment import preparing
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
+from pyte.mouse import ARROWS_PER_WHEEL_STEP, WHEEL_ARROWS, MouseAction, mouse_report, reports_mouse
 from pyte.placeholders import PLACEHOLDER
 from pyte.runs import runs_of
 from pyte.screen import Screen
@@ -335,6 +336,43 @@ class Terminal(Widget, can_focus=True):
         event.stop()
         event.prevent_default()
         self.process.write_input(self.emulator.wrap_paste(event.text))
+
+    # -- the mouse ----------------------------------------------------------
+
+    def _mouse(self, event: events.MouseEvent, action: MouseAction) -> None:
+        """
+        Tell the program what the mouse did, in the mode it asked for
+        (`pyte.mouse`), at the cell of the page under it. A program on
+        the alternate screen that asked for no reports gets the wheel as
+        arrows, the way ptterm sends it. Lillecarl/pymux#842.
+
+        Anything else is left to Textual: a widget that reports nothing
+        stops nothing, so the wheel still scrolls whatever holds it.
+        """
+        where = event.get_content_offset(self)
+        if where is None:
+            return  # On the border, not on a cell.
+        emulator = self.emulator
+        if reports_mouse(emulator):
+            report = mouse_report(emulator, action, where.x, where.y)
+            if report is not None:
+                event.stop()
+                emulator.reply_csi(report)
+        elif action in WHEEL_ARROWS and emulator.wheel_sends_arrows:
+            event.stop()
+            self.process.write_input(emulator.encode_key(WHEEL_ARROWS[action]) * ARROWS_PER_WHEEL_STEP)
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        self._mouse(event, MouseAction.PRESS)
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        self._mouse(event, MouseAction.RELEASE)
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self._mouse(event, MouseAction.WHEEL_UP)
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self._mouse(event, MouseAction.WHEEL_DOWN)
 
     # -- drawing ------------------------------------------------------------
 
