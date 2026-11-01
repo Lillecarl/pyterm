@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from . import hook
+from . import forwardref, hook
 from .native import Native
 from .policy import Policy, parse
 from .rewrite import Proxies
@@ -76,4 +76,6 @@ def install(
     if mechanism == "native" and not NATIVE:
         raise RuntimeError("lazy imports of the interpreter's own need 3.15")
     transform: hook.Transform = Native(policy) if mechanism == "native" else Proxies()
+    if mechanism == "proxies":
+        forwardref.patch()
     return hook.install(transform, policy, hook.cache_directory() if cache is None else Path(cache))

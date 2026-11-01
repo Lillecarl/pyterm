@@ -56,9 +56,11 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "retry-after-failure": (["RuntimeError", "second time"], {}),
     # PEP 810 keeps an import in `with` lazy, so it runs after the block.
     "inside-with": ("ModuleNotFoundError", {"eager": "found"}),
-    # `get_type_hints` evaluates in the module's globals, which no rewrite
-    # reaches: on 3.14 the hint is the proxy until the name resolves.
-    "type-hints": (["type", True], {"proxies": ["LazyProxy", False]}),
+    # A forward reference evaluates in the module's globals, which no
+    # rewrite reaches: `forwardref` resolves the names it reads first.
+    "type-hints": (["type", True], {}),
+    "type-hints-nested": (True, {}),
+    "eval-type-new": ("Thing", {}),
     "own-class": (["module", "Thing"], {}),
 }
 

@@ -60,8 +60,11 @@ that register on import, and they answer every probe in
 - **A first call from inside a function**, before 3.15, to a callee that
   reads its caller's frame sees the proxy as that caller. The first
   call rebinds the name; resolving every call cost a frame of pymux 6%.
-- **`typing.get_type_hints`**, before 3.15, evaluates a string annotation in
-  the module's globals, where an unresolved name is still the proxy.
+- **`inspect.get_annotations(eval_str=True)`**, before 3.15, evaluates a
+  string annotation with `eval` in the module's globals, where an
+  unresolved name is still the proxy. A forward reference does not:
+  `typing.get_type_hints` and pydantic resolve each name they read first,
+  at 2 µs an evaluation.
 - **An annotation at module or class level**, before 3.14, runs at import
   without `from __future__ import annotations`, so `__annotations__` may
   hold the proxy until the name resolves.

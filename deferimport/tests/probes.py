@@ -252,6 +252,28 @@ import typing
 hint = typing.get_type_hints(load("app.hints").take)["value"]
 result = [type(hint).__name__, hint is load("heavy").Thing]
 """,
+    # The lazy name inside a hint: `list[Thing]` keeps whatever the name
+    # read gave. (`Thing | None` would resolve it through `__or__`.)
+    "type-hints-nested": """
+import typing
+hint = typing.get_type_hints(load("app.hints").take_many)["many"]
+result = typing.get_args(hint)[0] is load("heavy").Thing
+""",
+    # pydantic's path to a field type: `typing._eval_type` in the module's
+    # globals, then `__new__` on what it gave. A proxy there raised
+    # "X is not a type object (LazyProxy)": nanopynix's `pynix repl`, through
+    # tree_sitter_config's `AnyUrl`.
+    "eval-type-new": """
+import inspect, typing
+# As pydantic calls it: `type_params` where the signature has it.
+takes = "type_params" in inspect.signature(typing._eval_type).parameters
+extra = {"type_params": ()} if takes else {}
+cls = typing._eval_type(typing.ForwardRef("Thing"), vars(load("app.hints")), None, **extra)
+try:
+    result = type(cls.__new__(cls)).__name__
+except TypeError as e:
+    result = "TypeError"
+""",
     # A module that sets its own class while it loads, after the
     # mechanism set one.
     "own-class": """
