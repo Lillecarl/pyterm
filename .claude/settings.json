@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
-    "wrapty@skills-dir": true
+    "wrapty@skills-dir": true,
+    "pymux-mcp@skills-dir": false
   },
   "enabledMcpjsonServers": ["pymux"],
   "hooks": {
