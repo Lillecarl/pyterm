@@ -39,6 +39,18 @@ async def test_a_click_reaches_a_program_that_asked_for_sgr_reports():
         assert backend.written == ["\x1b[<0;4;3M", "\x1b[<0;4;3m"]
 
 
+async def test_a_right_click_with_ctrl_reaches_the_program_as_one():
+    "Lillecarl/pymux#900."
+    backend = NoBackend()
+    app = TerminalApp(backend=backend)
+    async with app.run_test(size=SIZE) as pilot:
+        terminal = app.query_one(Terminal)
+        terminal.stream.feed(set_mode(PrivateMode.MOUSE_REPORTING) + set_mode(PrivateMode.SGR_MOUSE))
+        await pilot.click(Terminal, offset=(3, 2), control=True, button=3)
+        await pilot.pause()
+        assert backend.written == ["\x1b[<18;4;3M", "\x1b[<18;4;3m"]
+
+
 async def test_the_wheel_reaches_it_too():
     backend = NoBackend()
     app = TerminalApp(backend=backend)

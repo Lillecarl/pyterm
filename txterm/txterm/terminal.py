@@ -30,7 +30,18 @@ from ptyhost.backends.posix import spawn_backend
 from pyte.cells import PLAIN_APPEARANCE, Appearance, appearance_of
 from pyte.environment import preparing
 from pyte.images import ASSUMED_CELL_HEIGHT, ASSUMED_CELL_WIDTH
-from pyte.mouse import ARROWS_PER_WHEEL_STEP, WHEEL_ARROWS, MouseAction, mouse_report, reports_mouse
+from pyte.mouse import (
+    ARROWS_PER_WHEEL_STEP,
+    NO_MODIFIERS,
+    WHEEL_ARROWS,
+    MouseAction,
+    MouseBits,
+    MouseButton,
+    MouseInput,
+    mouse_report,
+    reports_mouse,
+    reports_pixels,
+)
 from pyte.placeholders import PLACEHOLDER
 from pyte.runs import runs_of
 from pyte.screen import Screen
@@ -114,6 +125,10 @@ def create_backend(
     return spawn_backend(command, preparing(environment), directory, cell=(ASSUMED_CELL_WIDTH, ASSUMED_CELL_HEIGHT))
 
 
+#: Textual numbers a button from 1, and 0 for none held.
+_TEXTUAL_BUTTONS = {1: MouseButton.LEFT, 2: MouseButton.MIDDLE, 3: MouseButton.RIGHT}
+
+
 class Terminal(Widget, can_focus=True):
     """
     A program on a pty, drawn in a Textual widget.
@@ -188,6 +203,10 @@ class Terminal(Widget, can_focus=True):
         # reads alike whichever widget drew the pane.
         # Lillecarl/pymux#238.
         self.unreadable_key_func = unreadable_key_func
+
+        # The cell of the last move sent, so that a move inside it
+        # sends nothing to a program that counts cells.
+        self._moved_to: tuple[int, int] | None = None
 
         self._backend = backend or create_backend(command or ["/bin/bash"], environment, directory)
 
@@ -361,8 +380,29 @@ class Terminal(Widget, can_focus=True):
         if where is None:
             return  # On the border, not on a cell.
         emulator = self.emulator
+        if action is MouseAction.MOVE:
+            if (where.x, where.y) == self._moved_to and not reports_pixels(emulator):
+                return
+            self._moved_to = (where.x, where.y)
         if reports_mouse(emulator):
-            report = mouse_report(emulator, action, where.x, where.y)
+            modifiers = NO_MODIFIERS
+            for held, bit in (
+                (event.shift, MouseBits.SHIFT),
+                (event.meta, MouseBits.ALT),
+                (event.ctrl, MouseBits.CONTROL),
+            ):
+                if held:
+                    modifiers |= bit
+            mouse = MouseInput(
+                action,
+                where.x,
+                where.y,
+                _TEXTUAL_BUTTONS.get(event.button, MouseButton.NONE),
+                modifiers,
+                event.pointer_x % 1,
+                event.pointer_y % 1,
+            )
+            report = mouse_report(emulator, mouse)
             if report is not None:
                 event.stop()
                 self.process.write_input(emulator.encode_report(report))
@@ -381,6 +421,9 @@ class Terminal(Widget, can_focus=True):
 
     def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
         self._mouse(event, MouseAction.WHEEL_DOWN)
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        self._mouse(event, MouseAction.MOVE)
 
     # -- drawing ------------------------------------------------------------
 
