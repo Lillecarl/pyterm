@@ -170,6 +170,21 @@ async def test_a_pane_that_is_not_focused_draws_no_cursor():
         assert [segment.text for segment in terminal.render_line(0)] == ["ab" + " " * 18]
 
 
+async def test_kittys_extra_cursors_reverse_their_cells_in_any_pane():
+    "Lillecarl/pymux#891. A pane without the focus draws them as well."
+    app = app_with_a_screen()
+    async with app.run_test(size=SIZE) as pilot:
+        terminal = app.query_one(Terminal)
+        terminal.blur()
+        await pilot.pause()
+        terminal.stream.feed("abcd\x1b[>1;2:1:2;2:1:4 q")
+        segments = list(terminal.render_line(0))
+        assert [segment.text for segment in segments] == ["a", "b", "c", "d", " " * 16]
+        assert [bool(segment.style.reverse) for segment in segments] == [False, True, False, True, False]
+        terminal.stream.feed("\x1b[>0;4 q")
+        assert [segment.text for segment in terminal.render_line(0)] == ["abcd" + " " * 16]
+
+
 async def test_a_reversed_cell_under_the_cursor_turns_back():
     """
     Three things reverse a cell and each one turns the last. A cell that

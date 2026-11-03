@@ -81,6 +81,10 @@ _NOT_REVERSE = Style(reverse=False)
 _NOT_FOR_A_SCREEN = frozenset(chr(code) for code in [*list(range(32)), 127, *list(range(128, 160))])
 
 
+#: A row no cursor stands on.
+_NO_CURSORS: frozenset[int] = frozenset()
+
+
 #: The size is `style_of`'s, because a key here is one of its answers:
 #: a style comes from an appearance, and `pyte.cells` keeps only so
 #: many of those alive. The two turnings double it.
@@ -427,6 +431,22 @@ class Terminal(Widget, can_focus=True):
 
     # -- drawing ------------------------------------------------------------
 
+    def _cursors_in(self, y: int) -> frozenset[int]:
+        """
+        The columns of row `y` of the page that draw a cursor: the main
+        one, and kitty's extra cursors, which a pane draws whether it
+        has the focus or not. Every one draws as a reversed cell.
+        Lillecarl/pymux#891.
+        """
+        main = self._cursor_column(y)
+        extra = self.emulator.extra_cursors
+        if not extra.cells:
+            return _NO_CURSORS if main is None else frozenset((main,))
+        columns = set(extra.in_row(y))
+        if main is not None:
+            columns.add(main)
+        return frozenset(columns)
+
     def _cursor_column(self, y: int) -> int | None:
         """
         The column the cursor stands on in row `y` of the page, or None
@@ -498,19 +518,19 @@ class Terminal(Widget, can_focus=True):
         # is the first row of it, and the buffer above that is the
         # history.
         number = emulator.line_offset + y
-        cursor_column = self._cursor_column(y)
+        cursors = self._cursors_in(y)
         # A row with no count of its own carries the one that
         # `touch_everything` last set, so a reset or a page swap moves
         # every row at once and costs nothing to say.
         version = emulator.written_at.get(number, emulator.everything_at)
-        self._shown[y] = (number, version, cursor_column)
-        # The row the cursor stands on is the one row whose answer
+        self._shown[y] = (number, version, cursors)
+        # A row a cursor stands on is the one kind of row whose answer
         # depends on something outside it, so it is never kept.
-        if cursor_column is None and self._drawn_at.get(number) == version:
+        if not cursors and self._drawn_at.get(number) == version:
             return self._drawn[number]
 
-        strip = self._build(number, width, cursor_column, ground)
-        if cursor_column is None:
+        strip = self._build(number, width, cursors, ground)
+        if not cursors:
             self._drawn[number] = strip
             self._drawn_at[number] = version
         return strip
@@ -538,7 +558,7 @@ class Terminal(Widget, can_focus=True):
         changed = []
         for y in range(self.size.height):
             number = line_offset + y
-            if shown.get(y) != (number, written_at.get(number, everything_at), self._cursor_column(y)):
+            if shown.get(y) != (number, written_at.get(number, everything_at), self._cursors_in(y)):
                 changed.append(Region(0, y, width, 1))
         if changed:
             self.refresh(*changed)
@@ -554,26 +574,27 @@ class Terminal(Widget, can_focus=True):
         self,
         number: int,
         width: int,
-        cursor_column: int | None,
+        cursors: frozenset[int],
         ground: Style,
     ) -> Strip:
         "One row of the page, as a strip."
         emulator = self.emulator
         row = emulator.page.data_buffer.get(number)
-        segments = segments_of_row(row, width, emulator.has_reverse_video, cursor_column)
+        segments = segments_of_row(row, width, emulator.has_reverse_video, cursors)
         # The style of the widget goes underneath, and the style of a
         # cell over it. A cell says only what a program asked for, so
         # everything else is the ground the widget paints.
         return Strip(segments, width).apply_style(ground)
 
 
-def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursor_column: int | None) -> list[Segment]:
+def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursors: frozenset[int]) -> list[Segment]:
     """
     One row as Rich segments, `width` columns wide: one segment per run
     of `pyte.runs`, joined where two neighbours draw the same way.
 
     `reverse_video` is DECSCNM, which reverses every cell, the blank ones
-    as well. A run the cursor stands in, or one the right edge cuts, is
+    as well. `cursors` are the columns a cursor reverses. A run a cursor
+    stands in, or one the right edge cuts, is
     built from its cells: a plain run may hold a combining character, so
     its text is not one character per column. Lillecarl/pymux#521.
     """
@@ -590,11 +611,12 @@ def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursor_col
             segments.append(Segment(text, style))
 
     def blanks(start: int, end: int) -> None:
-        if cursor_column is not None and start <= cursor_column < end:
-            if cursor_column > start:
-                add(" " * (cursor_column - start), PLAIN_APPEARANCE)
-            add(" ", PLAIN_APPEARANCE, cursor=True)
-            start = cursor_column + 1
+        for column in sorted(cursors) if cursors else ():
+            if start <= column < end:
+                if column > start:
+                    add(" " * (column - start), PLAIN_APPEARANCE)
+                add(" ", PLAIN_APPEARANCE, cursor=True)
+                start = column + 1
         if end > start:
             add(" " * (end - start), PLAIN_APPEARANCE)
 
@@ -603,7 +625,7 @@ def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursor_col
         if run.start >= width:
             break
         blanks(at, run.start)
-        cursor = cursor_column is not None and run.start <= cursor_column < run.end
+        cursor = bool(cursors) and any(run.start <= column < run.end for column in cursors)
         if not run.plain:
             # A double width character cannot stand in the last column:
             # its second half would be a column the row does not have,
@@ -613,7 +635,7 @@ def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursor_col
             add(run.text, run.appearance)
         else:
             for column in range(run.start, min(run.end, width)):
-                add(row[column].char, run.appearance, column == cursor_column)
+                add(row[column].char, run.appearance, column in cursors)
         at = min(run.end, width)
     blanks(at, width)
     return segments

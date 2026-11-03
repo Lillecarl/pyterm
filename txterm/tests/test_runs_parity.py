@@ -45,7 +45,7 @@ def _screen(reverse: bool) -> Screen:
     return screen
 
 
-def _cells(row, width: int, reverse_video: bool, cursor_column: int | None) -> list[Segment]:
+def _cells(row, width: int, reverse_video: bool, cursors: frozenset[int]) -> list[Segment]:
     "One row the way one cell at a time built it."
     row = row or {}
     segments: list[Segment] = []
@@ -64,7 +64,7 @@ def _cells(row, width: int, reverse_video: bool, cursor_column: int | None) -> l
             appearance = cell.appearance
 
         style = style_of(appearance)
-        reverse = appearance.rendition.reverse ^ reverse_video ^ (column == cursor_column)
+        reverse = appearance.rendition.reverse ^ reverse_video ^ (column in cursors)
         if reverse != appearance.rendition.reverse:
             style = _turned(style, reverse)
 
@@ -80,10 +80,11 @@ def _cells(row, width: int, reverse_video: bool, cursor_column: int | None) -> l
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-@pytest.mark.parametrize("cursor_column", [None, 0, 4, 6, 12, 99])
+@pytest.mark.parametrize("cursors", [(), (0,), (4,), (6,), (12,), (99,), (2, 4, 30)])
 @pytest.mark.parametrize("width", [100, 13, 9, 7])
 @pytest.mark.parametrize("number", [0, 1, 2, 4, 5, 7, 10])
-def test_a_row_built_from_runs_draws_what_cells_drew(number, width, cursor_column, reverse) -> None:
+def test_a_row_built_from_runs_draws_what_cells_drew(number, width, cursors, reverse) -> None:
     row = _screen(reverse).page.data_buffer.get(number)
+    columns = frozenset(cursors)
 
-    assert segments_of_row(row, width, reverse, cursor_column) == _cells(row, width, reverse, cursor_column)
+    assert segments_of_row(row, width, reverse, columns) == _cells(row, width, reverse, columns)
