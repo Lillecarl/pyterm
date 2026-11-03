@@ -44,6 +44,26 @@ def _getattr(module, name):
     raise AttributeError("module %r has no attribute %r" % (parent, name))
 
 
+def _setter(base: type):
+    """
+    The import system sets a submodule it loaded on its package. Where a
+    lazy `from` statement of the package binds that name, eagerly the
+    statement ran after the load and won: so its proxy stays, and
+    resolves to what the statement names. cryptography's
+    `openssl.backend` is such a name. Lillecarl/pymux#919.
+    """
+
+    def __setattr__(module, name, value):
+        if isinstance(value, types.ModuleType) and value.__name__ == "%s.%s" % (module.__name__, name):
+            from .proxy import LazyProxy
+
+            if type(module.__dict__.get(name)) is LazyProxy:
+                return
+        base.__setattr__(module, name, value)
+
+    return __setattr__
+
+
 def _attach(module: types.ModuleType) -> None:
     cls = type(module)
     # Only a package has submodules; and a class looked up on the type
@@ -51,7 +71,11 @@ def _attach(module: types.ModuleType) -> None:
     if getattr(cls, "_deferimport_pending", False) or "__path__" not in module.__dict__:
         return
     try:
-        pending = type("PendingSubmodules", (cls,), {"__getattr__": _getattr, "_deferimport_pending": True})
+        pending = type(
+            "PendingSubmodules",
+            (cls,),
+            {"__getattr__": _getattr, "__setattr__": _setter(cls), "_deferimport_pending": True},
+        )
     except TypeError:
         # A module type that may not be subclassed: apsw's `APSWModule`
         # is one. Its pending submodules import now, as an eager import

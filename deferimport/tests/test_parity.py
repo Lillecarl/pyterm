@@ -40,6 +40,10 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "outside-fetch": (True, {}),
     "submodule-side-effect": ("inner", {}),
     "shadowed-submodule": (["the object", "the object"], {}),
+    # 3.15 loses the statement's object to the submodule, and asyncssh
+    # then fails on cryptography's `openssl.backend`. The proxies keep
+    # it, as eager does. Lillecarl/pymux#919, Lillecarl/pymux#920.
+    "shadowed-submodule-imported-first": ("module", {"eager": "the object", "proxies": "the object"}),
     "caller-frame-at-import": ("app.calls_frames_at_import", {}),
     # The one call a proxy leaves between caller and callee: the first,
     # from inside a function.

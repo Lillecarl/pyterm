@@ -164,6 +164,16 @@ m = load("shadow")
 first, second = m.thing, m.thing
 result = [first, second if isinstance(second, str) else type(second).__name__]
 """,
+    # The same, with the submodule imported by somebody else before the
+    # name is used, and the name then read the way an eager `from` reads
+    # it. asyncssh read cryptography's module there. Lillecarl/pymux#919.
+    "shadowed-submodule-imported-first": """
+import importlib, sys
+load("shadow")
+importlib.import_module("shadow.thing")
+got = getattr(sys.modules["shadow"], "thing")
+result = got if isinstance(got, str) else type(got).__name__
+""",
     # A lazily imported callee that reads `sys._getframe(1)`, called first
     # from a module body, and first from inside a function.
     "caller-frame-at-import": """
