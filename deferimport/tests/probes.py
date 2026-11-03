@@ -245,6 +245,13 @@ try:
 except Exception as e:
     result = type(e).__name__
 """,
+    # A `try` keeps its own import eager, not the imports of the module
+    # it loads: `app.missing` loads with its missing import still lazy,
+    # so the `except ImportError` never runs. 3.15 does the same.
+    # Lillecarl/pymux#867.
+    "try-import-of-a-broken-module": """
+result = load("app.tries_missing").which()
+""",
     # `typing.get_type_hints` evaluates a string annotation in the
     # module's globals, where the name is still lazy.
     "type-hints": """

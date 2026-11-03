@@ -56,6 +56,8 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "retry-after-failure": (["RuntimeError", "second time"], {}),
     # PEP 810 keeps an import in `with` lazy, so it runs after the block.
     "inside-with": ("ModuleNotFoundError", {"eager": "found"}),
+    # A `try` makes only its own statement eager.
+    "try-import-of-a-broken-module": ("found", {"eager": "fallback"}),
     # A forward reference evaluates in the module's globals, which no
     # rewrite reaches: `forwardref` resolves the names it reads first.
     "type-hints": (["type", True], {}),

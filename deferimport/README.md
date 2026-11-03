@@ -70,6 +70,13 @@ Deny an import made for what it does, a module that registers itself
 on import, and a module that replaces itself in `sys.modules`. A lazy
 import inside a `with` runs after the block, on 3.15 as well.
 
+Deny the target of a `try: ... except ImportError` that picks a
+fallback, when that module imports what may be missing. The `try`
+keeps its own statement eager, not the imports of the module it loads,
+so the target loads and the fallback never runs. structlog's
+`_greenlets` without greenlet is one: the failure comes at first use.
+3.15 does the same.
+
 ## Measured
 
 pyterm's `lazy-lab/`, last at pyterm
