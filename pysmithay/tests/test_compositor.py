@@ -219,6 +219,26 @@ def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
         client.wait(10)
 
 
+def test_a_window_the_pointer_left_gets_a_leave(compositor):
+    "Lillecarl/pymux#899."
+    client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
+    try:
+        pump(compositor, lambda seen: commits(seen))
+        compositor.pointer_motion(1, 5.0, 5.0, 1)
+        # Another window's leave is not this one's: the scroll after it
+        # still reaches this window, and no leave comes before it.
+        compositor.pointer_leave(2, 2)
+        compositor.pointer_scroll(1, 3)
+        lines = []
+        pump(compositor, lambda _seen: _read_until(client, lines, "axis"))
+        assert "leave" not in lines
+        compositor.pointer_leave(1, 4)
+        pump(compositor, lambda _seen: _read_until(client, lines, "leave"))
+    finally:
+        client.kill()
+        client.wait(10)
+
+
 def test_text_no_key_types_reaches_a_window_as_text(compositor):
     "é and an emoji, which xkb's default keymap has no key for. Lillecarl/pymux#624."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("text_input_client.py")))

@@ -2,7 +2,8 @@
 A window that asks for a pointer shape, the way Firefox does over a
 link: `wp_cursor_shape_v1`, with the serial of the pointer's entry. It
 prints "ready" once it drew, then asks for "pointer" each time the
-pointer enters, and prints each scroll as "axis <source> <value>".
+pointer enters, prints each scroll as "axis <source> <value>", and
+prints "leave" when the pointer leaves.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ def main() -> None:
     pointer.dispatcher["enter"] = lambda _p, serial, *_rest: device.set_shape(
         serial, WpCursorShapeDeviceV1.shape.pointer.value
     )
+    pointer.dispatcher["leave"] = lambda _p, _serial, _surface: print("leave", flush=True)
     source = []
     pointer.dispatcher["axis_source"] = lambda _p, kind: source.append(kind)
     pointer.dispatcher["axis"] = lambda _p, _time, _axis, value: print(

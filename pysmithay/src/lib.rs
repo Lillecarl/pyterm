@@ -1006,6 +1006,27 @@ impl Compositor {
         self.flush()
     }
 
+    /// The pointer left window `id`: the surface under it gets a leave.
+    /// A pointer that has moved on to another window stays there.
+    fn pointer_leave(&mut self, id: u64, time: u32) -> PyResult<()> {
+        if self.state.pointer_over != Some(id) {
+            return Ok(());
+        }
+        self.state.pointer_over = None;
+        let location = self.pointer.current_location();
+        self.pointer.motion(
+            &mut self.state,
+            None,
+            &MotionEvent {
+                location,
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+            },
+        );
+        self.pointer.frame(&mut self.state);
+        self.flush()
+    }
+
     /// Scroll the wheel by `steps` notches: positive is down, or right
     /// when `horizontal`. One notch is 15 units of scroll, as libinput
     /// counts a wheel click.
