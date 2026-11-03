@@ -60,6 +60,7 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     # rewrite reaches: `forwardref` resolves the names it reads first.
     "type-hints": (["type", True], {}),
     "type-hints-nested": (True, {}),
+    "annotations-eval-str": (["type", True], {}),
     "eval-type-new": ("Thing", {}),
     "own-class": (["module", "Thing"], {}),
 }

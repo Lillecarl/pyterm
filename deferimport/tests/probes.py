@@ -259,6 +259,13 @@ import typing
 hint = typing.get_type_hints(load("app.hints").take_many)["many"]
 result = typing.get_args(hint)[0] is load("heavy").Thing
 """,
+    # `inspect.get_annotations` evaluates a string annotation with `eval`
+    # in the module's globals, and builds no forward reference.
+    "annotations-eval-str": """
+import inspect
+hint = inspect.get_annotations(load("app.hints").take, eval_str=True)["value"]
+result = [type(hint).__name__, hint is load("heavy").Thing]
+""",
     # pydantic's path to a field type: `typing._eval_type` in the module's
     # globals, then `__new__` on what it gave. A proxy there raised
     # "X is not a type object (LazyProxy)": nanopynix's `pynix repl`, through
