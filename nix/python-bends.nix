@@ -300,6 +300,28 @@ pyFinal: pyPrev: {
     };
   });
 
+  # Bumped: the snapshot's 3.2.0 pins PyO3 0.27.2, which caps at
+  # 3.14; 3.3.0 takes PyO3 0.29.3 and runs 3.15 in upstream's CI.
+  # It reaches pymux through fastapi and pydantic-extra-types. The
+  # nixpkgs patch (upstream PR 979) is merged there, so it no
+  # longer applies and is dropped.
+  pendulum = pyPrev.pendulum.overridePythonAttrs (old: rec {
+    version = "3.3.0";
+    src = fetchFromGitHub {
+      owner = "python-pendulum";
+      repo = "pendulum";
+      tag = version;
+      hash = "sha256-BZZhSvO9G9EIY3yEVmufZzPqIFfVlTZkPqJowhHCjdY=";
+    };
+    patches = [ ];
+    cargoDeps = rustPlatform.fetchCargoVendor {
+      inherit (old) pname;
+      inherit version src;
+      sourceRoot = "${src.name}/rust";
+      hash = "sha256-Mkd5/UtxGppysFX3WoYtYqatHW4J3q7iH9MBN/jSfZM=";
+    };
+  });
+
   # Bumped: the snapshot's 1.3.7 segfaults its `test_clear_segfault`
   # on 3.15 (cleared environ); 1.3.8 is the latest release.
   setproctitle = pyPrev.setproctitle.overridePythonAttrs (_old: rec {
