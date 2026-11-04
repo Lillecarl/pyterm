@@ -69,6 +69,12 @@ EXPECTED: dict[str, tuple[object, dict[str, object]]] = {
     "annotations-eval-str": (["type", True], {}),
     "eval-type-new": ("Thing", {}),
     "own-class": (["module", "Thing"], {}),
+    # PEP 810 leaves the placeholder in `globals()`, and nothing resolves
+    # a value copied out of it. A proxy forwards `&`, so it survives.
+    "globals-at-import": (
+        [["lazy_import", "lazy_import"], "TypeError"],
+        {"eager": [["int", "str"], 0], "proxies": [["LazyProxy", "LazyProxy"], 0]},
+    ),
 }
 
 

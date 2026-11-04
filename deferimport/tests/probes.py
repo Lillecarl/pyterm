@@ -304,6 +304,16 @@ except TypeError as e:
 m = load("app.selfclass")
 result = [type(m.heavy).__name__, type(m.use()).__name__]
 """,
+    # A module that reads its own globals while it loads, as `symtable`
+    # builds `_flags`: CPython's `lazy_imports_all_exclude.txt` lists it.
+    "globals-at-import": """
+m = load("app.reads_globals")
+try:
+    masked = m.masked()
+except TypeError:
+    masked = "TypeError"
+result = [m.constant_types(), masked]
+""",
 }
 
 
