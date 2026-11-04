@@ -419,21 +419,12 @@ pyFinal: pyPrev: {
   # over the changed C struct, a genuine binding incompatibility
   # rather than an expectation. Nothing the collection ships
   # compresses through it, so only that test is skipped.
-  # Already the latest release (1.0.0): one compliance test
-  # aborts (SIGABRT) on 3.15 -- copying a compress object trips
-  # over the changed C struct, a genuine binding incompatibility
-  # rather than an expectation. Nothing the collection ships
-  # compresses through it, so only that test is skipped.
   zlib-ng = pyPrev.zlib-ng.overridePythonAttrs (old: {
     disabledTests = (old.disabledTests or [ ]) ++ [
       "test_badcompresscopy"
     ];
   });
 
-  # Bumped: the snapshot's 4.5.2 imports `no_type_check_decorator`
-  # from `typing` and passes two arguments to
-  # `cache_from_source`, both gone on 3.15; 4.6.0 is the latest
-  # release.
   # Bumped: the snapshot's 4.5.2 imports `no_type_check_decorator`
   # from `typing` and passes two arguments to
   # `cache_from_source`, both gone on 3.15; 4.6.0 is the latest
