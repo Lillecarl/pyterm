@@ -222,6 +222,42 @@ pyFinal: pyPrev: {
     ];
   });
 
+  # Bumped alongside anyio: the snapshot's 1.3.1 names
+  # `anyio.abc.BlockingPortal`, an alias 4.15 deprecates, and its
+  # suite turns the warning into an error at conftest import. 1.7.0
+  # is where upstream moved to `anyio.from_thread.BlockingPortal`;
+  # fastapi takes any starlette from 0.46. Its conftest imports
+  # blockbuster, and on 3.15 swaps the `os.scandir` guard that
+  # 3.15's immutable iterator breaks, so the guard runs here. The
+  # OpenTelemetry middleware is new since 1.3 and its test module
+  # needs opentelemetry, which nothing here takes, so that path
+  # alone is skipped.
+  starlette = pyPrev.starlette.overridePythonAttrs (old: rec {
+    version = "1.7.0";
+    src = fetchFromGitHub {
+      owner = "Kludex";
+      repo = "starlette";
+      tag = version;
+      hash = "sha256-5/gQtC0JbQM7eSQeu2aVJtD63v4LjnbSSC0jF96e958=";
+    };
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pyFinal.blockbuster ];
+    disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+      "tests/middleware/test_opentelemetry.py"
+    ];
+  });
+
+  # Bumped: scipy 1.18.1 asks for pythran 0.19 on 3.15, and the
+  # snapshot holds 0.18.1; 0.19.0 is the latest release.
+  pythran = pyPrev.pythran.overridePythonAttrs (_old: rec {
+    version = "0.19.0";
+    src = fetchFromGitHub {
+      owner = "serge-sans-paille";
+      repo = "pythran";
+      tag = version;
+      hash = "sha256-+ZHp6cExAi1dFPS+LhNRyFCUhNeDdtAPSWRT5T03dcg=";
+    };
+  });
+
   # Bumped: the snapshot's 2.2.1 fails its bytecode verifier
   # tests on 3.15 (`ast.Name is not created from CALL`: new
   # opcodes); 2.3.0 is the latest release and declares 3.15.
