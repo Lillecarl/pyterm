@@ -245,6 +245,11 @@ class Terminal(Widget, can_focus=True):
         self.stream = Stream(self.emulator)
         self._ground_timer = GroundTimer(self.stream, _GROUND_TIMEOUT, time.monotonic)
 
+        #: Whether `_watch_the_ground` runs, and what it waits on for
+        #: the next feed.
+        self._watching_the_ground = False
+        self._fed: anyio.Event | None = None
+
         #: The pty. It is made when the widget mounts and not when it
         #: is built, because mounting is what says there is a scope
         #: whose task group the program runs in.
@@ -291,7 +296,34 @@ class Terminal(Widget, can_focus=True):
     # -- the life of the program ------------------------------------------
 
     def _read(self, data: str) -> None:
-        self._ground_timer.feed(data, cut=self._backend.more_is_waiting)
+        timer = self._ground_timer
+        timer.feed(data)
+        if self._fed is not None:
+            self._fed.set()
+        if timer.deadline is not None and not self._watching_the_ground and self._task_group is not None:
+            self._watching_the_ground = True
+            self._task_group.start_soon(self._watch_the_ground)
+
+    async def _watch_the_ground(self) -> None:
+        """
+        Expire the open sequence at its deadline, unless the program wrote more.
+
+        Bytes still unread at the deadline mean the reader is late, not
+        the program quiet, so the watch waits for the feed that reads
+        them. ptterm's watch says why. Lillecarl/pymux#938.
+        """
+        timer = self._ground_timer
+        try:
+            while (deadline := timer.deadline) is not None:
+                await anyio.sleep(max(0.0, deadline - time.monotonic()))
+                if self.process.output_is_waiting:
+                    self._fed = anyio.Event()
+                    await self._fed.wait()
+                    continue
+                timer.expire()
+        finally:
+            self._watching_the_ground = False
+            self._fed = None
 
     async def on_mount(self) -> None:
         self._process = Process(

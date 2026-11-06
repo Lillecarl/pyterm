@@ -14,6 +14,9 @@ __all__ = ("NoBackend",)
 class NoBackend:
     "The whole of the backend interface, doing nothing."
 
+    more_is_waiting = False
+    output_is_waiting = False
+
     def __init__(self) -> None:
         #: Every size the widget asked for, oldest first.
         self.sizes = []
