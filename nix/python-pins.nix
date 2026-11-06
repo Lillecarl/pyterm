@@ -50,6 +50,7 @@ _pyFinal: pyPrev: {
     patches = (old.patches or [ ]) ++ [
       ./patches/apsw-context-manager-releases-the-gil.patch
       ./patches/apsw-reset-releases-the-gil.patch
+      ./patches/apsw-close-releases-the-gil.patch
     ];
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ unzip ];
     buildInputs = [ ];

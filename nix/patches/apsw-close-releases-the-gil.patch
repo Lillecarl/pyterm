@@ -1,0 +1,33 @@
+Release the GIL while a connection closes.
+
+The close of the last connection to a WAL database checkpoints, and
+the checkpoint fsyncs. apsw called sqlite3_close with the GIL held, so
+a slow disk froze every Python thread for the checkpoint, from close()
+and from the destructor alike. Lillecarl/pymux#939, Lillecarl/apsw#2.
+
+The connection's db and mutex are taken off the object before the
+call, so no other thread can reach it, and every callback a close can
+reach takes the GIL itself.
+
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -556,7 +556,8 @@
+
+   for (int count = 0; count < 100; count++)
+   {
+-    res = sqlite3_close(db);
++    Py_BEGIN_ALLOW_THREADS res = sqlite3_close(db);
++    Py_END_ALLOW_THREADS;
+     if (res == SQLITE_BUSY)
+     {
+       /* we can be racing with a destructor such as cursor which is
+@@ -572,7 +573,8 @@
+     /* we consider the connection closed but are unable to close it.  the likely
+        explanation is problems with a dependent, or an extension.  the former
+        won't happen unless we run out of memory */
+-    sqlite3_close_v2(db);
++    Py_BEGIN_ALLOW_THREADS sqlite3_close_v2(db);
++    Py_END_ALLOW_THREADS;
+
+     SET_EXC(res, NULL);
+     if (force == 2)
