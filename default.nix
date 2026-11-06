@@ -38,6 +38,14 @@ let
   # closure for it alone: nothing the collection ships reaches it.
   aimock = pkgs.callPackage ./pkgs/aimock { nodejs = pkgs.nodejs_22; };
 
+  # By name: callPackage resolves against the final set of whoever passed
+  # `pkgs`, and an overlay that installs this build as `qutebrowser` would
+  # feed it back into itself.
+  qutebrowser = pkgs.callPackage ./nix/qutebrowser.nix {
+    inherit (pkgs) qutebrowser;
+    src = sources.qutebrowser;
+  };
+
   # The collection builds on two interpreters. Both take the pins of
   # `nix/python-pins.nix`, the few packages it needs newer than
   # nixpkgs has; otherwise the default python stays as nixpkgs tested
@@ -305,6 +313,8 @@ let
       inherit (ps) mkProject;
       # The one that draws, which its checks need for kitty.
       inherit (pkgs) mesa;
+      # Our fork, which the browser checks drive.
+      inherit qutebrowser;
       # The readers of the clipboard fence.
       inherit (pkgs) wl-clipboard xclip;
       # The static checker that `pymux-types` runs.
@@ -501,6 +511,9 @@ rec {
   # `pymux-mcp`, for an agent harness: two MCP tools over every
   # operation libpymux has.
   pymux-mcp = default.pymux-mcp;
+
+  # qutebrowser with our patches; `nix/qutebrowser.nix` says why.
+  inherit qutebrowser;
 
   txterm = default.txterm;
 

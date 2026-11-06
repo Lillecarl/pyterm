@@ -23,6 +23,11 @@
       url = "github:pyproject-nix/pyproject.nix";
       flake = false;
     };
+    # Our patches to qutebrowser, on the release nixpkgs packages.
+    qutebrowser = {
+      url = "github:Lillecarl/qutebrowser/patched";
+      flake = false;
+    };
   };
 
   outputs =

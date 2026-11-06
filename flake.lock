@@ -64,12 +64,30 @@
         "type": "github"
       }
     },
+    "qutebrowser": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793994717,
+        "narHash": "sha256-7CjpZW7e5o9gHFqSdDRelBZnT0DD9G3LtDrj6pNzb/g=",
+        "owner": "Lillecarl",
+        "repo": "qutebrowser",
+        "rev": "554c09f851478f2fa8a287660a91c9849e5364a6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "ref": "patched",
+        "repo": "qutebrowser",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-compatish": "flake-compatish",
         "nixpkgs": "nixpkgs",
         "prompt-toolkit": "prompt-toolkit",
-        "pyproject-nix": "pyproject-nix"
+        "pyproject-nix": "pyproject-nix",
+        "qutebrowser": "qutebrowser"
       }
     }
   },

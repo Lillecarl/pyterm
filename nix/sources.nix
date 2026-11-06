@@ -3,8 +3,9 @@
 # Nine are in this tree. Each `package.nix` picks its own files with
 # `lib.fileset`, so a `result` or a cache beside them changes no store path.
 #
-# Two come from outside, pinned in `flake.lock`: prompt-toolkit, because every
-# patch there has to be one upstream could take, and pyproject.nix.
+# Three come from outside, pinned in `flake.lock`: prompt-toolkit, because
+# every patch there has to be one upstream could take; pyproject.nix; and
+# qutebrowser, our fork, which `nix/qutebrowser.nix` builds.
 # `nix/compat.nix` says how a checkout at ./prompt-toolkit replaces its pin.
 inputs:
 {
@@ -21,4 +22,5 @@ inputs:
   # copies the checkout into the store, and a pinned one as a store path.
   prompt-toolkit = inputs.prompt-toolkit.outPath;
   pyproject-nix = inputs.pyproject-nix.outPath;
+  qutebrowser = inputs.qutebrowser.outPath;
 }
