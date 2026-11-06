@@ -34,4 +34,4 @@ async def test_a_widget_gives_its_parser_a_ground_timer():
     async with app.run_test(size=SIZE):
         made = app.query_one(Terminal)
         assert made._ground_timer.timeout == 5
-        assert made.process.receive == made._ground_timer.feed
+        assert made.process.receive == made._read

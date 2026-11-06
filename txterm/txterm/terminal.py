@@ -290,10 +290,13 @@ class Terminal(Widget, can_focus=True):
 
     # -- the life of the program ------------------------------------------
 
+    def _read(self, data: str) -> None:
+        self._ground_timer.feed(data, cut=self._backend.more_is_waiting)
+
     async def on_mount(self) -> None:
         self._process = Process(
             backend=self._backend,
-            receive=self._ground_timer.feed,
+            receive=self._read,
             invalidate=self.refresh_changed,
             done_callback=lambda: self.post_message(self.Exited(self)),
             # A pane that nobody is looking at parses when the loop has
