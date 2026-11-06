@@ -1,0 +1,37 @@
+Release the GIL while a statement is reset or finalized.
+
+A statement that stopped at a row has not halted yet. Its reset halts
+it, and in autocommit mode the halt commits, which can fsync. apsw
+called sqlite3_reset and sqlite3_finalize with the GIL held, so a
+cursor dropped at a row froze every Python thread for the commit: 22s
+on btrfs, measured. Lillecarl/pymux#940, Lillecarl/apsw#3.
+
+Every callback that a halt can reach takes the GIL itself, as it does
+for sqlite3_step in cursor.c.
+
+--- a/src/statementcache.c
++++ b/src/statementcache.c
+@@ -91,7 +91,12 @@
+
+   Py_CLEAR(s->query);
+
+-  res = s->vdbestatement ? sqlite3_finalize(s->vdbestatement) : SQLITE_OK;
++  res = SQLITE_OK;
++  if (s->vdbestatement)
++  {
++    Py_BEGIN_ALLOW_THREADS res = sqlite3_finalize(s->vdbestatement);
++    Py_END_ALLOW_THREADS;
++  }
+
+ #if SC_STATEMENT_RECYCLE_BIN_ENTRIES > 0
+   if (sc && sc->recycle_bin_next < SC_STATEMENT_RECYCLE_BIN_ENTRIES)
+@@ -125,7 +130,8 @@
+   {
+     APSWStatement *evictee = NULL;
+
+-    res = sqlite3_reset(statement->vdbestatement);
++    Py_BEGIN_ALLOW_THREADS res = sqlite3_reset(statement->vdbestatement);
++    Py_END_ALLOW_THREADS;
+
+     /*
+       https://sqlite.org/forum/forumpost/d72cba6ff7
