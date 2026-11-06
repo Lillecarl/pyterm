@@ -95,6 +95,7 @@ Each source is an attribute of its own, and so are these:
     nix build --file . shell              # the dev shell itself
     nix build --file . docs.pymux         # one source's docs site
     nix build --file . aimock             # the mock model API the agent CLIs talk to
+    nix build --file . qutebrowser        # our qutebrowser fork, which pymux-browsers drives
     nix run --file . prompt-toolkit-ci    # prompt-toolkit's own CI, on the checkout
 
 `prompt-toolkit-pyrefly` is a stricter typing pass over the changed code of the
