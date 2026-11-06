@@ -67,11 +67,11 @@
     "qutebrowser": {
       "flake": false,
       "locked": {
-        "lastModified": 1793994717,
-        "narHash": "sha256-7CjpZW7e5o9gHFqSdDRelBZnT0DD9G3LtDrj6pNzb/g=",
+        "lastModified": 1793996745,
+        "narHash": "sha256-bGOggr91xdF0WZ7O8t4ZiHjdpkiKcptTlT7tj8Wkhq0=",
         "owner": "Lillecarl",
         "repo": "qutebrowser",
-        "rev": "554c09f851478f2fa8a287660a91c9849e5364a6",
+        "rev": "53ec4ded36ea2434decd8fb36480bd0c24043c4f",
         "type": "github"
       },
       "original": {
