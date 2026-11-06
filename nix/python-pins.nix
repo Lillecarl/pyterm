@@ -1,4 +1,5 @@
 {
+  fetchFromGitHub,
   fetchurl,
   unzip,
 }:
@@ -37,21 +38,24 @@ _pyFinal: pyPrev: {
   # so no other `libsqlite3.so.0` in the process -- the one Python's own
   # `sqlite3` loads -- can answer for it. The check below holds the
   # two version numbers equal to the patch.
+  #
+  # The source is the `async-gil-release-v2` branch of Lillecarl/apsw:
+  # 3.54.1.0 plus every SQLite call that can fsync or wait on a lock
+  # released from the GIL. Lillecarl/apsw#1, #2, #3; Lillecarl/pymux#936.
   apsw = pyPrev.apsw.overridePythonAttrs (old: rec {
     version = "3.54.1.0";
-    src = fetchurl {
-      url = "https://github.com/rogerbinns/apsw/releases/download/${version}/apsw-${version}.tar.gz";
-      hash = "sha256-BDdfCM8d+AlJ7reZIK0c3eCOYXp/0+VEKkUk7xw/Lsg=";
+    src = fetchFromGitHub {
+      owner = "Lillecarl";
+      repo = "apsw";
+      rev = "bb199e687473ef9e19f4733a82640fa5ebf8b09d";
+      # `.gitattributes` says `* export-ignore`: GitHub's archive is empty.
+      forceFetchGit = true;
+      hash = "sha256-EFrLBGaZ8eszQ+JW+IRPxdYnxeCzIqrPMdu8ke9gwIY=";
     };
     amalgamation = fetchurl {
       url = "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip";
       hash = "sha256-CpyONDUtrUYAaqgoNtU4O/+dxryc5aYFU8Baow5q0fk=";
     };
-    patches = (old.patches or [ ]) ++ [
-      ./patches/apsw-context-manager-releases-the-gil.patch
-      ./patches/apsw-reset-releases-the-gil.patch
-      ./patches/apsw-close-releases-the-gil.patch
-    ];
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ unzip ];
     buildInputs = [ ];
     # `setup.py` builds against `sqlite3/sqlite3.c` when it is there.
