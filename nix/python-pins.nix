@@ -47,6 +47,7 @@ _pyFinal: pyPrev: {
       url = "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip";
       hash = "sha256-CpyONDUtrUYAaqgoNtU4O/+dxryc5aYFU8Baow5q0fk=";
     };
+    patches = (old.patches or [ ]) ++ [ ./patches/apsw-context-manager-releases-the-gil.patch ];
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ unzip ];
     buildInputs = [ ];
     # `setup.py` builds against `sqlite3/sqlite3.c` when it is there.
