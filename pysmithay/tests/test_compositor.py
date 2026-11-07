@@ -179,7 +179,7 @@ def test_a_window_draws_no_title_bar_of_its_own(compositor):
 
 
 def test_shutdown_lets_the_socket_go(compositor):
-    "On the owner's thread, whichever thread frees it later. Lillecarl/pymux#642."
+    "On the owner's thread, whichever thread frees it later. Lillecarl/pyterm#644."
     path = Path(os.environ["XDG_RUNTIME_DIR"]) / compositor.socket_name
     assert path.exists()
     compositor.shutdown()
@@ -189,7 +189,7 @@ def test_shutdown_lets_the_socket_go(compositor):
 
 
 def test_a_window_names_the_pointer_it_wants(compositor):
-    "Lillecarl/pymux#650."
+    "Lillecarl/pyterm#652."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
     try:
         pump(compositor, lambda seen: commits(seen))
@@ -201,7 +201,7 @@ def test_a_window_names_the_pointer_it_wants(compositor):
 
 
 def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
-    "Lillecarl/pymux#652."
+    "Lillecarl/pyterm#654."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
     try:
         pump(compositor, lambda seen: commits(seen))
@@ -212,7 +212,7 @@ def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
         pump(compositor, lambda _seen: _read_until(client, lines, "axis"))
         # 2 is `wl_pointer.axis_source.continuous`. The axis line, and
         # not the last: the scroll can reach the client during the
-        # roundtrip before it prints "ready". Lillecarl/pymux#668.
+        # roundtrip before it prints "ready". Lillecarl/pyterm#670.
         assert [line for line in lines if line.startswith("axis")] == ["axis 2 20"]
     finally:
         client.kill()
@@ -220,7 +220,7 @@ def test_a_smooth_scroll_is_continuous_in_the_windows_own_pixels(compositor):
 
 
 def test_a_window_the_pointer_left_gets_a_leave(compositor):
-    "Lillecarl/pymux#899."
+    "Lillecarl/pyterm#901."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("pointer_client.py")))
     try:
         pump(compositor, lambda seen: commits(seen))
@@ -240,7 +240,7 @@ def test_a_window_the_pointer_left_gets_a_leave(compositor):
 
 
 def test_text_no_key_types_reaches_a_window_as_text(compositor):
-    "é and an emoji, which xkb's default keymap has no key for. Lillecarl/pymux#624."
+    "é and an emoji, which xkb's default keymap has no key for. Lillecarl/pyterm#626."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("text_input_client.py")))
     try:
         events = pump(compositor, lambda seen: any(event[0] == "toplevel" for event in seen))

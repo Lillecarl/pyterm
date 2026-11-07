@@ -23,7 +23,7 @@
   libxkbcommon,
   # The software renderer that composes a window with its popups.
   pixman,
-  # The VP9 encoder of window panes. Lillecarl/pymux#639.
+  # The VP9 encoder of window panes. Lillecarl/pyterm#641.
   libvpx,
   pkg-config,
   # Decodes the VP9 the encoder makes, in the tests.

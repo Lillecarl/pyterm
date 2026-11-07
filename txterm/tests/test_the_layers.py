@@ -2,7 +2,7 @@
 Which module may import what.
 
 txterm is one layer: the front end for Textual. Everything under it
-belongs to another package, and the point of Lillecarl/pymux#82 is that
+belongs to another package, and the point of Lillecarl/pyterm#84 is that
 this package can exist at all — a cell used to hold a prompt_toolkit
 style string, so a cell held one renderer's spelling and a second front
 end was impossible.
@@ -37,7 +37,7 @@ PACKAGE = Path(txterm.__file__).parent
 #: Five of them are the pure layer. `pyte.environment` is the sixth and
 #: is not pure: it says what a program run on this screen sees. A
 #: widget owns both a screen and a `Process`, so a widget is the only
-#: layer that can say it. Lillecarl/pymux#125.
+#: layer that can say it. Lillecarl/pyterm#127.
 #:
 #: Nothing else of `pyte` may appear. A name added here says the front
 #: end grew, and that is worth reading in a diff.
@@ -144,7 +144,7 @@ def test_the_widget_draws_with_textual():
 def test_the_pty_comes_from_ptyhost():
     """
     Only the widget runs a program. `ptyhost` is the package that does
-    it, and nothing here parses what it hands back. Lillecarl/pymux#85.
+    it, and nothing here parses what it hands back. Lillecarl/pyterm#87.
     """
     reaching = sorted(name for name in MODULES if any(_root(module) == "ptyhost" for module in _imports(MODULES[name])))
     assert reaching == ["app", "terminal"]

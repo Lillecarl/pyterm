@@ -4,7 +4,7 @@ A sequence that never finishes must not wedge a widget.
 A program can write a partial escape and then stop. The parser then
 reads every later byte as part of that sequence, and the widget shows
 the wrong screen for ever. `GroundTimer` bounds that. The rule is
-pyte's; this checks the widget gives itself one. Lillecarl/pymux#484.
+pyte's; this checks the widget gives itself one. Lillecarl/pyterm#486.
 """
 
 from __future__ import annotations

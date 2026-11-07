@@ -103,7 +103,7 @@ def test_a_reader_from_the_future_gets_the_whole_frame(compositor):
 
 # ----------------------------------------------------------------------
 # The same frames as raw rectangles, for a reader that encodes them for
-# its own terminal. Lillecarl/pymux#634.
+# its own terminal. Lillecarl/pyterm#636.
 
 
 def rects(compositor, *args, **kwargs):

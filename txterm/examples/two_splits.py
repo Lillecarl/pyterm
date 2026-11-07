@@ -15,7 +15,7 @@ two questions a multiplexer has to answer first show up:
   and tmux calls it a prefix. There are two here: one to move the focus,
   and one to quit.
 
-Lillecarl/pymux#82.
+Lillecarl/pyterm#84.
 """
 
 from __future__ import annotations

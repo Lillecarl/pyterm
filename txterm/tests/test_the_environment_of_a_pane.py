@@ -6,7 +6,7 @@ layer that can say the two things a program has to be told: that it
 draws on this screen and not on the terminal the application runs in,
 and where the entry that describes this screen lives. `pyte` has no
 child to set an environment for, and `ptyhost` runs a program and has
-no opinion on what parses the bytes. Lillecarl/pymux#125.
+no opinion on what parses the bytes. Lillecarl/pyterm#127.
 
 **The child asks ncurses, and not the environment.** `curses.setupterm`
 reads `TERM` and looks the entry up in the database. A program that

@@ -162,7 +162,7 @@ the theme, and whether it is drawn the other way round. Only a client can
 know what its terminal is, so the client reads this file itself and tells
 the server what it says. Over SSH that means the theme is the one on the
 machine in front of you while the panes still run on the other one.
-Lillecarl/pymux#223.
+Lillecarl/pyterm#225.
 
 `extraConfig` is added after the settings. Key bindings go there: `bind-key`
 takes a command and its own arguments, and a Nix option cannot spell that
@@ -208,7 +208,7 @@ The panes run there and are drawn here. **The server gains nothing and knows
 nothing about this**: it keeps its unix socket, and openssh carries that socket
 over a channel of its own, `direct-streamlocal@openssh.com`, which `asyncssh`
 opens with `conn.open_unix_connection(path)`. So the far side is a stock sshd
-and the packets are the same packets. Lillecarl/pymux#90.
+and the packets are the same packets. Lillecarl/pyterm#92.
 
 **Why not `ssh host -t pymux attach`.** That starts a shell to start a client to
 reach a socket on the far side, and the terminal in the middle is openssh's.
@@ -228,7 +228,7 @@ second, then a second, up to thirty, with jitter. Any key tries at once and `q`
 leaves. A refused key, an unknown host key and a socket that is not there never
 retry, because each of those is an answer the far machine gave and will give
 again. A server that closes the connection never retries either: that is what a
-detach is. Lillecarl/pymux#256.
+detach is. Lillecarl/pyterm#258.
 
 **Nothing runs on the other machine.** Not a shell, not a pymux, not even to
 find out which socket to open. `ssh://host` with no path lists the sockets over
@@ -244,7 +244,7 @@ where the first server of a user listens. Name the path when that is wrong.
 
 **It attaches; it does not start anything.** `ssh://` names a machine that is
 already running a server. Spawning one is the other half of
-Lillecarl/pymux#90.
+Lillecarl/pyterm#92.
 
 ## Watching a pane in a browser
 
@@ -277,7 +277,7 @@ out, no HTTP anywhere.
 That is `<pymux-pane>` as an npm package — the custom element the page uses,
 written in TypeScript and compiled at build time, with the declarations
 generated beside it. It needs no `unsafe-inline`, because every rule it draws
-goes through the CSSOM. Lillecarl/pymux#461, Lillecarl/pymux#466.
+goes through the CSSOM. Lillecarl/pyterm#463, Lillecarl/pyterm#468.
 
 ## Driving pymux from an agent
 
@@ -290,7 +290,7 @@ runs one operation, and `pymux_describe` lists them or answers one's JSON
 Schema. It lives in `pymux/pymux-mcp/`, over libpymux alone.
 
 `.mcp.json` here starts it for Claude Code in this checkout, and
-`.claude/settings.json` allows it. Lillecarl/pymux#760.
+`.claude/settings.json` allows it. Lillecarl/pyterm#762.
 
 ## Tests
 
@@ -867,7 +867,7 @@ difference between two depths is the history alone.
 
 The log also names the twelve allocation sites that hold the most, so a number
 a person does not like points at a line of code. That is how
-Lillecarl/pymux#227 was found: `Row` held a closure over the blank cell, which
+Lillecarl/pyterm#229 was found: `Row` held a closure over the blank cell, which
 cost more per row than the cells did.
 
     PTTERM_FOOTPRINT_INCLUDE=2000 nix build --file . checks.ptterm-footprint
@@ -932,7 +932,7 @@ reason a red run is worth believing.
 `checks.pymux-busy` runs a real animating program in a window the client does not
 look at, and measures how much of one core the server takes. cmatrix in a
 background window used to peg a core and draw five frames in five seconds, while
-`ptyhost` polled for an idle loop that never comes (Lillecarl/pymux#253):
+`ptyhost` polled for an idle loop that never comes (Lillecarl/pyterm#255):
 
 | program | before | after | frames drawn in 5s |
 | --- | --- | --- | --- |
@@ -1037,7 +1037,7 @@ Read it against the section below. The work takes 2.1 ms here, in one process
 with no socket and no loop; the same keystroke measured across three processes
 takes 3.85 ms. **The difference is what an instruction count cannot see** — the
 transport, and every moment nothing was running. Counting turns of the event
-loop is the measurement for that half, and it is Lillecarl/pymux#232.
+loop is the measurement for that half, and it is Lillecarl/pyterm#234.
 
     nix build --file . checks.pymux-keystroke.run
     PYMUX_KEYSTROKE_INCLUDE=render nix build --file . checks.pymux-keystroke
@@ -1235,7 +1235,7 @@ Each source keeps a repository of its own, and josh fills it from this one.
 `josh-export` (`pkgs/josh-export`) filters this history through
 `:/<source>` for each source and pushes the result. The filter gives back
 the commits each source always had, with their own hashes, so the history
-of every repository goes on where it stopped. Lillecarl/pymux#667.
+of every repository goes on where it stopped. Lillecarl/pyterm#669.
 
 The workflow `josh-export.yml` runs it after every push to main. It never forces a
 push. It refuses a source whose repository holds a commit this repository
@@ -1250,7 +1250,7 @@ that every source still says ok.
 Each exported repository stands on its own: `nix run github:Lillecarl/pymux`
 works, and so does `nix build --file .` in a clone. Its `flake.nix` has one
 input, pyterm, and its `default.nix` builds its own directory against its
-siblings there, through flake-compatish. Lillecarl/pymux#670. So its
+siblings there, through flake-compatish. Lillecarl/pyterm#672. So its
 `flake.lock` names a pyterm commit, and `lock-subtrees` writes it: pyterm's
 own lock with a pyterm node on top. A commit cannot name itself, so the locks
 name the commit under them and land as a commit of their own. The export
@@ -1279,7 +1279,7 @@ file, never a copy.
 Each repository publishes a docs site on GitHub Pages:
 `lillecarl.github.io/<source>/`. `nix build --file . pages.<source>` builds
 it here. It is the source's README, its `docs/`, and an API reference, made
-with Sphinx by `nix/docs`. Lillecarl/pymux#671.
+with Sphinx by `nix/docs`. Lillecarl/pyterm#673.
 
 The galleries of every picture check, `pictures`, take half an hour, so only
 pymux's site holds them, under `pictures/`. A source's

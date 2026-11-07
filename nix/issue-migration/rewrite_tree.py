@@ -1,7 +1,10 @@
 """pyedit script: point every reference to a moved issue at its new number.
 
-  pyedit -s nix/issue-migration/rewrite_tree.py            # dry run, from the repo root
-  pyedit -s nix/issue-migration/rewrite_tree.py --apply
+  cd $(mktemp -d) && PYTERM=~/Code/pyterm pyedit -s ~/Code/pyterm/nix/issue-migration/rewrite_tree.py [--apply]
+
+Run it from outside the tree: the root's pyedit.toml would put every staged
+`.py` file through ruff's language server, which reformats more than this
+changes and outlasts pyedit's timeout over a thousand files.
 
 `Lillecarl/pymux#N` and `github.com/Lillecarl/pymux/issues/N` become
 `Lillecarl/pyterm#M` and its URL through the `moves` table, and a link to
@@ -10,6 +13,7 @@ where BARE names it: most bare numbers in the tree are a sixel colour, a
 vttest screen or another project's issue.
 """
 
+import os
 import re
 import sqlite3
 import subprocess
@@ -17,7 +21,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path.cwd()
+ROOT = Path(os.environ["PYTERM"]).expanduser()
 HERE = ROOT / "nix/issue-migration"
 db = sqlite3.connect(HERE / "issues.sqlite")
 NEW = {(repo, old): new for repo, old, new in db.execute("select repo, old, new from moves")}
@@ -137,11 +141,14 @@ def bare(path: str, text: str) -> str:
     return "\n".join(lines)
 
 
-files = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, check=True).stdout.split("\0")
+files = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True, check=True).stdout.split("\0")
 for path in filter(None, files):
     if path.startswith("nix/issue-migration/") or path.endswith((".lock", ".patch", ".png", ".svg", ".gif", ".bin")):
         continue
-    text = pyedit.read(path)
+    # git lists a submodule's directory as a path.
+    if not (ROOT / path).is_file():
+        continue
+    text = pyedit.read(str(ROOT / path))
     if not isinstance(text, str):
         continue
     # Bare numbers first: their line numbers are the file's as it is on disk.
@@ -151,7 +158,7 @@ for path in filter(None, files):
     new = TRACKER_URL.sub(tracker_url, new)
     new = QUALIFIED.sub(qualified, new)
     if new != text:
-        pyedit.write(path, new)
+        pyedit.write(str(ROOT / path), new)
 
 missing = set(BARE) - set(files)
 assert not missing, f"BARE names files that are not tracked: {missing}"

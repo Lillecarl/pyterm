@@ -2,7 +2,7 @@
 Export each source of pyterm to its own repository, through josh.
 
 The workflow `josh-export.yml` runs it, and so can a person, from a
-checkout with the whole history. Lillecarl/pymux#667.
+checkout with the whole history. Lillecarl/pyterm#669.
 
     josh-export REV            report what an export of REV would do
     josh-export REV --verify   and evaluate each exported tree on its own
@@ -16,7 +16,7 @@ already holds.
 
 `--verify` evaluates each exported tree as a flake, with pyterm taken from
 this repository at the commit the tree's lock names, and requires the
-derivation pyterm builds for that source here. Lillecarl/pymux#670.
+derivation pyterm builds for that source here. Lillecarl/pyterm#672.
 
 JOSH_REMOTE is the URL of a source with {} for its name, and JOSH_BRANCH
 the branch to push to, `main` unless named.

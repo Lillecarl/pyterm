@@ -7,7 +7,7 @@ spelling. What a renderer writes for them is the renderer's own answer,
 and this file is Rich's.
 
 `ptterm/style.py` is the same file for prompt_toolkit, and the two share
-no word. That is the whole argument of Lillecarl/pymux#82: a cell used
+no word. That is the whole argument of Lillecarl/pyterm#84: a cell used
 to hold a style string, so a cell held one renderer's spelling, and a
 second front end could not exist.
 

@@ -171,7 +171,7 @@ async def test_a_pane_that_is_not_focused_draws_no_cursor():
 
 
 async def test_kittys_extra_cursors_reverse_their_cells_in_any_pane():
-    "Lillecarl/pymux#891. A pane without the focus draws them as well."
+    "Lillecarl/pyterm#893. A pane without the focus draws them as well."
     app = app_with_a_screen()
     async with app.run_test(size=SIZE) as pilot:
         terminal = app.query_one(Terminal)

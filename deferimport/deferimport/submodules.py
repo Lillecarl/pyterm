@@ -50,7 +50,7 @@ def _setter(base: type):
     lazy `from` statement of the package binds that name, eagerly the
     statement ran after the load and won: so its proxy stays, and
     resolves to what the statement names. cryptography's
-    `openssl.backend` is such a name. Lillecarl/pymux#919.
+    `openssl.backend` is such a name. Lillecarl/pyterm#921.
     """
 
     def __setattr__(module, name, value):

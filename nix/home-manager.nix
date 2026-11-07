@@ -3,12 +3,12 @@
 # pymux reads `$XDG_CONFIG_HOME/pymux/pymux.conf` at startup: one command per
 # line, the same shape as `pymux/examples/example-config.conf`. Until now a
 # person who manages the rest of their home with Nix had to write and place
-# that one file by hand. Lillecarl/pymux#190.
+# that one file by hand. Lillecarl/pyterm#192.
 #
 # It writes the XDG path and not `~/.pymux.conf`, which pymux also reads and
 # reads second. home-manager's own `programs.tmux` does the same for tmux,
 # and a dotfile straight in the home directory is what XDG exists to stop.
-# Lillecarl/pymux#196.
+# Lillecarl/pyterm#198.
 #
 # **This is a path, not a flake output.** It is a plain module file, so
 #
@@ -28,7 +28,7 @@
 #
 # The two settings options are two scopes and not one convenience: a client
 # option belongs to the terminal a person is sitting at, and the client reads
-# this file itself to find it. Lillecarl/pymux#223.
+# this file itself to find it. Lillecarl/pyterm#225.
 #
 # This module writes only what it is asked for. pymux has its own defaults,
 # and repeating them here would make a change to one of them invisible to

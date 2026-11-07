@@ -120,7 +120,7 @@ impl Toplevel {
     /// when nothing committed.
     ///
     /// An empty commit is still news: it may carry a frame callback, and
-    /// Firefox paints nothing until that is answered. Lillecarl/pymux#638.
+    /// Firefox paints nothing until that is answered. Lillecarl/pyterm#640.
     fn render(&mut self, renderer: &mut PixmanRenderer) -> Option<Vec<Rect>> {
         if !std::mem::take(&mut self.dirty) {
             return None;
@@ -378,12 +378,12 @@ impl SeatHandler for State {
     /// The window with the keyboard is offered the clipboard and the
     /// primary selection. smithay offers a selection to a client only
     /// through these two, so without them a paste in a window read
-    /// nothing. Lillecarl/pymux#708.
+    /// nothing. Lillecarl/pyterm#710.
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
-        // Text input follows the keyboard as well. Lillecarl/pymux#624.
+        // Text input follows the keyboard as well. Lillecarl/pyterm#626.
         self.text_inputs.set_focus(focused);
     }
 
@@ -727,7 +727,7 @@ struct Compositor {
 ///
 /// `shutdown` drops it on the thread that owns the compositor. PyO3 runs
 /// no destructor of an `unsendable` class freed on another thread, and
-/// Python's garbage collector may free one on any. Lillecarl/pymux#642.
+/// Python's garbage collector may free one on any. Lillecarl/pyterm#644.
 struct Wire {
     display: Display<State>,
     listener: ListeningSocket,
@@ -971,7 +971,7 @@ impl Compositor {
     /// keys, through its active `zwp_text_input_v3`. False when it has
     /// none: the window did not enable text input where its focus is.
     /// A character outside the default keymap has no key to press.
-    /// Lillecarl/pymux#624.
+    /// Lillecarl/pyterm#626.
     fn commit_text(&mut self, text: &str) -> PyResult<bool> {
         let sent = self.state.text_inputs.commit_text(text);
         self.flush()?;
@@ -1219,7 +1219,7 @@ impl Compositor {
     ///
     /// The pixels are copied at the call, and the encode runs on a
     /// worker thread: at 1600x900 it takes 12 ms, which the event loop
-    /// that awaits it does not wait for. Lillecarl/pymux#631.
+    /// that awaits it does not wait for. Lillecarl/pyterm#633.
     #[pyo3(signature = (id, image_id, since=None))]
     fn kitty_update<'py>(
         &self,
@@ -1261,7 +1261,7 @@ impl Compositor {
     /// pixels)` with the pixels as RGB rows, kitty's `f=24`: the whole
     /// frame when `whole`, and otherwise the damage since `since`, merged
     /// as `kitty_update` merges it; empty when the reader is up to date.
-    /// The reader encodes it for its terminal itself. Lillecarl/pymux#634.
+    /// The reader encodes it for its terminal itself. Lillecarl/pyterm#636.
     #[pyo3(signature = (id, since=None))]
     fn frame_rects<'py>(
         &self,
@@ -1307,7 +1307,7 @@ impl Compositor {
     /// that changed, grown out to the encoder's blocks: what the reader
     /// takes from the decoded frame. `data` is empty when the reader is
     /// up to date. The encode runs on a worker thread.
-    /// Lillecarl/pymux#639.
+    /// Lillecarl/pyterm#641.
     fn vp9_frame<'py>(
         &self,
         py: Python<'py>,

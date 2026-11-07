@@ -7,7 +7,7 @@ a pty, through ptterm's parser, and onto the screen this widget draws.
 
 **Every program below waits at the end instead of exiting.** What a
 program writes just before it exits is sometimes lost, because the
-reaper closes the pty without draining it (Lillecarl/pymux#121). A test
+reaper closes the pty without draining it (Lillecarl/pyterm#123). A test
 that ends its program at once is a test that fails once in a dozen runs
 for a reason that has nothing to do with what it asks.
 """

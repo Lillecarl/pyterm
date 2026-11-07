@@ -8,7 +8,7 @@ refused here too.
 
 Two things are read back. First `startup_errors`, which is where every
 failed line of a configuration file lands (`pymux/main.py`, and
-Lillecarl/pymux#38 for why it is kept rather than shown). Then the values
+Lillecarl/pyterm#40 for why it is kept rather than shown). Then the values
 themselves, because a line can be accepted and still arrive wrong: a
 quoted value that loses its trailing space is the case that matters, and
 only reading the value back sees it.
@@ -41,11 +41,11 @@ EXPECTED = {
 #: What `clientSettings` asked for, and what the client has to take out
 #: of the same file. The server reads these lines too and does nothing
 #: with them: it has no client to set them on, which is the whole
-#: reason they are a scope of their own. Lillecarl/pymux#223.
+#: reason they are a scope of their own. Lillecarl/pyterm#225.
 EXPECTED_FOR_CLIENT = [
     # A bare word, which is what most values are. The two below carry
     # the quoting; this one says a plain value arrives plain.
-    # Lillecarl/pymux#340.
+    # Lillecarl/pyterm#342.
     ("name", "desk"),
     ("swap-light-and-dark-colors", "on"),
     ("theme", "grey"),

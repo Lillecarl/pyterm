@@ -4,7 +4,7 @@
 //! keymap, every emoji -- cannot be pressed, so it goes to the window as
 //! text, the way an input method commits it. smithay's own text input
 //! drops every request while no input method client is connected, and
-//! here the compositor is the one with the text. Lillecarl/pymux#624.
+//! here the compositor is the one with the text. Lillecarl/pyterm#626.
 //!
 //! The protocol, in short: the compositor says `enter` and `leave` as
 //! the keyboard moves; a window that has a text field under its focus

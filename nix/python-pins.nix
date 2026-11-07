@@ -22,14 +22,14 @@ _pyFinal: pyPrev: {
   # and the loop reports `InvalidStateError`. A peer link that is
   # cancelled as the owner's packet arrives hits it on every
   # shutdown under load (`test_a_target_here_names_the_pane_there`).
-  # Unfixed in anyio's main as of 4.15.1. Lillecarl/pymux#759.
+  # Unfixed in anyio's main as of 4.15.1. Lillecarl/pyterm#761.
   anyio = pyPrev.anyio.overridePythonAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./patches/anyio-ready-after-cancel.patch ];
   });
 
   # Async connections, and async callbacks that run on the event loop,
   # arrived in 3.52; 3.54 fixes leaks and crashes in error handling.
-  # Lillecarl/pymux#722.
+  # Lillecarl/pyterm#724.
   #
   # **SQLite comes from apsw's own release, compiled into the
   # extension.** An apsw release is made for the SQLite of the same
@@ -41,7 +41,7 @@ _pyFinal: pyPrev: {
   #
   # The source is the `async-gil-release-v2` branch of Lillecarl/apsw:
   # 3.54.1.0 plus every SQLite call that can fsync or wait on a lock
-  # released from the GIL. Lillecarl/apsw#1, #2, #3; Lillecarl/pymux#936.
+  # released from the GIL. Lillecarl/apsw#1, #2, #3; Lillecarl/pyterm#938.
   apsw = pyPrev.apsw.overridePythonAttrs (old: rec {
     version = "3.54.1.0";
     src = fetchFromGitHub {

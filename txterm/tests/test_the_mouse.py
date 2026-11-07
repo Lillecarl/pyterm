@@ -2,7 +2,7 @@
 A program in the widget hears the mouse it asked for: a click and the
 wheel, in the mode it turned on, at the cell under the pointer. The
 reports are `pyte.mouse`'s, so these tests read what reaches the
-backend, not how a report is spelled. Lillecarl/pymux#842.
+backend, not how a report is spelled. Lillecarl/pyterm#844.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ async def test_a_click_reaches_a_program_that_asked_for_sgr_reports():
 
 
 async def test_a_right_click_with_ctrl_reaches_the_program_as_one():
-    "Lillecarl/pymux#900."
+    "Lillecarl/pyterm#902."
     backend = NoBackend()
     app = TerminalApp(backend=backend)
     async with app.run_test(size=SIZE) as pilot:

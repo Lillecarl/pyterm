@@ -3,7 +3,7 @@
 > This repository is a copy. Work on txterm happens in
 > [pyterm](https://github.com/Lillecarl/pyterm), which exports its `txterm/`
 > directory here on every push. Send changes there, and issues to
-> [Lillecarl/pymux](https://github.com/Lillecarl/pymux/issues).
+> [Lillecarl/pyterm](https://github.com/Lillecarl/pyterm/issues).
 > The docs are at <https://lillecarl.github.io/txterm/>.
 
 <!-- The lines above are pyterm's nix/shared/readme-head.md, written by sync-sources. -->
@@ -50,7 +50,7 @@ application that will really move the widget passes `may_resize` and
 txterm draws and reads keys. The screen and the parser are in `pyte`,
 and the pty is in `ptyhost`. `tests/test_the_layers.py` names every
 module of `pyte` this package imports, and holds that nothing of
-prompt-toolkit comes in behind them. Lillecarl/pymux#82 holds the
+prompt-toolkit comes in behind them. Lillecarl/pyterm#84 holds the
 argument.
 
 ## What Rich cannot draw

@@ -28,7 +28,7 @@ jobs:
       - uses: cachix/install-nix-action@master
         timeout-minutes: 15
       # Every source's docs, and not the galleries: pymux's repository
-      # builds those. Lillecarl/pymux#671.
+      # builds those. Lillecarl/pyterm#673.
       - name: Build the site
         run: nix build --file . pages.pyterm -o site --print-build-logs
         timeout-minutes: 50

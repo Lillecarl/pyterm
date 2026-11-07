@@ -30,12 +30,12 @@ workflow, `.github/workflows/josh-export.yml`, filters this repository
 through josh into each one on every push, with the same commit hashes the
 source always had. Commit here and only here: a push straight to a source's
 repository is not brought back, and the next export refuses to overwrite
-it. Lillecarl/pymux#667.
+it. Lillecarl/pyterm#669.
 
 A source's repository runs one workflow, `<source>/.github/workflows/pages.yml`,
 which deploys its docs site (`pages`). pymux's site holds the galleries,
 which take half an hour, and pyterm's site never builds them. Tests run only
-here. Lillecarl/pymux#671.
+here. Lillecarl/pyterm#673.
 
 **prompt-toolkit is the exception.** It is not in this repository, because
 every patch there has to be one upstream could take. `flake.lock` pins it,
@@ -206,7 +206,7 @@ the *old* module and runs code you did not build.
 It fails as a wrong answer and not an error, so it reads as "my patch does not
 work" while the suite says otherwise. If a hand-check disagrees with a passing
 suite, grep the built store path for the string you are seeing; if it is not
-there, you are running something else. Lillecarl/pymux#318.
+there, you are running something else. Lillecarl/pyterm#320.
 
 **Iterate inside the check, not beside it.** A build from a file evaluates
 impurely, so `builtins.getEnv` gives a check as much control as you need:
@@ -301,18 +301,20 @@ Write what a reader needs to act:
 
 One issue per finding. An issue that needs the word "and" is two issues.
 
-**Every issue lives in `Lillecarl/pymux`, and no commit is made there.** A
-bare `Closes #89` names an issue of this repository, which is not the one
-you mean. Write `Closes Lillecarl/pymux#89`.
+**Every issue lives in `Lillecarl/pyterm`.** The sources' repositories have
+their trackers turned off. Write a reference with the repository in it,
+`Closes Lillecarl/pyterm#89`, in code and in a commit message alike. The
+export carries each commit into a source's repository, and a bare `#89`
+there names that repository's issue 89. That issue moved here under another
+number, and its old URL redirects to the wrong one for the reader.
+
+The issues moved here from `Lillecarl/pymux` on 2026-11-07, and each old
+number became a new one. `nix/issue-migration/` holds the map, and a commit
+older than that names the old numbers.
 
 **Prefer closing an issue with the commit that fixes it.** That line is the
 record that costs nothing extra and cannot drift from the fix. It closes the
 issue when the commit reaches the default branch, so the push closes it.
-
-**A cross-repository `Closes` closes it too.** Measured: pyte `03aba48a` carried
-`Closes Lillecarl/pymux#426`, and the closing event on #426 names that commit,
-seconds after the push. GitHub resolves the keyword across repositories when the
-pusher can write to both, and one person owns them all.
 
 So nothing needs closing by hand. What is left is the comment naming the
 revision, because the issue is where somebody looks for it. Write that with `gh

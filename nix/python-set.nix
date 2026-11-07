@@ -1,7 +1,7 @@
 # A pyproject.nix *builders* package set, sourcing every third-party
 # dependency from nixpkgs rather than from a lock file.
 #
-# Ported from nanopynix, which wrote all of the findings below. Lillecarl/pymux#319.
+# Ported from nanopynix, which wrote all of the findings below. Lillecarl/pyterm#321.
 #
 # Why the builders at all: nixpkgs' Python infrastructure works by dependency
 # propagation, and `withPackages` keeps only derivations that are importable
@@ -12,7 +12,7 @@
 # put runtime dependencies in `passthru` instead and assemble real virtualenvs,
 # so there is no propagation to fall off and no module/application distinction
 # to be caught by. One site-packages also means nothing to shadow, which is
-# Lillecarl/pymux#318.
+# Lillecarl/pyterm#320.
 #
 # Why not uv2nix: the builders are written for lock-file consumers, and
 # `pyproject-nix.build.packages` is by its own documentation "incomplete, and
@@ -270,7 +270,7 @@ in
     carries `tests`, `docs`, the `__pycache__` beside every module and the
     `.ruff_cache` a local run rewrites, and then a test run changes the
     source hash of the package and rebuilds everything above it.
-    Lillecarl/pymux#320.
+    Lillecarl/pyterm#322.
 
     `packages` is for a project whose backend is not hatchling and so has no
     `[tool.hatch.build.targets.wheel]` to read: prompt-toolkit is
@@ -325,7 +325,7 @@ in
       # that serves those files answered nothing and said nothing about
       # why. So a project that ships data says so in
       # `[tool.hatch.build.targets.wheel] artifacts`, and this reads the
-      # same list hatchling reads. Lillecarl/pymux#461.
+      # same list hatchling reads. Lillecarl/pyterm#463.
       #
       # A trailing `/*` means the directory whole, and nothing else is
       # allowed: `lib.fileset` has no globbing, so a pattern that meant one

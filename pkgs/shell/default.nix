@@ -3,7 +3,7 @@
 # `devEnv` is one virtualenv and it is the whole python: pymux, everything
 # pymux declares, and the `test` extra that the suites and the hand-run
 # drivers need. It carries `bin/pymux` as well, so there is no second python
-# on PATH to shadow this one. Lillecarl/pymux#319.
+# on PATH to shadow this one. Lillecarl/pyterm#321.
 {
   mkShell,
   runCommand,
@@ -28,7 +28,7 @@ let
   # **One nixpkgs python package in `packages` puts every input on
   # PYTHONPATH**, the virtualenv included, and PYTHONPATH beats a venv's own
   # site-packages. So `/nix/store/<fresh>/bin/pymux` imported the shell's
-  # pymux and ran code nobody built. Lillecarl/pymux#318.
+  # pymux and ran code nobody built. Lillecarl/pyterm#320.
   #
   # Measured 2026-09-13, by building one shell per input: the venv with
   # jujutsu, git, ruff and ncurses gives an empty PYTHONPATH; adding black

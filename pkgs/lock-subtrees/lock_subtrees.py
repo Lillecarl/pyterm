@@ -3,7 +3,7 @@ Write the `flake.lock` of each source from pyterm's own, or check them.
 
 A source's flake has one input, `pyterm`, and builds its own directory
 against its siblings there. So its lock is pyterm's lock graph with a
-`pyterm` node on top, locked at a pyterm commit. Lillecarl/pymux#670.
+`pyterm` node on top, locked at a pyterm commit. Lillecarl/pyterm#672.
 
 A commit cannot name itself: its hash is not known until it exists. So the
 locks name the commit under them, and land as a commit of their own that

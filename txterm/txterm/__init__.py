@@ -10,7 +10,7 @@ A terminal widget for Textual.
 
 The parsing is `pyte.screen`, which imports no toolkit, and the pty is
 `ptyhost`. What is here is the drawing and the keys: the two things that
-belong to Textual and to nothing else. Lillecarl/pymux#82.
+belong to Textual and to nothing else. Lillecarl/pyterm#84.
 """
 
 from __future__ import annotations

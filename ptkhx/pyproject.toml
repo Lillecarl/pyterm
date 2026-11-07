@@ -27,7 +27,7 @@ Homepage = "https://github.com/Lillecarl/ptkhx"
 Documentation = "https://lillecarl.github.io/ptkhx/"
 # Work happens in the monorepo this repository is exported from.
 Source = "https://github.com/Lillecarl/pyterm"
-Issues = "https://github.com/Lillecarl/pymux/issues"
+Issues = "https://github.com/Lillecarl/pyterm/issues"
 
 [build-system]
 requires = ["hatchling"]

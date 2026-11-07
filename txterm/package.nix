@@ -9,12 +9,12 @@
 #
 # The third one was `ptterm` until the pure layer moved. That made the
 # prompt_toolkit widget a build dependency of the Textual one, and only a test
-# kept the toolkit out of the code. Lillecarl/pymux#11.
+# kept the toolkit out of the code. Lillecarl/pyterm#13.
 #
 # **This is a pyproject.nix builders package, not a nixpkgs one.** The three
 # dependencies are declared once, in `pyproject.toml`, and the renderer reads
 # them; an environment is a virtualenv rather than a PYTHONPATH.
-# Lillecarl/pymux#319.
+# Lillecarl/pyterm#321.
 #
 # Nothing else belongs in this repository: the dev shell and the collection
 # that assembles this with its siblings live in pyterm.

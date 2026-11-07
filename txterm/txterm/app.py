@@ -7,7 +7,7 @@ filling the window.
 
 It exists to be driven. A suite that puts a real terminal in front of
 txterm needs a program to run, and "a widget" is not one.
-Lillecarl/pymux#82.
+Lillecarl/pyterm#84.
 """
 
 from __future__ import annotations

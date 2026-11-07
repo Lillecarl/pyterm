@@ -92,13 +92,13 @@ let
       };
       # The other scope. A client option is written into the same file
       # and read by the client rather than by the server, so the judge
-      # asks both halves about it. Lillecarl/pymux#223.
+      # asks both halves about it. Lillecarl/pyterm#225.
       clientSettings = {
         theme = "grey";
         swap-light-and-dark-colors = true;
         # What a person calls the terminals of this machine. A file is
         # one machine's, so it names every one of them the same.
-        # Lillecarl/pymux#340.
+        # Lillecarl/pyterm#342.
         name = "desk";
       };
       extraConfig = ''
@@ -133,6 +133,6 @@ suite { name = "pyterm-home-manager"; } ''
   # pymux is a virtualenv, so it is the environment the judge runs in:
   # the modules it imports are beside the `pymux` it was given, and
   # nothing has to be made into a python module to reach them.
-  # Lillecarl/pymux#319.
+  # Lillecarl/pyterm#321.
   ${pymux}/bin/python ${./home-manager-judge.py} pymux.conf
 ''

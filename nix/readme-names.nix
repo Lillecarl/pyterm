@@ -2,7 +2,7 @@
 #
 # `CLAUDE.md` says to read the README first, so a check or a front end it
 # leaves out is one nobody finds: `pymux-web` and `checks.pymux-element`
-# were both missing until somebody went looking. Lillecarl/pymux#475.
+# were both missing until somebody went looking. Lillecarl/pyterm#477.
 #
 # A check counts as named when `checks.<name>` appears, and an attribute when
 # it appears in backquotes or after `--file .`. A name that is only a word in

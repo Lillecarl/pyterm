@@ -24,7 +24,7 @@ let
 
   # The builders that assemble a virtualenv instead of a PYTHONPATH.
   # `nix/python-set.nix` says why, and why the third-party packages still
-  # come from nixpkgs. Lillecarl/pymux#319.
+  # come from nixpkgs. Lillecarl/pyterm#321.
   pyproject-nix = import sources.pyproject-nix { inherit (pkgs) lib; };
   ps = pkgs.callPackage ./nix/python-set.nix { inherit pyproject-nix; };
 
@@ -157,7 +157,7 @@ let
     # The test equipment the collection's suites share: the seats, the
     # drivers, the budgets. It takes the floor the widgets take and never
     # a layer above it, so every repository's checks can take it as an
-    # input without a cycle. Lillecarl/pymux#274.
+    # input without a cycle. Lillecarl/pyterm#276.
     pyterm-pytest = final.callPackage (sources.pyterm-pytest + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `pyterm-pytest-ruff` runs.
@@ -191,7 +191,7 @@ let
     };
 
     # Helix's modal editing for a prompt_toolkit buffer. Its oracle check
-    # runs real Helix, through ptyhost and pyte. Lillecarl/pymux#749.
+    # runs real Helix, through ptyhost and pyte. Lillecarl/pyterm#751.
     ptkhx = final.callPackage (sources.ptkhx + "/package.nix") {
       inherit (ps) mkProject;
       inherit (pkgs) ruff helix;
@@ -207,7 +207,7 @@ let
 
     # pyte's per-cell loops in Rust, which an embedder installs over the
     # Python ones. A project inside pyte's repository, the way libpymux is
-    # inside pymux's. Lillecarl/pymux#566.
+    # inside pymux's. Lillecarl/pyterm#568.
     pyte-rs = final.callPackage (sources.pyte + "/pyte_rs") {
       inherit (pkgs)
         rustPlatform
@@ -221,7 +221,7 @@ let
 
     # The layer that runs a program on a pty. It depends on nothing here,
     # which is the point: two widgets need it, and neither may drag a
-    # toolkit in behind it. Lillecarl/pymux#85.
+    # toolkit in behind it. Lillecarl/pyterm#87.
     ptyhost = final.callPackage (sources.ptyhost + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `ptyhost-ruff` runs, and the player
@@ -243,7 +243,7 @@ let
     # prompt_toolkit's per-cell loops in Rust, which pymux installs over
     # the Python ones. A project inside pymux's repository, because
     # prompt-toolkit takes only patches upstream could take.
-    # Lillecarl/pymux#566.
+    # Lillecarl/pyterm#568.
     prompt-toolkit-rs = final.callPackage (sources.pymux + "/prompt_toolkit_rs") {
       inherit (pkgs)
         rustPlatform
@@ -257,7 +257,7 @@ let
 
     # pymux's image loops in Rust, which pymux installs over its own
     # Python. It imports nothing of pymux, which depends on it.
-    # Lillecarl/pymux#574.
+    # Lillecarl/pyterm#576.
     pymux-rs = final.callPackage (sources.pymux + "/pymux_rs") {
       inherit (pkgs)
         rustPlatform
@@ -324,14 +324,14 @@ let
       # The model API that the scenario check aims claude-code at.
       inherit aimock;
       # The PipeWire of `audio-server private`, in the closure on Linux.
-      # Pass null for either to leave it out. Lillecarl/pymux#657.
+      # Pass null for either to leave it out. Lillecarl/pyterm#659.
       pipewire = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire else null;
       wireplumber = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber else null;
     };
 
     # The second front end: the same screen, drawn with Textual. It
     # takes the pure layer from pyte and no prompt_toolkit comes with
-    # it, which is what Lillecarl/pymux#82 asks for -- and the set is
+    # it, which is what Lillecarl/pyterm#84 asks for -- and the set is
     # what keeps that true now, because a virtualenv holds exactly what
     # was asked for and nothing propagates into it.
     txterm = final.callPackage (sources.txterm + "/package.nix") {
@@ -401,7 +401,7 @@ let
       # server they did not ask for. The cost is small -- `websockets` is
       # pure python and the front end is five files -- and the reason is
       # not the closure: a port that shows a terminal is a thing to choose
-      # rather than to find. Lillecarl/pymux#461.
+      # rather than to find. Lillecarl/pyterm#463.
       pymux-web = set.mkVirtualEnv "pymux-web" {
         pymux = [
           "catppuccin"
@@ -446,9 +446,9 @@ rec {
   inherit pkgs sources aimock;
 
   # Writes each source's flake.lock from this one, and checks them before an
-  # export. Lillecarl/pymux#670.
+  # export. Lillecarl/pyterm#672.
   lock-subtrees = pkgs.callPackage ./pkgs/lock-subtrees { };
-  # Filters each source out of this repository into its own. Lillecarl/pymux#667.
+  # Filters each source out of this repository into its own. Lillecarl/pyterm#669.
   josh-export = pkgs.callPackage ./pkgs/josh-export { };
   # Copies what the root holds for every source into each one, and
   # `checks.pyterm-sources-in-step` holds the copies.
@@ -500,7 +500,7 @@ rec {
   # carries the interpreter's version in it: a consumer reaching in there
   # breaks when the collection moves interpreter. This one does not move.
   # `checks.pymux-element` judges the declarations it publishes.
-  # Lillecarl/pymux#461.
+  # Lillecarl/pyterm#463.
   pymux-element = default.pymux.element;
 
   # The client library on its own, for a program that drives a server
@@ -540,7 +540,7 @@ rec {
   ptkhx = default.ptkhx;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
-  # placed by hand. Lillecarl/pymux#190.
+  # placed by hand. Lillecarl/pyterm#192.
   #
   # It is a path and nothing else, so `imports = [ ... ]` takes it straight.
   # `flake.nix` passes this same attribute through, which is why the module
@@ -574,7 +574,7 @@ rec {
     # there is no recorded image to judge them against. The roaming
     # property tests draw a fresh example every run, which is the one
     # thing a gate may not do. The wire measurement prints sizes for
-    # Lillecarl/pymux#258 and judges nothing.
+    # Lillecarl/pyterm#260 and judges nothing.
     #
     # The shots of pymux-pictures are listed beside it, so the report's
     # times show where that check spends them.
@@ -605,7 +605,7 @@ rec {
   };
 
   # Each source's docs site, and pyterm's own, which is the README with
-  # a link to each source's. Lillecarl/pymux#671.
+  # a link to each source's. Lillecarl/pyterm#673.
   docs =
     let
       build = pkgs.callPackage ./nix/docs { };
@@ -734,7 +734,7 @@ rec {
         # and per batch of themes, and the page sees them gathered:
         # the pieces write disjoint trees, and a rerun of the site
         # rebuilds only the combos that failed.
-        # Lillecarl/pymux#284.
+        # Lillecarl/pyterm#286.
         run = pkgs.symlinkJoin {
           name = "pymux-theme-pictures";
           paths = builtins.map (combo: combo.run) (
@@ -755,7 +755,7 @@ rec {
   # needs nothing but python.
   suites = {
     # prompt-toolkit's copy of `nix/suite.nix`, which `sync-sources`
-    # does not write, is the root's. Lillecarl/pymux#367.
+    # does not write, is the root's. Lillecarl/pyterm#369.
     pyterm-one-suite-nix = pkgs.callPackage ./nix/one-suite-nix.nix {
       inherit sources;
     };
@@ -765,14 +765,14 @@ rec {
       inherit sources sync-sources;
     };
     # The README names every check and every attribute here.
-    # Lillecarl/pymux#475.
+    # Lillecarl/pyterm#477.
     pyterm-readme-names = pkgs.callPackage ./nix/readme-names.nix {
       readme = ./README.md;
       checks = lib.attrNames checks;
       # The keys of this file, read without evaluating a value.
       attributes = lib.attrNames (import ./. { inherit inputs system pkgs sourceOverrides; });
       skip = [
-        # A scratch measurement, removed with Lillecarl/pymux#258.
+        # A scratch measurement, removed with Lillecarl/pyterm#260.
         "pymux-wire"
         # What this file is built from, and what it builds the rest with.
         "pkgs"
@@ -791,19 +791,19 @@ rec {
     };
     pyte-unit = pyte.checks.unit;
     # The Rust kernels against the Python they replace.
-    # Lillecarl/pymux#566.
+    # Lillecarl/pyterm#568.
     pyte-rs-parity = pyte-rs.checks.parity;
     prompt-toolkit-rs-parity = prompt-toolkit-rs.checks.parity;
     # Their Rust, held by rustfmt and clippy.
     pyte-rs-lint = pyte-rs.checks.lint;
     # pyte's suite with the Rust row in place of the dict.
-    # Lillecarl/pymux#570.
+    # Lillecarl/pyterm#572.
     pyte-rs-unit = pyte-rs.checks.unit;
     # prompt-toolkit's suite with the Rust row in its composed screen.
     prompt-toolkit-rs-unit = prompt-toolkit-rs.checks.unit;
     prompt-toolkit-rs-lint = prompt-toolkit-rs.checks.lint;
     # pymux's image kernels, against its Python and in its style.
-    # Lillecarl/pymux#574.
+    # Lillecarl/pyterm#576.
     pymux-rs-parity = pymux-rs.checks.parity;
     pymux-rs-lint = pymux-rs.checks.lint;
     # The compositor against real Wayland clients, its Rust's style, and
@@ -825,10 +825,10 @@ rec {
     # The character set tables, judged against xterm's own source. The
     # national replacement sets are published nowhere as data, so
     # `charsets.h` is the list and this is what says the copy is right.
-    # Lillecarl/pymux#111.
+    # Lillecarl/pyterm#113.
     pyte-xterm-tables = pyte.checks.xterm-tables;
     # The key encoder, judged against kitty's own, and each difference put
-    # to kitty, Ghostty and WezTerm. Lillecarl/pymux#684.
+    # to kitty, Ghostty and WezTerm. Lillecarl/pyterm#686.
     pyte-key-panel = pyte.checks.key-panel;
     # The pty layer, on its own. It runs real programs on real ptys,
     # and one of its tests holds it to importing nothing at all.
@@ -872,10 +872,10 @@ rec {
     # Two, split by what they need. `ptterm-unit` needs nothing but
     # python, and it is seventeen of the thirty-six test files. The
     # tests that judge the screen rather than the widget moved to
-    # `pyte-unit` and `pyte-xcms`. Lillecarl/pymux#11.
+    # `pyte-unit` and `pyte-xcms`. Lillecarl/pyterm#13.
     ptterm-unit = ptterm.checks.unit;
     # The same unit suite on pyte's Rust row and kernels, which pymux
-    # runs on. Lillecarl/pymux#470.
+    # runs on. Lillecarl/pyterm#472.
     ptterm-rs-unit = ptterm.checks.rs-unit;
     # The style of ptterm: the selected lint rules, the layout at
     # width 120, and the future import in every file.
@@ -900,7 +900,7 @@ rec {
     ptterm-fuzz = ptterm.checks.fuzz;
     # Not a gate either. vttest draws a screen and asks a person whether
     # what they see is right, so this walks its menus and keeps every
-    # screen. Reading them is the work. Lillecarl/pymux#46.
+    # screen. Reading them is the work. Lillecarl/pyterm#48.
     ptterm-vttest = ptterm.checks.vttest;
     # The Textual widget: what it draws, read as the segments it
     # returns, and a real program on a pty under Textual's own driver.
@@ -915,22 +915,22 @@ rec {
     pymux-unit = pymux.checks.unit;
     # The compositor pymux holds for panes with no display, with the
     # `wayland` extra that every other pymux suite leaves out.
-    # Lillecarl/pymux#383.
+    # Lillecarl/pyterm#385.
     pymux-wayland = pymux.checks.wayland;
     # A real Firefox in a window pane, switched away from and back to.
-    # Not a gate yet. Lillecarl/pymux#753.
+    # Not a gate yet. Lillecarl/pyterm#755.
     pymux-firefox = pymux.checks.firefox;
     # pymux-mcp's browsers, headless and in a window pane.
-    # Lillecarl/pymux#822.
+    # Lillecarl/pyterm#824.
     pymux-browsers = pymux.checks.browsers;
     # How long the loop stalls while a window pane plays video. Not a
-    # gate. Lillecarl/pymux#632.
+    # gate. Lillecarl/pyterm#634.
     pymux-loop-stalls = pymux.checks.loopStalls;
-    # Sound through a real PipeWire. Lillecarl/pymux#657.
+    # Sound through a real PipeWire. Lillecarl/pyterm#659.
     pymux-audio = pymux.checks.audio;
     # The types of pymux, held by a static checker rather than by a run:
     # a `Mode` member added and not handled by the `match` in
-    # `run_pymux` fails here. Lillecarl/pymux#486.
+    # `run_pymux` fails here. Lillecarl/pyterm#488.
     pymux-types = pymux.checks.types;
     # The style of pymux: the selected lint rules, the layout at
     # width 120, and the future import in every file. `ruff.toml`
@@ -985,12 +985,12 @@ rec {
     # That the profiler still runs, which is a gate even though what it
     # measures is not. The instrument broke and nothing said so, because
     # the only thing that would have run it was the thing that broke.
-    # Lillecarl/pymux#360.
+    # Lillecarl/pyterm#362.
     pymux-profile-starts = pymux.checks.profileStarts;
     # What pymux costs a keystroke, against the same program on a bare
     # pty. Not a gate either, and for the same reason the profile is
     # not: a millisecond belongs to the machine that read it. It is
-    # the third of the three numbers Lillecarl/pymux#8 asked for, and
+    # the third of the three numbers Lillecarl/pyterm#10 asked for, and
     # the only one an instruction count cannot give.
     pymux-latency = pymux.checks.latency;
     # A wheel step, down and up, beside a pane that streams. Not a gate,
@@ -1003,7 +1003,7 @@ rec {
     # the shortest keystroke of the run to a number, because a loaded
     # machine can only add turns and never take one away.
     pymux-turns = pymux.checks.turns;
-    # TEMPORARY scratch measurement for Lillecarl/pymux#258. Remove it
+    # TEMPORARY scratch measurement for Lillecarl/pyterm#260. Remove it
     # with the script and the check it runs.
     pymux-wire = pymux.checks.wire;
     # That the declarations `<pymux-pane>` publishes are usable. The
@@ -1031,23 +1031,23 @@ rec {
     # vttest's main menu.
     pymux-vttest-pictures = pymux.checks.vttestPictures;
     # yazi and claude-code, driven step by step, bare and through pymux at
-    # once. Not a gate. Lillecarl/pymux#593.
+    # once. Not a gate. Lillecarl/pyterm#595.
     pymux-scenarios = pymux.checks.scenarios;
     # A picture of what pymux draws around a pane: the status line, a
     # title bar, the command palette, a strip. Not a gate either, and
     # it judges nothing: the chrome is the thing pymux adds, so there
     # is no bare side to subtract from. Reading the pictures is the
-    # work. Lillecarl/pymux#161.
+    # work. Lillecarl/pyterm#163.
     pymux-chrome-pictures = pymux.checks.chromePictures;
-    # A Wayland window in a pane, in every terminal. Lillecarl/pymux#620.
+    # A Wayland window in a pane, in every terminal. Lillecarl/pyterm#622.
     pymux-window-pane-pictures = pymux.checks.windowPanePictures;
     # Every view before and after `upgrade-server`, in a real terminal,
-    # and each pair has to be the same pixels. Lillecarl/pymux#408.
+    # and each pair has to be the same pixels. Lillecarl/pyterm#410.
     pymux-upgrade-pictures = pymux.checks.upgradePictures;
     pymux-terminal-state = pymux.checks.terminalState;
     # Every theme, with the demo application in the pane: the whole
     # gallery in `$out`, for a person to read side by side. Not a gate
-    # either. Lillecarl/pymux#194, Lillecarl/pymux#195.
+    # either. Lillecarl/pyterm#196, Lillecarl/pyterm#197.
     pymux-theme-pictures = pymux.checks.themePictures;
     # Not a gate on its own: it judges the run against a recorded list
     # of the tests that fail today, and complains at a difference in

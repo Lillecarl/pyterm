@@ -12,7 +12,7 @@
   # The python every suite runs on: a virtualenv of txterm, what txterm
   # declares, and its `test` extra. `default.nix` builds it from
   # `pyproject.toml`, so what a suite may import is what the package
-  # declares and there is no second list here. Lillecarl/pymux#319.
+  # declares and there is no second list here. Lillecarl/pyterm#321.
   testEnv,
   callPackage,
   testSources,
@@ -68,7 +68,7 @@ in
   # ptterm runs the same suite on a bare pty with no toolkit anywhere.
   # **The two lists together are the proof that the screen layer is
   # shared**: a name that fails here and passes there is txterm's own.
-  # Lillecarl/pymux#82.
+  # Lillecarl/pyterm#84.
   #
   # It is not a pass or fail of its own. The run is judged against
   # `tests/esctest-failures.txt`, and a difference either way fails.

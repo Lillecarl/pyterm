@@ -166,7 +166,7 @@ result = [first, second if isinstance(second, str) else type(second).__name__]
 """,
     # The same, with the submodule imported by somebody else before the
     # name is used, and the name then read the way an eager `from` reads
-    # it. asyncssh read cryptography's module there. Lillecarl/pymux#919.
+    # it. asyncssh read cryptography's module there. Lillecarl/pyterm#921.
     "shadowed-submodule-imported-first": """
 import importlib, sys
 load("shadow")
@@ -258,7 +258,7 @@ except Exception as e:
     # A `try` keeps its own import eager, not the imports of the module
     # it loads: `app.missing` loads with its missing import still lazy,
     # so the `except ImportError` never runs. 3.15 does the same.
-    # Lillecarl/pymux#867.
+    # Lillecarl/pyterm#869.
     "try-import-of-a-broken-module": """
 result = load("app.tries_missing").which()
 """,

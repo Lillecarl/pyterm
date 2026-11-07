@@ -15,7 +15,7 @@ prompt_toolkit's table.
 **The table is Textual's own, read backwards.** Writing the sequences
 out again here would be a second table to keep in step with the first,
 and the two would disagree the day Textual learns a key.
-Lillecarl/pymux#119 is that same disagreement, between the two tables
+Lillecarl/pyterm#121 is that same disagreement, between the two tables
 that already exist.
 """
 
@@ -58,7 +58,7 @@ def _keys_to_data() -> dict[str, str]:
 #:
 #: **This loses ctrl+h**, and there is nothing here that can keep it:
 #: Textual gives that key and the backspace key the same name, so what
-#: reaches this file is one key and not two. Lillecarl/pymux#123.
+#: reaches this file is one key and not two. Lillecarl/pyterm#125.
 CORRECTIONS = {
     "backspace": "\x7f",
 }

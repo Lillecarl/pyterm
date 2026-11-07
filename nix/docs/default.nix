@@ -1,4 +1,4 @@
-# The docs site of one source, built with Sphinx. Lillecarl/pymux#671.
+# The docs site of one source, built with Sphinx. Lillecarl/pyterm#673.
 #
 # Every source gets one written for it: its README, every page in
 # its `docs/`, and an API reference of its modules.

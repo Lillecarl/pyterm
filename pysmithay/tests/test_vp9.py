@@ -2,7 +2,7 @@
 A window as a VP9 stream: a keyframe first, then only the blocks under
 the damage. ffmpeg decodes what the encoder made, and the pixels have to
 come back close to the ones the probe client drew: the encoding is lossy.
-Lillecarl/pymux#639.
+Lillecarl/pyterm#641.
 """
 
 from __future__ import annotations

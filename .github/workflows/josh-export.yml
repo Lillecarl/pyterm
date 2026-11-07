@@ -1,6 +1,6 @@
 # Export each source to its own repository. `pkgs/josh-export` says what it
 # checks before a push, and `pkgs/lock-subtrees` why every source's lock has
-# to name the commit under it. Lillecarl/pymux#667, Lillecarl/pymux#670.
+# to name the commit under it. Lillecarl/pyterm#669, Lillecarl/pyterm#672.
 
 name: josh export
 on:

@@ -1,7 +1,7 @@
 # What txterm is and what it needs. `setup.py` used to say this, and a build
 # read it by running it. Nix reads this file instead, at evaluation time, so
 # the dependency list here is the one the package is built from and there is
-# no second copy in a `.nix` file to fall out of step. Lillecarl/pymux#319.
+# no second copy in a `.nix` file to fall out of step. Lillecarl/pyterm#321.
 [project]
 name = "txterm"
 version = "0.1"
@@ -16,7 +16,7 @@ requires-python = ">=3.14"
 # **No prompt_toolkit, and not even in the closure.** The pure layer used
 # to sit in `ptterm`, which is the prompt_toolkit widget, so this package
 # pulled the toolkit in behind it and only a test kept it out of the
-# code. It is in `pyte` now, where it belongs. Lillecarl/pymux#11.
+# code. It is in `pyte` now, where it belongs. Lillecarl/pyterm#13.
 dependencies = [
     "textual",
     "ptyhost",
@@ -44,7 +44,7 @@ Homepage = "https://github.com/Lillecarl/txterm"
 Documentation = "https://lillecarl.github.io/txterm/"
 # Work happens in the monorepo this repository is exported from.
 Source = "https://github.com/Lillecarl/pyterm"
-Issues = "https://github.com/Lillecarl/pymux/issues"
+Issues = "https://github.com/Lillecarl/pyterm/issues"
 
 [project.scripts]
 txterm = "txterm.app:main"

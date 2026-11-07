@@ -1,6 +1,6 @@
 """
 Random key sequences, in real Helix and in ptkhx, and the two answers
-compared. Lillecarl/pymux#749.
+compared. Lillecarl/pyterm#751.
 
 `cases.py` holds what somebody thought to ask. This asks what nobody
 did: Hypothesis draws a short document and a few commands from

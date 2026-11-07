@@ -36,7 +36,7 @@ Two more that are easy to blur:
   one `Arrangement`, its windows and its environment. One server, n
   sessions, m clients, and each client looks at one session
   (`ClientState.session`). The options are the server's, not the
-  session's. Lillecarl/pymux#323.
+  session's. Lillecarl/pyterm#325.
 - **the frame** is one render for one client. **the plan** is where the
   panes are, which every client of one window shares.
 

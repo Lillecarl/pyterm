@@ -12,7 +12,7 @@ runs the same suite on a bare `Process`, with no toolkit anywhere
 a Textual widget, inside a Textual application, on Textual's own event
 loop: the suite is a program in a pane, and the pane is drawn by a
 second front end. A name that fails here and passes there is txterm's,
-and there should be very few of them. Lillecarl/pymux#82.
+and there should be very few of them. Lillecarl/pyterm#84.
 
 **A widget answers no resize.** ptterm's host owns its pty and can take
 any size the suite asks for. A widget sits in a layout that somebody

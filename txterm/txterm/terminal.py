@@ -12,7 +12,7 @@ the joint between them:
   key of Textual sends.
 
 `ptterm/terminal.py` is the same joint for prompt_toolkit. Neither reads
-a word of the other, which is what Lillecarl/pymux#82 asks for.
+a word of the other, which is what Lillecarl/pyterm#84 asks for.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 __all__ = ["Terminal"]
 
 #: How long a sequence may stay open in a widget before the next bytes
-#: drop it and return the parser to plain text. Lillecarl/pymux#390.
+#: drop it and return the parser to plain text. Lillecarl/pyterm#392.
 _GROUND_TIMEOUT = 5
 
 #: Reversed, and not reversed. Three things reverse a cell and each one
@@ -205,7 +205,7 @@ class Terminal(Widget, can_focus=True):
         # Called for a key this pane reads as something else, or not at
         # all. The same hook ptterm takes, so a key that does not fit
         # reads alike whichever widget drew the pane.
-        # Lillecarl/pymux#238.
+        # Lillecarl/pyterm#240.
         self.unreadable_key_func = unreadable_key_func
 
         # The cell of the last move sent, so that a move inside it
@@ -221,7 +221,7 @@ class Terminal(Widget, can_focus=True):
 
         # The screen belongs to the front end and not to the pty: a
         # `Process` runs a program and pumps its bytes, and what those
-        # bytes mean is decided here. Lillecarl/pymux#85.
+        # bytes mean is decided here. Lillecarl/pyterm#87.
         #
         # It is not called `screen`, because `Widget.screen` is the
         # Textual screen this widget is on.
@@ -262,7 +262,7 @@ class Terminal(Widget, can_focus=True):
         #: The state is here and not on the screen, because a screen has
         #: more than one reader and no way to know how many: `ptterm`
         #: draws the same screen with prompt_toolkit, and pymux gives
-        #: several clients one pane. Lillecarl/pymux#126.
+        #: several clients one pane. Lillecarl/pyterm#128.
         self._drawn: dict[int, Strip] = {}
         self._drawn_at: dict[int, int] = {}
 
@@ -274,7 +274,7 @@ class Terminal(Widget, can_focus=True):
         #: page, its write count and the cursor column on it. A frame
         #: asks Textual for the rows whose answer moved and no others.
         #: Textual keeps the strip of every row it is not asked for, so a
-        #: row missed here is a wrong screen. Lillecarl/pymux#127.
+        #: row missed here is a wrong screen. Lillecarl/pyterm#129.
         self._shown: dict[int, tuple[int, int, int | None]] = {}
 
         #: Whether the program has been forked yet.
@@ -310,7 +310,7 @@ class Terminal(Widget, can_focus=True):
 
         Bytes still unread at the deadline mean the reader is late, not
         the program quiet, so the watch waits for the feed that reads
-        them. ptterm's watch says why. Lillecarl/pymux#938.
+        them. ptterm's watch says why. Lillecarl/pyterm#940.
         """
         timer = self._ground_timer
         try:
@@ -410,7 +410,7 @@ class Terminal(Widget, can_focus=True):
         Tell the program what the mouse did, in the mode it asked for
         (`pyte.mouse`), at the cell of the page under it. A program on
         the alternate screen that asked for no reports gets the wheel as
-        arrows, the way ptterm sends it. Lillecarl/pymux#842.
+        arrows, the way ptterm sends it. Lillecarl/pyterm#844.
 
         Anything else is left to Textual: a widget that reports nothing
         stops nothing, so the wheel still scrolls whatever holds it.
@@ -471,7 +471,7 @@ class Terminal(Widget, can_focus=True):
         The columns of row `y` of the page that draw a cursor: the main
         one, and kitty's extra cursors, which a pane draws whether it
         has the focus or not. Every one draws as a reversed cell.
-        Lillecarl/pymux#891.
+        Lillecarl/pyterm#893.
         """
         main = self._cursor_column(y)
         extra = self.emulator.extra_cursors
@@ -530,7 +530,7 @@ class Terminal(Widget, can_focus=True):
         again.** The screen counts every write it makes to a row, and
         this widget keeps the count it drew each row at, so a frame
         after a program wrote one line draws one line.
-        Lillecarl/pymux#126.
+        Lillecarl/pyterm#128.
         """
         emulator = self.emulator
         width = self.size.width
@@ -631,7 +631,7 @@ def segments_of_row(row: Row | None, width: int, reverse_video: bool, cursors: f
     as well. `cursors` are the columns a cursor reverses. A run a cursor
     stands in, or one the right edge cuts, is
     built from its cells: a plain run may hold a combining character, so
-    its text is not one character per column. Lillecarl/pymux#521.
+    its text is not one character per column. Lillecarl/pyterm#523.
     """
     segments: list[Segment] = []
 

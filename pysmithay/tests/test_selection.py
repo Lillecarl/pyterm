@@ -134,7 +134,7 @@ def test_python_answers_a_selection_held_with_none(compositor):
 
 
 def test_the_window_with_the_keyboard_is_offered_the_clipboard(compositor):
-    "A window pastes what wl-copy copied, as Firefox in a pane does. Lillecarl/pymux#708."
+    "A window pastes what wl-copy copied, as Firefox in a pane does. Lillecarl/pyterm#710."
     holder = copy(compositor, "copied beside the window")
     window = subprocess.Popen(
         [sys.executable, "-X", "faulthandler", str(PASTE_CLIENT)],

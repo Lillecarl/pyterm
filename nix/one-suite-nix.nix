@@ -5,7 +5,7 @@
 # sibling by path. `sync-sources` writes the copies of this repository's
 # sources, and `checks.pyterm-sources-in-step` holds them. prompt-toolkit
 # is a fork with a repository of its own, so sync writes nothing there, and
-# this is the check that its copy has not drifted. Lillecarl/pymux#367.
+# this is the check that its copy has not drifted. Lillecarl/pyterm#369.
 {
   callPackage,
   sources,

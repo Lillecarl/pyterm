@@ -5,7 +5,7 @@ The runs build draws what the cell build drew.
 holds it against the walk over every cell that it replaced, segment for
 segment: styled text, blanks, gaps, combining and wide characters, a
 wide character the right edge cuts, the cursor, and reverse video.
-Lillecarl/pymux#521.
+Lillecarl/pyterm#523.
 """
 
 from __future__ import annotations

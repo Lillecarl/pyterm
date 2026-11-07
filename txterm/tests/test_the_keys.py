@@ -69,7 +69,7 @@ def test_the_backspace_erases():
 
     Textual gives ctrl+h and the backspace key the same name, so a pane
     cannot tell the two apart and one of them has to win. The backspace
-    is the one a person presses. Lillecarl/pymux#123.
+    is the one a person presses. Lillecarl/pyterm#125.
     """
     assert data_of(press("backspace")) == "\x7f"
 

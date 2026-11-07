@@ -7,7 +7,7 @@ moved is a row it hands back as it stands, so a frame after a program
 wrote one line builds one line. `ptterm` does the same for
 prompt_toolkit, and for the same reason: the state belongs to the
 reader, because a screen has more than one and no way to know how many.
-Lillecarl/pymux#126.
+Lillecarl/pyterm#128.
 
 **A row that is kept and should not have been is a wrong screen, not a
 slow one.** So this file does not check the rule. It runs two widgets
@@ -108,7 +108,7 @@ async def test_textual_draws_the_same_frames_when_told_only_the_rows_that_change
     `refresh_changed` names a row to Textual only when its answer moved.
     A row it misses is a row Textual hands back from its cache, stale. So
     one widget refreshes what changed, one refreshes everything, and
-    every frame has to match. Lillecarl/pymux#127.
+    every frame has to match. Lillecarl/pyterm#129.
     """
     naming = TerminalApp(backend=NoBackend())
     everything = TerminalApp(backend=NoBackend())

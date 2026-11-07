@@ -2,7 +2,7 @@
 //! for raw pixels. libvpx encodes 4:4:4, tuned for screen content, and
 //! only the 16x16 blocks under the damage: the rest of the frame goes as
 //! "unchanged" (libvpx's active map), which costs neither time nor bytes.
-//! pymux_rs decodes it on the client. Lillecarl/pymux#639.
+//! pymux_rs decodes it on the client. Lillecarl/pyterm#641.
 
 use std::ffi::CStr;
 use std::sync::Mutex;
