@@ -597,7 +597,6 @@ rec {
         "pymux-scenarios"
         "pymux-scrolling"
         "pymux-theme-pictures"
-        "pymux-vttest-pictures"
         "pymux-wire"
         "pyte-roaming"
       ];
