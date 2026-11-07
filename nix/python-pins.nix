@@ -42,15 +42,16 @@ _pyFinal: pyPrev: {
   # The source is the `async-gil-release-v2` branch of Lillecarl/apsw:
   # 3.54.1.0 plus every SQLite call that can fsync or wait on a lock
   # released from the GIL. Lillecarl/apsw#1, #2, #3; Lillecarl/pyterm#938.
+  # And a cancelled `as_async` that ends its worker thread: Lillecarl/apsw#6.
   apsw = pyPrev.apsw.overridePythonAttrs (old: rec {
     version = "3.54.1.0";
     src = fetchFromGitHub {
       owner = "Lillecarl";
       repo = "apsw";
-      rev = "bb199e687473ef9e19f4733a82640fa5ebf8b09d";
+      rev = "e3508ab18431a0df8e6f11faf16c5bb559ab5ccd";
       # `.gitattributes` says `* export-ignore`: GitHub's archive is empty.
       forceFetchGit = true;
-      hash = "sha256-EFrLBGaZ8eszQ+JW+IRPxdYnxeCzIqrPMdu8ke9gwIY=";
+      hash = "sha256-Ucg3DYCyIVhPPkvHrZqDD+r+Pi1RpBKASQUMWQbGq5I=";
     };
     amalgamation = fetchurl {
       url = "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip";
