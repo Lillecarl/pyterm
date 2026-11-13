@@ -35,12 +35,16 @@ def _getattr(module, name):
         pending.discard(name)
         fullname = "%s.%s" % (parent, name)
         try:
-            importlib.import_module(fullname)
+            imported = importlib.import_module(fullname)
         except ModuleNotFoundError as exc:
             if exc.name != fullname:
                 raise
         else:
-            return module.__dict__[name]
+            # In an import cycle the submodule is still loading, and the
+            # import system sets it on its package only once it is done.
+            # `from . import x` then takes it from sys.modules, and so does
+            # this: websockets' `exceptions` imports `http11` that way.
+            return module.__dict__.get(name, imported)
     raise AttributeError("module %r has no attribute %r" % (parent, name))
 
 

@@ -32,3 +32,22 @@ def test_a_package_whose_module_type_takes_no_subclass_imports_its_submodule_at_
     finally:
         for name in ("finalpkg.sub", "finalpkg"):
             sys.modules.pop(name, None)
+
+
+def test_a_submodule_still_loading_in_a_cycle_comes_from_sys_modules(tmp_path, monkeypatch):
+    package = tmp_path / "cyclepkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        module = importlib.import_module("cyclepkg")
+        # What a cycle leaves: the submodule in sys.modules, not yet on its package.
+        loading = types.ModuleType("cyclepkg.sub")
+        sys.modules["cyclepkg.sub"] = loading
+        submodules.PENDING["cyclepkg"].add("sub")
+
+        assert submodules._getattr(module, "sub") is loading
+    finally:
+        submodules.PENDING.pop("cyclepkg", None)
+        for name in ("cyclepkg.sub", "cyclepkg"):
+            sys.modules.pop(name, None)
