@@ -353,6 +353,46 @@ let
         inherit python overlay;
         nixpkgsRoots = nixpkgsRootsOn python;
       };
+
+      /**
+        pymux with plugin distributions in its virtualenv, where the
+        server finds them through the `pymux.plugins` entry-point group.
+        Lillecarl/pyterm#983. `pymux.withPlugins` reaches it.
+
+        Each plugin is a builders package. One this set lacks joins it
+        under its `pname`, and what it declares must resolve in the set.
+
+        # Example
+
+        ```nix
+        pymux.withPlugins (ps: [ ps.pymux-ai ])
+        ```
+
+        # Type
+
+        ```
+        withPlugins :: (AttrSet -> [Derivation]) -> Derivation
+        ```
+      */
+      pymuxWith =
+        plugins:
+        let
+          withThem = set.overrideScope (
+            _: _: lib.listToAttrs (map (plugin: lib.nameValuePair plugin.pname plugin) plugins)
+          );
+        in
+        withThem.mkVirtualEnv "pymux" (
+          { pymux = [ "catppuccin" "wayland" ]; } // lib.genAttrs (map (plugin: plugin.pname) plugins) (_: [ ])
+        )
+        // {
+          inherit (set.pymux) checks;
+          inherit (set.pymux) meta;
+          # `<pymux-pane>` compiled, which is a thing to reach on its own:
+          # a front end built with node links it and never the venv.
+          inherit (set.pymux) element;
+          inherit plugins;
+          withPlugins = select: pymuxWith (plugins ++ select set);
+        };
     in
     rec {
       # The libraries of the collection, on this interpreter. Nothing
@@ -380,13 +420,7 @@ let
       # the compositor for panes with no display (`wayland-server`). The
       # checks ride along from the package inside, which is where they
       # are written.
-      pymux = set.mkVirtualEnv "pymux" { pymux = [ "catppuccin" "wayland" ]; } // {
-        inherit (set.pymux) checks;
-        inherit (set.pymux) meta;
-        # `<pymux-pane>` compiled, which is a thing to reach on its own:
-        # a front end built with node links it and never the venv.
-        inherit (set.pymux) element;
-      };
+      pymux = pymuxWith [ ];
 
       # `pymux-mcp` as a harness starts it: a virtualenv, so the command
       # is in `bin` with libpymux, the MCP SDK and pydantic beside it.

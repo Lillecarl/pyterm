@@ -38,6 +38,11 @@ let
         default = [ ];
       };
 
+      options.assertions = lib.mkOption {
+        type = lib.types.listOf lib.types.unspecified;
+        default = [ ];
+      };
+
       options.xdg.configFile = lib.mkOption {
         default = { };
         type = lib.types.attrsOf (
@@ -113,6 +118,21 @@ let
   # rather than a string.
   installs = written.home.packages == [ pymux ];
 
+  # A plugin goes into pymux's own virtualenv, where the server finds its
+  # entry point. libpymux stands in: any package of the set will do.
+  # Lillecarl/pyterm#983.
+  withAPlugin = pymux.withPlugins (ps: [ ps.libpymux ]);
+  plugged = evaluate {
+    programs.pymux = {
+      enable = true;
+      package = pymux;
+      plugins = withAPlugin.plugins;
+    };
+  };
+  installsPlugins =
+    map (package: package.drvPath) plugged.home.packages == [ withAPlugin.drvPath ]
+    && lib.all (one: one.assertion) plugged.assertions;
+
 in
 suite { name = "pyterm-home-manager"; } ''
   cp ${conf} pymux.conf
@@ -122,6 +142,11 @@ suite { name = "pyterm-home-manager"; } ''
 
   ${lib.optionalString (!installs) ''
     echo "the module did not install the package it was given" >&2
+    exit 1
+  ''}
+
+  ${lib.optionalString (!installsPlugins) ''
+    echo "the module did not install pymux with the plugins it was given" >&2
     exit 1
   ''}
 

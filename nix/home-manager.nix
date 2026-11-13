@@ -88,6 +88,18 @@ in
       '';
     };
 
+    plugins = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ pyterm.default.pymux-ai ]";
+      description = ''
+        Plugin distributions to install beside pymux, through
+        `package.withPlugins`. The server finds each one through the
+        `pymux.plugins` entry-point group, and runs its event plugin and
+        mounts its commands.
+      '';
+    };
+
     settings = lib.mkOption {
       type =
         with lib.types;
@@ -168,7 +180,17 @@ in
 
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
-      { home.packages = lib.optional (cfg.package != null) cfg.package; }
+      {
+        assertions = [
+          {
+            assertion = cfg.plugins == [ ] || (cfg.package != null && cfg.package ? withPlugins);
+            message = "programs.pymux.plugins needs a package with `withPlugins`, which pyterm's pymux has.";
+          }
+        ];
+        home.packages = lib.optional (cfg.package != null) (
+          if cfg.plugins == [ ] then cfg.package else cfg.package.withPlugins (_: cfg.plugins)
+        );
+      }
 
       {
         xdg.configFile."pymux/pymux.conf".text = lib.mkBefore (
