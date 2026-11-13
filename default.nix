@@ -8,7 +8,13 @@ in
   # and config set, so nixpkgs never reads ~/.config/nixpkgs.
   pkgs ? import inputs.nixpkgs {
     inherit system;
-    config.allowUnfree = true;
+    config = {
+      allowUnfree = true;
+      # QtWebEngine still trusts the compromised eMudhra intermediates
+      # (CVE-2026-111943), and no release fixes it: qutebrowser/qutebrowser#9032.
+      # Remove this when nixpkgs drops the warning.
+      permittedInsecurePackages = [ "qutebrowser-3.7.0" ];
+    };
     overlays = [ ];
   },
   # A source to build from another directory: a clone of one source passes
