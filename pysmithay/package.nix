@@ -43,7 +43,9 @@ let
     fileset = fs.unions [
       ./Cargo.toml
       ./Cargo.lock
-      ./build.rs
+      ./core/Cargo.toml
+      ./core/build.rs
+      ./core/src
       ./pyproject.toml
       ./README.md
       ./LICENSE

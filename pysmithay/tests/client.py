@@ -2,12 +2,16 @@
 A Wayland client whose every pixel and every damage rectangle is known.
 
 It opens one 64x32 window titled "probe", fills it with one colour, then
-paints a 4x4 red square at (10, 5) and damages only that. Then it exits.
+paints a 4x4 red square at (10, 5) and damages only that. Then it holds
+the window until its stdin closes, and exits: a compositor that runs on
+its own, as one in a child does, would see it go before the test reads
+the frame.
 """
 
 from __future__ import annotations
 
 import mmap
+import sys
 
 from pywayland.client import Display
 from pywayland.protocol.wayland import WlCompositor, WlShm
@@ -82,6 +86,7 @@ def main() -> None:
     surface.commit()
     display.roundtrip()
 
+    sys.stdin.read()
     toplevel.destroy()
     xdg_surface.destroy()
     surface.destroy()

@@ -361,6 +361,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-scenarios # yazi and claude-code, bare and in a pane
     nix build --file . checks.pymux-element  # what <pymux-pane> decides, in node
     nix build --file . checks.pysmithay-unit # the compositor, against real Wayland clients
+    nix build --file . checks.pysmithay-rust # its Rust's tests: the compositor's core and its socket protocol
     nix build --file . checks.pysmithay-lint # its Rust, by rustfmt and clippy
     nix build --file . checks.pysmithay-ruff # its Python's style
     nix build --file . checks.pyterm-pytest-unit # the equipment the suites share

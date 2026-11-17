@@ -7,8 +7,6 @@
 use std::ffi::CStr;
 use std::sync::Mutex;
 
-use pyo3::prelude::*;
-
 use crate::Rect;
 use crate::kitty::{Pixels, coalesced};
 
@@ -293,18 +291,9 @@ fn rgb_to_yuv(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 
 /// One reader's VP9 stream of one window. A stream holds the frames it
 /// sent as its reference, so every reader has an encoder of its own.
-#[pyclass(name = "Vp9Encoder", frozen)]
 #[derive(Default)]
 pub struct Vp9Encoder {
     stream: Mutex<Option<Stream>>,
-}
-
-#[pymethods]
-impl Vp9Encoder {
-    #[new]
-    fn new() -> Self {
-        Self::default()
-    }
 }
 
 impl Vp9Encoder {

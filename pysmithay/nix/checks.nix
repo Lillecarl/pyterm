@@ -39,42 +39,58 @@ let
       ../pyproject.toml
     ];
   };
+
+  # The workspace, ready for cargo. A compiler, for the build scripts of
+  # the crates: a `runCommand` has none of its own.
+  crateInputs = [
+    cargo
+    rustc
+    clippy
+    rustfmt
+    stdenv.cc
+    pkg-config
+    rustPlatform.bindgenHook
+  ];
+  crateSetup = ''
+    cp -r ${src}/. crate
+    chmod -R +w crate
+    cd crate
+    export HOME="$TMPDIR"
+    export PYO3_PYTHON=${python.interpreter}
+    export CARGO_TARGET_DIR="$TMPDIR/target"
+    export LIBRARY_PATH=${libxkbcommon}/lib:${pixman}/lib:${libvpx}/lib
+    export PKG_CONFIG_PATH=${lib.getDev libvpx}/lib/pkgconfig
+    # What `cargoSetupHook` writes, which a `runCommand` never runs.
+    mkdir -p .cargo
+    printf '[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "%s"\n' ${cargoDeps} > .cargo/config.toml
+  '';
 in
 {
   # The Rust's style, held by the formatter and by clippy with every
-  # warning an error.
+  # warning an error, tests included.
   #
   #     nix build --file . checks.pysmithay-lint
   lint = suite {
     name = "pysmithay-lint";
-    # A compiler, for the build scripts of the crates: a `runCommand`
-    # has none of its own.
-    inputs = [
-      cargo
-      rustc
-      clippy
-      rustfmt
-      stdenv.cc
-      pkg-config
-      rustPlatform.bindgenHook
-    ];
-    setup = ''
-      cp -r ${src}/. crate
-      chmod -R +w crate
-      cd crate
-      export HOME="$TMPDIR"
-      export PYO3_PYTHON=${python.interpreter}
-      export CARGO_TARGET_DIR="$TMPDIR/target"
-      export LIBRARY_PATH=${libxkbcommon}/lib:${pixman}/lib
-      export PKG_CONFIG_PATH=${lib.getDev libvpx}/lib/pkgconfig
-      # What `cargoSetupHook` writes, which a `runCommand` never runs.
-      mkdir -p .cargo
-      printf '[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "%s"\n' ${cargoDeps} > .cargo/config.toml
-    '';
+    inputs = crateInputs;
+    setup = crateSetup;
   } ''
     cargo fmt --check
-    cargo clippy --offline --frozen -- -D warnings
+    cargo clippy --offline --frozen --all-targets -- -D warnings
   '';
+
+  # The Rust's own tests: the core crate, which holds the compositor and
+  # the protocol of a compositor in a child process. The PyO3 module's
+  # are the unit suite's.
+  #
+  #     nix build --file . checks.pysmithay-rust
+  rust = suite {
+    name = "pysmithay-rust";
+    inputs = crateInputs;
+    setup = crateSetup + ''
+      export LD_LIBRARY_PATH=$LIBRARY_PATH
+    '';
+  } "cargo test --offline --frozen --package pysmithay-core";
 
   # The compositor against a client that draws known pixels, against
   # foot, a real program, and the clipboard against wl-copy and wl-paste.

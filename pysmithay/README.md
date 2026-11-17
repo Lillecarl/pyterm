@@ -43,6 +43,30 @@ Events are tuples, such as `("toplevel", id, tag)`,
 damage is empty when it drew nothing, and it still waits on
 `frame_done`. `Compositor.dispatch` lists them all.
 
+## A compositor in a child process
+
+`RemoteCompositor` has the same methods, for a compositor that runs in
+a process of its own, so that its windows outlive the process that
+shows them. The child is `python -m pysmithay.host`, and
+`pysmithay.host.command` gives its command line:
+
+```python
+import socket, subprocess
+from pysmithay import RemoteCompositor
+from pysmithay.host import command
+
+ours, theirs = socket.socketpair()
+child = subprocess.Popen(command(theirs.fileno()), pass_fds=[theirs.fileno()])
+theirs.close()
+compositor = await RemoteCompositor.start(ours.detach())
+```
+
+The child's loop is Python and routes each request, as a window manager
+in Python would. Everything with a cost stays in Rust: the Wayland
+protocol, the drawing, every encode, and every frame on the socket. The
+crate under it, `core/`, holds the compositor and that socket protocol
+with no Python in them.
+
 ## What it does not do yet
 
 - Buffers other than wl_shm, so no GPU clients.

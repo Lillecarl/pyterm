@@ -15,8 +15,6 @@ import sys
 
 from test_compositor import CLIENT, commits, launch, pump
 
-from pysmithay import Vp9Encoder
-
 WIDTH, HEIGHT = 64, 32
 #: The probe's fill and square, as RGB.
 FILL = bytes([0x33, 0x66, 0x99])
@@ -71,7 +69,7 @@ def assert_near(got: bytes, want: bytes) -> None:
 
 def test_the_stream_starts_with_a_keyframe_and_then_sends_the_damaged_blocks(compositor):
     client = launch(compositor, sys.executable, str(CLIENT))
-    encoder = Vp9Encoder()
+    encoder = compositor.vp9_encoder()
     pump(compositor, lambda seen: len(commits(seen)) >= 1)
     serial, keyframe, width, height, first, rects = frame(compositor, encoder)
     assert (serial, keyframe, width, height, rects) == (1, True, WIDTH, HEIGHT, [(0, 0, WIDTH, HEIGHT)])
@@ -91,7 +89,7 @@ def test_the_stream_starts_with_a_keyframe_and_then_sends_the_damaged_blocks(com
 def test_a_reader_up_to_date_gets_no_data(compositor):
     client = launch(compositor, sys.executable, str(CLIENT))
     pump(compositor, lambda seen: len(commits(seen)) >= 2)
-    encoder = Vp9Encoder()
+    encoder = compositor.vp9_encoder()
     frame(compositor, encoder)
     assert frame(compositor, encoder) == (2, False, WIDTH, HEIGHT, b"", [])
     client.kill()
@@ -101,7 +99,7 @@ def test_every_reader_has_a_stream_of_its_own(compositor):
     "A second encoder starts with a keyframe of its own, whatever the first sent."
     client = launch(compositor, sys.executable, str(CLIENT))
     pump(compositor, lambda seen: len(commits(seen)) >= 2)
-    frame(compositor, Vp9Encoder())
-    _serial, keyframe, *_rest = frame(compositor, Vp9Encoder())
+    frame(compositor, compositor.vp9_encoder())
+    _serial, keyframe, *_rest = frame(compositor, compositor.vp9_encoder())
     assert keyframe
     client.kill()

@@ -859,9 +859,10 @@ rec {
     # Lillecarl/pyterm#576.
     pymux-rs-parity = pymux-rs.checks.parity;
     pymux-rs-lint = pymux-rs.checks.lint;
-    # The compositor against real Wayland clients, its Rust's style, and
-    # its Python's.
+    # The compositor against real Wayland clients, its Rust's tests and
+    # style, and its Python's.
     pysmithay-unit = pysmithay.checks.unit;
+    pysmithay-rust = pysmithay.checks.rust;
     pysmithay-lint = pysmithay.checks.lint;
     pysmithay-ruff = pysmithay.checks.ruff;
     # The style of pyte: the selected lint rules, the layout at

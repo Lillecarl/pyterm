@@ -1,0 +1,20 @@
+[package]
+name = "pysmithay-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+
+# The compositor and the protocol of a compositor in a child process,
+# with no Python: `pysmithay._native` wraps it, on both ends of the
+# socket. Lillecarl/pyterm#1004.
+
+[dependencies]
+base64 = "0.23.1"
+flate2 = "1.1.10"
+rustix = { version = "1.1", features = ["net"] }
+smithay = { version = "0.7", default-features = false, features = ["wayland_frontend", "desktop", "renderer_pixman"] }
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3.34"

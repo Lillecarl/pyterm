@@ -643,14 +643,22 @@ dependencies = [
 name = "pysmithay"
 version = "0.1.0"
 dependencies = [
+ "pyo3",
+ "pyo3-async-runtimes",
+ "pysmithay-core",
+ "tokio",
+]
+
+[[package]]
+name = "pysmithay-core"
+version = "0.1.0"
+dependencies = [
  "base64",
  "bindgen",
  "flate2",
  "pkg-config",
- "pyo3",
- "pyo3-async-runtimes",
+ "rustix",
  "smithay",
- "tokio",
 ]
 
 [[package]]

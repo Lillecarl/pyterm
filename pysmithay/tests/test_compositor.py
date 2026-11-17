@@ -52,7 +52,7 @@ def sockets_in(directory: str) -> set[str]:
 
 def launch(compositor, *command):
     env = dict(os.environ, WAYLAND_DISPLAY=compositor.socket_name)
-    return subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return subprocess.Popen(command, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 
 def commits(events):
@@ -75,6 +75,7 @@ def test_the_first_frame_is_the_buffer_as_rgba(compositor):
     assert (width, height) == (64, 32)
     assert rgba == bytes([0x33, 0x66, 0x99, 0xFF]) * (64 * 32)
 
+    client.stdin.close()
     pump(compositor, lambda seen: ("closed", 1) in seen)
     client.wait(10)
 
@@ -94,6 +95,7 @@ def test_the_second_frame_names_only_what_changed(compositor):
     assert pixel(13, 8) == bytes([0xFF, 0x00, 0x00, 0xFF])
     assert pixel(14, 8) == bytes([0x33, 0x66, 0x99, 0xFF])
 
+    client.stdin.close()
     pump(compositor, lambda seen: ("closed", 1) in seen)
     client.wait(10)
     assert compositor.toplevels() == []
@@ -113,6 +115,7 @@ def test_a_window_that_drew_wants_a_frame_until_it_is_told(compositor):
     compositor.frame_done(1, 0)
     assert not compositor.wants_frame(1)
 
+    client.stdin.close()
     pump(compositor, lambda seen: ("closed", 1) in seen)
     client.wait(10)
 
@@ -125,11 +128,13 @@ def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
     tag, fd = compositor.connect()
     assert tag != 0
     env = dict(os.environ, WAYLAND_SOCKET=str(fd))
-    second = subprocess.Popen([sys.executable, str(CLIENT)], env=env, pass_fds=[fd])
+    second = subprocess.Popen([sys.executable, str(CLIENT)], env=env, pass_fds=[fd], stdin=subprocess.PIPE)
     os.close(fd)
     earlier = pump(compositor, lambda seen: ("toplevel", 2, tag) in seen)
     assert sockets_in(os.environ["XDG_RUNTIME_DIR"]) == before
 
+    first.stdin.close()
+    second.stdin.close()
     pump(compositor, lambda seen: all(("closed", id) in earlier + seen for id in (1, 2)))
     first.wait(10)
     second.wait(10)
