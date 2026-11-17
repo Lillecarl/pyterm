@@ -259,6 +259,11 @@ impl Compositor {
         self.inner.toplevels()
     }
 
+    /// Every open window, oldest first, as `(id, tag, title, app_id)`.
+    fn windows(&self) -> Vec<pysmithay_core::WindowInfo> {
+        self.inner.windows()
+    }
+
     /// The output's size in pixels, which a client reads as its screen.
     #[getter]
     fn output_size(&self) -> Option<(i32, i32)> {

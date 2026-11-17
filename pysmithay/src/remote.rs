@@ -10,6 +10,10 @@
 //! windows the events said are open, so a closed one raises `KeyError`
 //! here, as it would in process. A call that answers waits for it, with
 //! the GIL let go; a frame answers an awaitable.
+//!
+//! `pause` and `adopt` hand the child to another parent, across an
+//! `exec`: the socket's descriptor is `fileno()`, and the child writes
+//! nothing between the two. `resume` takes it back when nobody adopted it.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Read, Write};
@@ -22,7 +26,7 @@ use std::time::Duration;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pysmithay_core::protocol::{Answer, Message, Receiver, Request, Sender, VERSION};
-use pysmithay_core::{Error, Event, Result, Target, target_of};
+use pysmithay_core::{Error, Event, Result, Target, WindowInfo, target_of};
 
 use crate::{PyFrame, event_py, frame_py, kitty_py, py_err, rects_py, video_py};
 
@@ -57,6 +61,9 @@ struct Shared {
     /// The windows open, as the events so far say.
     toplevels: Mutex<HashSet<u64>>,
     closed: AtomicBool,
+    /// Between `pause` and `resume`: a call that waits for an answer is
+    /// refused at once, since the child answers nothing.
+    paused: AtomicBool,
     /// Written once per batch of events; `fds()` names its other end.
     wake: UnixStream,
 }
@@ -67,8 +74,20 @@ impl Shared {
         loop {
             match receiver.receive() {
                 Ok(Some(Message::Reply { seq, result })) => {
+                    // Before any event after it: those change this list.
+                    if let Ok(Answer::Adopted { windows, .. }) = &result {
+                        *lock(&self.toplevels) = ids_of(windows);
+                    }
+                    let adopted = matches!(result, Ok(Answer::Adopted { .. }));
                     if let Some(waiter) = lock(&self.waiters).remove(&seq) {
                         waiter.give(result);
+                    }
+                    // The child dropped every reply it owed from before
+                    // the pause.
+                    if adopted {
+                        for (_, waiter) in lock(&self.waiters).drain() {
+                            waiter.give(Err(Error::Closed));
+                        }
                     }
                 }
                 Ok(Some(Message::Event(event))) => {
@@ -167,6 +186,9 @@ impl RemoteCompositor {
     }
 
     fn send_waiting(&self, request: Request, waiter: Waiter) -> Result<()> {
+        if self.shared.paused.load(Ordering::SeqCst) && request != Request::Adopt {
+            return Err(Error::Closed);
+        }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         lock(&self.shared.waiters).insert(seq, waiter);
         // After the waiter is in: the reader fails every waiter it finds
@@ -220,6 +242,15 @@ fn unexpected() -> PyErr {
     PyValueError::new_err("the compositor answered something else")
 }
 
+fn ids_of(windows: &[WindowInfo]) -> HashSet<u64> {
+    windows.iter().map(|window| window.0).collect()
+}
+
+/// Whether this build speaks the protocol `version` of a live child.
+fn speaks(version: u32) -> bool {
+    version == VERSION
+}
+
 #[pymethods]
 impl RemoteCompositor {
     /// An awaitable of the compositor whose child holds the other end of
@@ -241,6 +272,62 @@ impl RemoteCompositor {
                 .map_err(|_| py_err(Error::Closed))?
                 .map_err(py_err)
         })
+    }
+
+    /// An awaitable of `(compositor, windows)` for the child at the other
+    /// end of `fd`, which another parent paused, within `timeout` seconds.
+    /// `version` is what its `Hello` said. Each window is `(id, tag,
+    /// title, app_id)`, and no event came of them. This owns `fd` now.
+    #[staticmethod]
+    #[pyo3(signature = (fd, version, timeout=5.0))]
+    fn adopt(py: Python<'_>, fd: i32, version: u32, timeout: f64) -> PyResult<Bound<'_, PyAny>> {
+        // SAFETY: the caller hands the descriptor over.
+        let stream = unsafe { UnixStream::from_raw_fd(fd) };
+        let timeout = Duration::try_from_secs_f64(timeout)
+            .map_err(|_| PyValueError::new_err("a timeout is a positive number of seconds"))?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            std::thread::spawn(move || drop(sender.send(Self::adopted(stream, version, timeout))));
+            receiver
+                .await
+                .map_err(|_| py_err(Error::Closed))?
+                .map_err(py_err)
+        })
+    }
+
+    /// Whether this build can adopt a child that speaks `version`.
+    #[staticmethod]
+    fn speaks(version: u32) -> bool {
+        speaks(version)
+    }
+
+    /// The socket to the child, for an `exec` to carry between `pause`
+    /// and `adopt`.
+    fn fileno(&self) -> i32 {
+        self.stream.as_raw_fd()
+    }
+
+    /// Stop the child writing, at a message boundary, until `adopt` or
+    /// `resume`. Raises `OSError` when it does not answer.
+    fn pause(&self, py: Python<'_>) -> PyResult<()> {
+        match self.ask(py, Request::Pause).map_err(py_err)? {
+            Answer::Unit => {
+                self.shared.paused.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            _ => Err(unexpected()),
+        }
+    }
+
+    /// Let a paused child write again, and answer its windows as `adopt`
+    /// does: what it held of them is gone.
+    fn resume(&self, py: Python<'_>) -> PyResult<Vec<WindowInfo>> {
+        let answer = self.ask(py, Request::Adopt);
+        self.shared.paused.store(false, Ordering::SeqCst);
+        match answer.map_err(py_err)? {
+            Answer::Adopted { windows, .. } => Ok(windows),
+            _ => Err(unexpected()),
+        }
     }
 
     #[getter]
@@ -538,20 +625,106 @@ impl RemoteCompositor {
             Ok(None) => return Err(Error::Os("the compositor ended before it listened".into())),
             Err(error) => return Err(Error::Os(format!("the compositor never listened: {error}"))),
         };
-        if version != VERSION {
+        if !speaks(version) {
             return Err(Error::Os(format!(
                 "the compositor speaks version {version}, and this build {VERSION}"
             )));
         }
         reader.set_read_timeout(None)?;
+        let sender = Sender::new(stream.try_clone()?);
+        Self::running(
+            stream,
+            sender,
+            receiver,
+            version,
+            socket_name,
+            output,
+            HashSet::new(),
+            1,
+        )
+    }
+
+    /// Take over a paused child: the first word on the socket is the
+    /// answer to `Adopt`.
+    fn adopted(
+        stream: UnixStream,
+        version: u32,
+        timeout: Duration,
+    ) -> Result<(Self, Vec<WindowInfo>)> {
+        if !speaks(version) {
+            return Err(Error::Os(format!(
+                "the compositor speaks version {version}, and this build {VERSION}"
+            )));
+        }
+        let reader = stream.try_clone()?;
+        reader.set_read_timeout(Some(timeout))?;
+        let mut receiver = Receiver::new(reader.try_clone()?);
+        let sender = Sender::new(stream.try_clone()?);
+        sender.send(Message::Request {
+            seq: 1,
+            request: Request::Adopt,
+        })?;
+        let (socket_name, output, windows) = loop {
+            match receiver.receive() {
+                Ok(Some(Message::Reply { seq: 1, result })) => match result? {
+                    Answer::Adopted {
+                        socket_name,
+                        output,
+                        windows,
+                    } => break (socket_name, output, windows),
+                    _ => return Err(Error::Os("the compositor answered something else".into())),
+                },
+                // A paused child sends nothing before the answer; one that
+                // was not paused said nothing the windows do not say.
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(Error::Os(
+                        "the compositor ended before it was adopted".into(),
+                    ));
+                }
+                Err(error) => {
+                    return Err(Error::Os(format!(
+                        "the compositor was not adopted: {error}"
+                    )));
+                }
+            }
+        };
+        reader.set_read_timeout(None)?;
+        let ids = ids_of(&windows);
+        let compositor = Self::running(
+            stream,
+            sender,
+            receiver,
+            version,
+            socket_name,
+            output,
+            ids,
+            2,
+        )?;
+        Ok((compositor, windows))
+    }
+
+    /// Start reading the child from here on.
+    #[allow(clippy::too_many_arguments)]
+    fn running(
+        stream: UnixStream,
+        sender: Sender,
+        receiver: Receiver,
+        version: u32,
+        socket_name: String,
+        output: Option<(i32, i32)>,
+        toplevels: HashSet<u64>,
+        next_seq: u64,
+    ) -> Result<Self> {
         let (wake, woken) = UnixStream::pair()?;
         wake.set_nonblocking(true)?;
         woken.set_nonblocking(true)?;
         let shared = Arc::new(Shared {
             waiters: Mutex::new(HashMap::new()),
             events: Mutex::new(VecDeque::new()),
-            toplevels: Mutex::new(HashSet::new()),
+            toplevels: Mutex::new(toplevels),
             closed: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
             wake,
         });
         let reading = shared.clone();
@@ -560,7 +733,7 @@ impl RemoteCompositor {
             .name("pysmithay-remote".into())
             .spawn(move || reading.read(receiver, ending))?;
         Ok(Self {
-            sender: Arc::new(Sender::new(stream.try_clone()?)),
+            sender: Arc::new(sender),
             shared,
             stream,
             woken,
@@ -568,7 +741,7 @@ impl RemoteCompositor {
             socket_name,
             output,
             version,
-            next_seq: AtomicU64::new(1),
+            next_seq: AtomicU64::new(next_seq),
             next_encoder: AtomicU64::new(1),
         })
     }

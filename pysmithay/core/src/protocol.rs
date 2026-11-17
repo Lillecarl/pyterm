@@ -11,7 +11,14 @@
 //! drops a failure of it. Events go the other way at any time.
 //!
 //! `VERSION` is in `Hello`. A child outlives the build that started it,
-//! so a parent speaks every version a live child may have.
+//! so a parent speaks every version a live child may have, and a child
+//! answers a request it does not know with an error.
+//!
+//! A parent hands the socket over, across an `exec`, between `Pause` and
+//! `Adopt`. After its answer to `Pause` the child writes nothing until
+//! `Adopt`, so no reader holds half a message when the socket changes
+//! hands. `Adopt` answers what `Hello` said and every open window, which
+//! stand for the events the child held meanwhile.
 
 use std::collections::VecDeque;
 use std::io::{IoSlice, IoSliceMut, Write};
@@ -25,7 +32,7 @@ use rustix::net::{
     SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
 };
 
-use crate::{Error, Event, FrameRect, Rect, Result, Target};
+use crate::{Error, Event, FrameRect, Rect, Result, Target, WindowInfo};
 
 /// The protocol this build speaks.
 pub const VERSION: u32 = 1;
@@ -126,6 +133,13 @@ pub enum Request {
     DropEncoder {
         encoder: u64,
     },
+    /// Answer, then hold every event and write nothing until `Adopt`.
+    Pause,
+    /// Write again, and answer `Adopted`. Every encoder goes: the parent
+    /// that made them may be gone.
+    Adopt,
+    /// A request of a newer build, by its tag.
+    Unknown(u8),
 }
 
 /// What the child answers.
@@ -140,6 +154,11 @@ pub enum Answer {
     Kitty(crate::KittyUpdate),
     Rects(crate::FrameRects),
     Video(crate::VideoFrame),
+    Adopted {
+        socket_name: String,
+        output: Option<(i32, i32)>,
+        windows: Vec<WindowInfo>,
+    },
 }
 
 /// One message, either way.
@@ -549,6 +568,9 @@ fn write_request(out: &mut Writer, request: &Request) {
             out.u8(21);
             out.u64(*encoder);
         }
+        Request::Pause => out.u8(22),
+        Request::Adopt => out.u8(23),
+        Request::Unknown(tag) => out.u8(*tag),
     }
 }
 
@@ -641,7 +663,14 @@ fn read_request(input: &mut Reader) -> Result<Request> {
         21 => Request::DropEncoder {
             encoder: input.u64()?,
         },
-        _ => return Err(malformed("an unknown request")),
+        22 => Request::Pause,
+        23 => Request::Adopt,
+        // The length frames it, so what follows is skipped whole. No
+        // request carries a descriptor.
+        tag => {
+            input.bytes = &[];
+            Request::Unknown(tag)
+        }
     })
 }
 
@@ -713,6 +742,26 @@ fn write_answer(out: &mut Writer, answer: Answer) {
                 out.rects(&rects);
             }
         }
+        Answer::Adopted {
+            socket_name,
+            output,
+            windows,
+        } => {
+            out.u8(9);
+            out.str(&socket_name);
+            out.bool(output.is_some());
+            if let Some((width, height)) = output {
+                out.i32(width);
+                out.i32(height);
+            }
+            out.len(windows.len());
+            for (id, tag, title, app_id) in windows {
+                out.u64(id);
+                out.u64(tag);
+                out.str(&title);
+                out.str(&app_id);
+            }
+        }
     }
 }
 
@@ -768,6 +817,23 @@ fn read_answer(input: &mut Reader) -> Result<Answer> {
         } else {
             None
         }),
+        9 => {
+            let socket_name = input.str()?;
+            let output = if input.bool()? {
+                Some((input.i32()?, input.i32()?))
+            } else {
+                None
+            };
+            let len = input.len()?;
+            let windows = (0..len)
+                .map(|_| Ok((input.u64()?, input.u64()?, input.str()?, input.str()?)))
+                .collect::<Result<_>>()?;
+            Answer::Adopted {
+                socket_name,
+                output,
+                windows,
+            }
+        }
         _ => return Err(malformed("an unknown answer")),
     })
 }
@@ -1120,6 +1186,54 @@ mod tests {
                 seq: 7,
                 request: back,
             } => assert_eq!(back, request),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_request_of_a_newer_build_reads_as_unknown_and_whole() {
+        let (mut bytes, _) = encode(Message::Request {
+            seq: 5,
+            request: Request::Unknown(200),
+        });
+        bytes.extend_from_slice(&[1, 2, 3]);
+        let len = u32::try_from(bytes.len() - 4).unwrap();
+        bytes[..4].copy_from_slice(&len.to_le_bytes());
+        match decode(&bytes[4..], &mut VecDeque::new()).unwrap() {
+            Message::Request {
+                seq: 5,
+                request: Request::Unknown(200),
+            } => {}
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_adoption_names_every_window() {
+        let windows = vec![
+            (1, 4, "a title".into(), "foot".into()),
+            (3, 0, String::new(), String::new()),
+        ];
+        match round_trip(Message::Reply {
+            seq: 1,
+            result: Ok(Answer::Adopted {
+                socket_name: "wayland-9".into(),
+                output: Some((800, 600)),
+                windows: windows.clone(),
+            }),
+        }) {
+            Message::Reply {
+                seq: 1,
+                result:
+                    Ok(Answer::Adopted {
+                        socket_name,
+                        output: Some((800, 600)),
+                        windows: back,
+                    }),
+            } => {
+                assert_eq!(socket_name, "wayland-9");
+                assert_eq!(back, windows);
+            }
             other => panic!("{other:?}"),
         }
     }

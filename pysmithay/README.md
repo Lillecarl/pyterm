@@ -67,6 +67,21 @@ protocol, the drawing, every encode, and every frame on the socket. The
 crate under it, `core/`, holds the compositor and that socket protocol
 with no Python in them.
 
+The child can change parents, across an `exec`, and keep its windows:
+
+```python
+compositor.pause()             # the child writes nothing from here on
+os.set_inheritable(compositor.fileno(), True)
+os.execv(...)                  # pass fileno() and compositor.version on
+# in the new image:
+compositor, windows = await RemoteCompositor.adopt(fd, version)
+```
+
+Each window is `(id, tag, title, app_id)`. The events the child held
+during the pause are dropped, except selections and pastes. A window
+that committed in that time waits for a `frame_done` from the new
+parent. `resume()` undoes a pause when nobody adopts the child.
+
 ## What it does not do yet
 
 - Buffers other than wl_shm, so no GPU clients.

@@ -148,12 +148,17 @@ pub type VideoFrame = Option<(u64, bool, i32, i32, Vec<u8>, Vec<Rect>)>;
 /// What `frame` answers: width, height and RGBA with no row padding.
 pub type Frame = Option<(i32, i32, Vec<u8>)>;
 
+/// One open window of `windows`: id, tag, title, app_id.
+pub type WindowInfo = (u64, u64, String, String);
+
 /// How many frames of damage a window remembers. A reader further
 /// behind than this gets the whole frame again.
 const HISTORY: usize = 64;
 
 struct Toplevel {
     id: u64,
+    /// The tag of the connection that opened it (`connect`), or 0.
+    tag: u64,
     window: Window,
     /// The window drawn whole, once it has drawn anything.
     canvas: Option<Canvas>,
@@ -625,6 +630,7 @@ impl XdgShellHandler for State {
             .unwrap_or(0);
         self.toplevels.push(Toplevel {
             id,
+            tag: origin,
             window: Window::new_wayland_window(surface),
             canvas: None,
             wanted: None,
@@ -1422,6 +1428,24 @@ impl Compositor {
             .toplevels
             .iter()
             .map(|toplevel| toplevel.id)
+            .collect()
+    }
+
+    /// Every open window, oldest first, as `(id, tag, title, app_id)`:
+    /// what the events about it said so far, for a caller that missed them.
+    pub fn windows(&self) -> Vec<WindowInfo> {
+        self.state
+            .toplevels
+            .iter()
+            .map(|toplevel| {
+                let surface = toplevel.surface();
+                (
+                    toplevel.id,
+                    toplevel.tag,
+                    role_string(surface, |role| role.title.clone()),
+                    role_string(surface, |role| role.app_id.clone()),
+                )
+            })
             .collect()
     }
 
