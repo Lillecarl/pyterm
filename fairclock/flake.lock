@@ -1,0 +1,114 @@
+{
+  "nodes": {
+    "flake-compatish": {
+      "locked": {
+        "lastModified": 1792708319,
+        "narHash": "sha256-s5AthAg/231JSUHwZ1Jxg/qcdcAbWYi2ERRRHW8X2pA=",
+        "owner": "Lillecarl",
+        "repo": "flake-compatish",
+        "rev": "3358220f9262c5ada71866c61f4f3457a9f49c89",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "repo": "flake-compatish",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1794495034,
+        "narHash": "sha256-E0hYoioqUtM2XmPPvYYpJgdADF5AW9oOoPSEiM9dTHQ=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "2074cc672349f14240fb7ea90d509e0b643e9dd4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "prompt-toolkit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794075065,
+        "narHash": "sha256-WAMiK+sNfgKI/LFARNTpEKqtDOHUMx4aBY5PRmF8ME0=",
+        "owner": "Lillecarl",
+        "repo": "python-prompt-toolkit",
+        "rev": "d5369e0eb91f97010e269174612baf775f915deb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "ref": "render-performance",
+        "repo": "python-prompt-toolkit",
+        "type": "github"
+      }
+    },
+    "pyproject-nix": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788394333,
+        "narHash": "sha256-xYOP0Xym1eVGUaHFx+eJEaycFGoiCbst3fZf0xFHP78=",
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "rev": "6a8a7881d75b6f98967e7b8069f4ead331384301",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "type": "github"
+      }
+    },
+    "pyterm": {
+      "inputs": {
+        "flake-compatish": "flake-compatish",
+        "nixpkgs": "nixpkgs",
+        "prompt-toolkit": "prompt-toolkit",
+        "pyproject-nix": "pyproject-nix",
+        "qutebrowser": "qutebrowser"
+      },
+      "locked": {
+        "lastModified": 1794883797,
+        "narHash": "sha256-AsJXWQ/spfHcUVEs2hHgifeHpOQoS7rmahimhm282DE=",
+        "owner": "Lillecarl",
+        "repo": "pyterm",
+        "rev": "47e0c5bf29bb3b41be2da0b0e6a670fa306a7959",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "repo": "pyterm",
+        "type": "github"
+      }
+    },
+    "qutebrowser": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793996745,
+        "narHash": "sha256-bGOggr91xdF0WZ7O8t4ZiHjdpkiKcptTlT7tj8Wkhq0=",
+        "owner": "Lillecarl",
+        "repo": "qutebrowser",
+        "rev": "53ec4ded36ea2434decd8fb36480bd0c24043c4f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "ref": "patched",
+        "repo": "qutebrowser",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "pyterm": "pyterm"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
