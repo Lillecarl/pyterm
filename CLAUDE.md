@@ -19,6 +19,7 @@ each one claims one job:
 | `prompt-toolkit` | the toolkit under `ptterm` and `pymux` |
 | `ptkhx` | Helix's modal editing, for a prompt-toolkit buffer |
 | `deferimport` | make imports lazy, without a keyword |
+| `fairclock` | deadlines that leave the machine's load out |
 
 `pyterm-pytest` is one more: the test equipment the suites share.
 

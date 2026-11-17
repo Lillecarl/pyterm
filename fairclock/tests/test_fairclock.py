@@ -22,12 +22,12 @@ import anyio
 import pytest
 import trio
 
-from pyterm_pytest import fairclock
-from pyterm_pytest.fairclock import Clock, Deadline, Stopwatch, pids_naming, run_delays, task_times
-from pyterm_pytest.fairclock import anyio as fair_anyio
-from pyterm_pytest.fairclock import asyncio as fair_asyncio
-from pyterm_pytest.fairclock import subprocess as fair_subprocess
-from pyterm_pytest.fairclock import trio as fair_trio
+import fairclock
+from fairclock import Clock, Deadline, Stopwatch, pids_naming, run_delays, task_times
+from fairclock import anyio as fair_anyio
+from fairclock import asyncio as fair_asyncio
+from fairclock import subprocess as fair_subprocess
+from fairclock import trio as fair_trio
 
 LINUX = Path("/proc/self/task").is_dir()
 needs_proc = pytest.mark.skipif(not LINUX, reason="no /proc")
@@ -206,17 +206,17 @@ def test_a_thousand_short_scopes_share_one_thread(front):
     run, bound, sleep, _expired = FRONTS[front]
 
     async def scopes() -> float:
-        began = time.monotonic()
+        took = Stopwatch()
         for _ in range(1000):
             await bound(10, lambda: sleep(0))
-        return time.monotonic() - began
+        return took.elapsed()
 
     assert run(scopes()) < 1.0
     assert sum(thread.name == "fairclock" for thread in threading.enumerate()) <= 1
 
 
 def test_the_package_reaches_only_its_own_front_ends_library():
-    "Each module imports the standard library, and a front end its own loop's library: it can leave pyterm whole."
+    "Each module imports the standard library, and a front end its own loop's library: a suite of any layer may take it."
     allowed = {
         "__init__": set(),
         "_watch": set(),

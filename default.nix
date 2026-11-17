@@ -97,6 +97,7 @@ let
     sources.pysmithay
     sources.deferimport
     sources.ptkhx
+    sources.fairclock
   ];
 
   /**
@@ -127,6 +128,7 @@ let
     "txterm"
     "deferimport"
     "ptkhx"
+    "fairclock"
     "maturin"
   ];
 
@@ -167,6 +169,13 @@ let
     pyterm-pytest = final.callPackage (sources.pyterm-pytest + "/package.nix") {
       inherit (ps) mkProject;
       # The linter and formatter that `pyterm-pytest-ruff` runs.
+      inherit (pkgs) ruff;
+    };
+
+    # Deadlines that leave the machine's load out. The standard library
+    # alone, so every source's suite may take it. Lillecarl/pyterm#1008.
+    fairclock = final.callPackage (sources.fairclock + "/package.nix") {
+      inherit (ps) mkProject;
       inherit (pkgs) ruff;
     };
 
@@ -419,6 +428,7 @@ let
         libpymux
         deferimport
         ptkhx
+        fairclock
         ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
@@ -579,6 +589,8 @@ rec {
 
   ptkhx = default.ptkhx;
 
+  fairclock = default.fairclock;
+
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pyterm#192.
   #
@@ -684,6 +696,7 @@ rec {
       pyterm-pytest = source "pyterm-pytest" [ "pyterm_pytest" ];
       deferimport = source "deferimport" [ "deferimport" ];
       ptkhx = source "ptkhx" [ "ptkhx" ];
+      fairclock = source "fairclock" [ "fairclock" ];
       pyterm = build {
         name = "pyterm";
         src = textOf ./.;
@@ -745,6 +758,7 @@ rec {
     "pyterm-pytest"
     "deferimport"
     "ptkhx"
+    "fairclock"
   ];
 
   # The galleries of everything pymux draws, laid out for a person to
@@ -892,6 +906,9 @@ rec {
     ptkhx-unit = ptkhx.checks.unit;
     ptkhx-oracle = ptkhx.checks.oracle;
     ptkhx-ruff = ptkhx.checks.ruff;
+    # Fair deadlines on every front end, on an idle machine and a crowded CPU.
+    fairclock-unit = fairclock.checks.unit;
+    fairclock-ruff = fairclock.checks.ruff;
     # Not a gate: random key sequences, which find differences from
     # Helix faster than they get fixed.
     ptkhx-hunt = ptkhx.checks.hunt;
