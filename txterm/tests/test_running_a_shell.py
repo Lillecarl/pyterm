@@ -17,6 +17,7 @@ from __future__ import annotations
 import sys
 
 import anyio
+from fairclock import anyio as fair_anyio
 from pyte.modes import PrivateMode
 from pyte.sequences.csi import set_mode
 
@@ -189,5 +190,5 @@ async def test_the_end_of_a_program_reaches_the_application():
     async with anyio.create_task_group() as task_group:
         app = Watching(program("pass", linger=False), task_group)
         async with app.run_test(size=SIZE):
-            with anyio.fail_after(TIMEOUT):
+            with fair_anyio.fail_after(TIMEOUT):
                 await app.ended.wait()

@@ -37,6 +37,8 @@ test = [
     "anyio",
     # `count_instructions`, for what a frame costs.
     "pyterm-pytest",
+    # Deadlines in fair time. Lillecarl/pyterm#1008.
+    "fairclock",
 ]
 
 [project.urls]
@@ -353,4 +355,4 @@ select = [
 # sibling sorts one way in the dev shell and the other in the
 # sandbox.
 known-first-party = ["txterm"]
-known-third-party = ["pyte", "ptyhost"]
+known-third-party = ["fairclock", "pyte", "ptyhost"]
