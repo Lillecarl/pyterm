@@ -90,10 +90,10 @@ let
         # quote as `'\''`, which shlex reads as a close, an escaped quote
         # and an open. Nothing else here says whether it survives.
         status-right = "it's #h";
-        # A setting of null writes no line. `bell` is a real option, so a
-        # line for it would be accepted and the judge would not see it;
-        # the grep below is what sees it.
-        bell = null;
+        # A setting of null writes no line. `bell-action` is a real option,
+        # so a line for it would be accepted and the judge would not see
+        # it; the grep below is what sees it.
+        bell-action = null;
       };
       # The other scope. A client option is written into the same file
       # and read by the client rather than by the server, so the judge
@@ -150,7 +150,7 @@ suite { name = "pyterm-home-manager"; } ''
     exit 1
   ''}
 
-  if grep -q '^set-option bell' pymux.conf; then
+  if grep -q '^set-option bell-action' pymux.conf; then
     echo "a setting of null still wrote a line" >&2
     exit 1
   fi
