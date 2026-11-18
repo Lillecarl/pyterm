@@ -361,6 +361,7 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.pymux-integrated # the same, in one process
     nix build --file . checks.pymux-esctest # the conformance suite, in a pane
     nix build --file . checks.pymux-vterm   # the same libvterm suite, through pymux
+    nix build --file . checks.pymux-tmux-corpus # real tmux configuration files, read by pymux
     nix build --file . checks.pymux-pictures # a picture of a real terminal
     nix build --file . checks.pymux-vttest-pictures # the same, of vttest
     nix build --file . checks.pymux-image-exercise # an image moved and resized, step by step

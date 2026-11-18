@@ -1166,6 +1166,9 @@ rec {
     # gate here: a pane of its own for each of the 40, and one of the
     # recordings is a third of a megabyte.
     pymux-alacritty = pymux.checks.alacritty;
+    # Real tmux configuration files, read by pymux and judged against
+    # the list of lines it refuses today. Lillecarl/pyterm#1027.
+    pymux-tmux-corpus = pymux.checks.tmux-corpus;
     # The home-manager module, judged by pymux. Nix writes the
     # configuration file the module generates, and pymux reads it through
     # the same `source-file` a real startup runs. It is named for this

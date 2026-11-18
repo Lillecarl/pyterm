@@ -81,7 +81,7 @@ def main(path):
         problems.append("extraConfig: the bind-key line bound nothing")
 
     # And the client's half of the same file.
-    announced = sorted(client_options_in(path))
+    announced = sorted(client_options_in([path]))
     if announced != EXPECTED_FOR_CLIENT:
         problems.append(
             "clientSettings: a client would announce %r, and the module asked for %r" % (announced, EXPECTED_FOR_CLIENT)
