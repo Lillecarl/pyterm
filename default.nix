@@ -60,14 +60,22 @@ let
   # them. The bends live in `nix/python-bends.nix`. Both compose into
   # the interpreter's own package scope.
   pins = pkgs.callPackage ./nix/python-pins.nix { };
+  # aid's libraries without aid, aid-models and aid-agent, as aid
+  # packages them. pymux-ai takes them. Lillecarl/aid#75.
+  aid = import (sources.aid + "/nix/python-overlay.nix");
   pkgs' = pkgs.extend (final: prev: {
     python3 = prev.python3.override (old: {
-      packageOverrides = lib.composeExtensions (old.packageOverrides or (_: _: { })) pins;
+      packageOverrides = lib.composeManyExtensions [
+        (old.packageOverrides or (_: _: { }))
+        pins
+        aid
+      ];
     });
     python315 = prev.python315.override (old: {
       packageOverrides = lib.composeManyExtensions [
         (old.packageOverrides or (_: _: { }))
         pins
+        aid
         (pkgs.callPackage ./nix/python-bends.nix { })
       ];
     });
@@ -88,6 +96,7 @@ let
     sources.pymux
     (sources.pymux + "/libpymux")
     (sources.pymux + "/pymux-mcp")
+    (sources.pymux + "/pymux-ai")
     sources.txterm
     sources.ptterm
     sources.pyte
@@ -116,6 +125,7 @@ let
     "pymux"
     "libpymux"
     "pymux-mcp"
+    "pymux-ai"
     "ptterm"
     "prompt-toolkit"
     "prompt-toolkit-rs"
@@ -324,6 +334,13 @@ let
       };
     };
 
+    # pymux's AI plugins. No pymux has them unless it is built with
+    # `pymux.withPlugins (ps: [ ps.pymux-ai ])`.
+    pymux-ai = final.callPackage (sources.pymux + "/pymux-ai") {
+      inherit (ps) mkProject;
+      inherit (pkgs) ruff;
+    };
+
     pymux = final.callPackage (sources.pymux + "/package.nix") {
       inherit (ps) mkProject;
       # The one that draws, which its checks need for kitty.
@@ -429,6 +446,7 @@ let
         deferimport
         ptkhx
         fairclock
+        pymux-ai
         ;
 
       # pymux, as a person runs it: a virtualenv holding the package,
@@ -590,6 +608,9 @@ rec {
   ptkhx = default.ptkhx;
 
   fairclock = default.fairclock;
+
+  # pymux's AI plugins, for `pymux.withPlugins`; reached here for its checks.
+  pymux-ai = default.pymux-ai;
 
   # The home-manager module, so `~/.pymux.conf` is generated rather than
   # placed by hand. Lillecarl/pyterm#192.
@@ -910,6 +931,9 @@ rec {
     # Fair deadlines on every front end, on an idle machine and a crowded CPU.
     fairclock-unit = fairclock.checks.unit;
     fairclock-ruff = fairclock.checks.ruff;
+    # The Claude Code encourager with a model that answers from a list.
+    pymux-ai-unit = pymux-ai.checks.unit;
+    pymux-ai-ruff = pymux-ai.checks.ruff;
     # Not a gate: random key sequences, which find differences from
     # Helix faster than they get fixed.
     ptkhx-hunt = ptkhx.checks.hunt;

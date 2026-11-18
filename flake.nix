@@ -28,6 +28,12 @@
       url = "github:Lillecarl/qutebrowser/patched";
       flake = false;
     };
+    # aid's model transports, without aid: `aid-models` and `aid-agent`,
+    # which pymux-ai stands on. Lillecarl/aid#75.
+    aid = {
+      url = "github:Lillecarl/aid";
+      flake = false;
+    };
   };
 
   outputs =

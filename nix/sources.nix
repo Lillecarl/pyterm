@@ -3,9 +3,10 @@
 # Ten are in this tree. Each `package.nix` picks its own files with
 # `lib.fileset`, so a `result` or a cache beside them changes no store path.
 #
-# Three come from outside, pinned in `flake.lock`: prompt-toolkit, because
-# every patch there has to be one upstream could take; pyproject.nix; and
-# qutebrowser, our fork, which `nix/qutebrowser.nix` builds.
+# Four come from outside, pinned in `flake.lock`: prompt-toolkit, because
+# every patch there has to be one upstream could take; pyproject.nix;
+# qutebrowser, our fork, which `nix/qutebrowser.nix` builds; and aid, whose
+# model libraries pymux-ai takes.
 # `nix/compat.nix` says how a checkout at ./prompt-toolkit replaces its pin.
 inputs:
 {
@@ -24,4 +25,5 @@ inputs:
   prompt-toolkit = inputs.prompt-toolkit.outPath;
   pyproject-nix = inputs.pyproject-nix.outPath;
   qutebrowser = inputs.qutebrowser.outPath;
+  aid = inputs.aid.outPath;
 }

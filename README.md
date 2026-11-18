@@ -293,6 +293,17 @@ Schema. It lives in `pymux/pymux-mcp/`, over libpymux alone.
 `.mcp.json` here starts it for Claude Code in this checkout, and
 `.claude/settings.json` allows it. Lillecarl/pyterm#762.
 
+## AI plugins
+
+    pymux.withPlugins (ps: [ ps.pymux-ai ])
+
+`pymux-ai` holds pymux's plugins that ask a model about what a pane
+shows. A plain pymux has none of them. The first, the Claude Code
+encourager, asks Claude Haiku whether a Claude Code agent that stopped
+could have gone on alone, and if so types the next step for it. It
+lives in `pymux/pymux-ai/`, over aid's model transports: aid's
+`nix/python-overlay.nix` supplies `aid-agent`. Lillecarl/aid#75.
+
 ## Tests
 
 A package exposes its own tests through `passthru.checks`. This repository gives
@@ -379,6 +390,8 @@ run needs the ptterm that this collection assembled:
     nix build --file . checks.ptkhx-ruff # its style
     nix build --file . checks.fairclock-unit # fair deadlines (FAIRCLOCK_TESTS narrows it)
     nix build --file . checks.fairclock-ruff # its style
+    nix build --file . checks.pymux-ai-unit # the encourager, with a model that answers from a list (PYMUX_AI_TESTS narrows it)
+    nix build --file . checks.pymux-ai-ruff # its style
     nix build --file . checks.aimock-fixtures # the mock model API answers every wire format
     nix build --file . checks.pyterm-home-manager # the module, judged by pymux
     nix build --file . checks.pyterm-sources-in-step # each source's copies of nix/shared

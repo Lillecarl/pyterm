@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "aid": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794991124,
+        "narHash": "sha256-o3CJnfR0hHVlx3xcBEvg8ioxJHpDiUyt4ojzgz+sRsM=",
+        "owner": "Lillecarl",
+        "repo": "aid",
+        "rev": "0942f5d14b3208e30e39bcad63344eb6f0811a52",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Lillecarl",
+        "repo": "aid",
+        "type": "github"
+      }
+    },
     "flake-compatish": {
       "locked": {
         "lastModified": 1792708319,
@@ -83,6 +99,7 @@
     },
     "root": {
       "inputs": {
+        "aid": "aid",
         "flake-compatish": "flake-compatish",
         "nixpkgs": "nixpkgs",
         "prompt-toolkit": "prompt-toolkit",
