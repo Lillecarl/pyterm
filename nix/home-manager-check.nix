@@ -155,9 +155,8 @@ suite { name = "pyterm-home-manager"; } ''
     exit 1
   fi
 
-  # pymux is a virtualenv, so it is the environment the judge runs in:
-  # the modules it imports are beside the `pymux` it was given, and
-  # nothing has to be made into a python module to reach them.
-  # Lillecarl/pyterm#321.
-  ${pymux}/bin/python ${./home-manager-judge.py} pymux.conf
+  # pymux's virtualenv is the environment the judge runs in: the modules
+  # it imports are beside the `pymux` it was given, and nothing has to be
+  # made into a python module to reach them. Lillecarl/pyterm#321.
+  ${pymux.venv}/bin/python ${./home-manager-judge.py} pymux.conf
 ''

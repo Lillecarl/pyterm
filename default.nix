@@ -412,19 +412,43 @@ let
           withThem = set.overrideScope (
             _: _: lib.listToAttrs (map (plugin: lib.nameValuePair plugin.pname plugin) plugins)
           );
+          venv = withThem.mkVirtualEnv "pymux-env" (
+            { pymux = [ "catppuccin" "wayland" ]; } // lib.genAttrs (map (plugin: plugin.pname) plugins) (_: [ ])
+          );
         in
-        withThem.mkVirtualEnv "pymux" (
-          { pymux = [ "catppuccin" "wayland" ]; } // lib.genAttrs (map (plugin: plugin.pname) plugins) (_: [ ])
-        )
-        // {
-          inherit (set.pymux) checks;
-          inherit (set.pymux) meta;
-          # `<pymux-pane>` compiled, which is a thing to reach on its own:
-          # a front end built with node links it and never the venv.
-          inherit (set.pymux) element;
-          inherit plugins;
-          withPlugins = select: pymuxWith (plugins ++ select set);
-        };
+        # **Only pymux's own commands, and not the virtualenv's whole
+        # `bin`.** That holds a command of every dependency -- python,
+        # pygmentize, f2py, and httpx once a plugin brings httpx2 -- and
+        # an installed pymux put them all on the person's PATH, where
+        # home-manager refuses two of a name.
+        pkgs.runCommand "pymux"
+          {
+            passthru = {
+              inherit (set.pymux) checks;
+              # `<pymux-pane>` compiled, which is a thing to reach on its own:
+              # a front end built with node links it and never the venv.
+              inherit (set.pymux) element;
+              inherit plugins venv;
+              withPlugins = select: pymuxWith (plugins ++ select set);
+            };
+            meta = set.pymux.meta // {
+              mainProgram = "pymux";
+            };
+          }
+          ''
+            mkdir -p $out/bin
+            ${lib.concatMapStrings (command: "ln -s ${venv}/bin/${command} $out/bin/${command}\n") pymuxCommands}
+            cp -rs ${venv}/share $out/share
+          '';
+
+      /**
+        The commands an installed pymux puts on the PATH: pymux's own,
+        and ptyhost's recorder, which records a fault on the machine of
+        the person who hit it.
+      */
+      pymuxCommands =
+        builtins.attrNames (lib.importTOML (sources.pymux + "/pyproject.toml")).project.scripts
+        ++ builtins.attrNames (lib.importTOML (sources.ptyhost + "/pyproject.toml")).project.scripts;
     in
     rec {
       # The libraries of the collection, on this interpreter. Nothing
