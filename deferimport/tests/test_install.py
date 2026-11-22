@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import compileall
+import os
 import shutil
+import subprocess
+import sys
 
 import pytest
 
-from probes import FIXTURES, MECHANISMS, run
+from probes import FIXTURES, MECHANISMS, PACKAGE, run
 
 LAZY = [mechanism for mechanism in MECHANISMS if mechanism != "eager"]
 
@@ -82,6 +85,21 @@ def test_installing_twice_gives_the_first_finder(tmp_path):
         cache=tmp_path,
     )
     assert answer == [True, 1]
+
+
+def test_a_lazy_name_a_destructor_reads_at_exit_is_bound(tmp_path):
+    """
+    `warnings` is loaded long before exit, so the destructor gets it, as
+    without deferimport; not an import after the import system is gone.
+    Lillecarl/pyterm#1011.
+    """
+    code = "import deferimport\ndeferimport.install('targets=warnings', mechanism='proxies')\nimport app.dies_late\n"
+    environment = dict(os.environ, PYTHONPATH=os.pathsep.join([str(FIXTURES), str(PACKAGE)]))
+    environment["DEFERIMPORT_CACHE"] = str(tmp_path)
+    environment.pop("DEFERIMPORT", None)
+    done = subprocess.run([sys.executable, "-c", code], env=environment, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert "Exception ignored" not in done.stderr, done.stderr
 
 
 def test_a_policy_that_takes_nothing_rewrites_nothing(tmp_path):

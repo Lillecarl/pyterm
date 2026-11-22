@@ -27,12 +27,13 @@ itself in `sys.modules`. Deny those.
 
 from __future__ import annotations
 
+import atexit
 import os
 import sys
 from pathlib import Path
 from typing import Literal
 
-from . import forwardref, hook
+from . import forwardref, hook, proxy
 from .native import Native
 from .policy import Policy, parse
 from .rewrite import Proxies
@@ -78,4 +79,5 @@ def install(
     transform: hook.Transform = Native(policy) if mechanism == "native" else Proxies()
     if mechanism == "proxies":
         forwardref.patch()
+        atexit.register(proxy.bind_loaded)
     return hook.install(transform, policy, hook.cache_directory() if cache is None else Path(cache))

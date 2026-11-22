@@ -18,6 +18,7 @@ that hold where 3.15 holds it in C:
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import importlib
 import sys
@@ -78,6 +79,36 @@ def keep_class(module: types.ModuleType) -> None:
     replacement = type("DeferredModule", (type(module),), pending)
     module.__class__ = replacement
     module.__dict__[CLASS] = replacement
+
+
+def bind_loaded() -> None:
+    """
+    Bind every name still lazy whose object is loaded already. It runs at
+    exit, before the import system goes: a `__del__` that runs after
+    reaches the module as it would without deferimport, and not an
+    import that fails with "sys.meta_path is None". Nothing is imported
+    here. Lillecarl/pyterm#1011.
+    """
+    for module in list(sys.modules.values()):
+        namespace = getattr(module, "__dict__", None)
+        cls = namespace.get(CLASS) if isinstance(namespace, dict) else None
+        if cls is None:
+            continue
+        for name, value in list(cls.__dict__.items()):
+            pending = namespace.get(name)
+            if isinstance(value, property) and type(pending) is LazyProxy and _loaded(pending._lazy_display):
+                # A name that cannot bind keeps its proxy, as without this.
+                with contextlib.suppress(Exception):
+                    pending._reify()
+
+
+def _loaded(display: str) -> bool:
+    "Whether `a.b`, a module or a member of one, is there without an import."
+    if display in sys.modules:
+        return True
+    parent, _, attr = display.rpartition(".")
+    module = sys.modules.get(parent)
+    return module is not None and attr in getattr(module, "__dict__", {})
 
 
 def _forget(namespace: dict, name: str) -> None:
