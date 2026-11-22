@@ -28,6 +28,12 @@ let
   # comes from.
   sources = import ./nix/sources.nix inputs // sourceOverrides;
 
+  # The font files a glyph falls back to, for a picture of a pane and for
+  # `pymux web` alike: one list, so both draw the same symbols.
+  fallbackFonts = pkgs.callPackage (sources.pymux + "/nix/fallback-fonts.nix") {
+    unifont = pkgs.unifont.out;
+  };
+
   # The builders that assemble a virtualenv instead of a PYTHONPATH.
   # `nix/python-set.nix` says why, and why the third-party packages still
   # come from nixpkgs. Lillecarl/pyterm#321.
@@ -329,9 +335,7 @@ let
     pymux-mcp = final.callPackage (sources.pymux + "/pymux-mcp") {
       inherit (ps) mkProject;
       nerdFont = pkgs.nerd-fonts.jetbrains-mono;
-      fallbackFonts = pkgs.callPackage (sources.pymux + "/nix/fallback-fonts.nix") {
-        unifont = pkgs.unifont.out;
-      };
+      inherit fallbackFonts;
     };
 
     # pymux's AI plugins. No pymux has them unless it is built with
@@ -359,6 +363,12 @@ let
       # Pass null for either to leave it out. Lillecarl/pyterm#659.
       pipewire = if pkgs.stdenv.hostPlatform.isLinux then pkgs.pipewire else null;
       wireplumber = if pkgs.stdenv.hostPlatform.isLinux then pkgs.wireplumber else null;
+      # What `pymux web` draws with: pymux-mcp's fonts, so a phone draws
+      # what a picture of a pane does. Lillecarl/pyterm#1070.
+      webFonts = pkgs.callPackage (sources.pymux + "/nix/web-fonts.nix") {
+        nerdFont = pkgs.nerd-fonts.jetbrains-mono;
+        inherit fallbackFonts;
+      };
     };
 
     # The second front end: the same screen, drawn with Textual. It
