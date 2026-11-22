@@ -121,8 +121,9 @@ def test_a_window_that_drew_wants_a_frame_until_it_is_told(compositor):
 
 
 def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
+    "And which process it is, for a program that found the socket itself. Lillecarl/pyterm#1062."
     first = launch(compositor, sys.executable, str(CLIENT))
-    pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+    pump(compositor, lambda seen: ("toplevel", 1, 0, first.pid) in seen)
 
     before = sockets_in(os.environ["XDG_RUNTIME_DIR"])
     tag, fd = compositor.connect()
@@ -130,7 +131,8 @@ def test_a_window_says_which_connection_its_client_took(compositor, tmp_path):
     env = dict(os.environ, WAYLAND_SOCKET=str(fd))
     second = subprocess.Popen([sys.executable, str(CLIENT)], env=env, pass_fds=[fd], stdin=subprocess.PIPE)
     os.close(fd)
-    earlier = pump(compositor, lambda seen: ("toplevel", 2, tag) in seen)
+    # Its peer is whoever made the pair, which says nothing.
+    earlier = pump(compositor, lambda seen: any(event[:3] == ("toplevel", 2, tag) for event in seen))
     assert sockets_in(os.environ["XDG_RUNTIME_DIR"]) == before
 
     first.stdin.close()
@@ -149,7 +151,7 @@ def test_a_scaled_window_lays_out_small_and_draws_dense(compositor, scale, flags
     "The canvas is the pixels asked for, and the window's buffer lands on them one to one."
     client = launch(compositor, sys.executable, str(CLIENT.with_name("scale_client.py")), *flags)
     try:
-        pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+        pump(compositor, lambda seen: ("toplevel", 1, 0, client.pid) in seen)
         compositor.configure(1, 90, 60, scale)
         # The first frame at the new size is the clear colour, before the
         # client has drawn into it.
@@ -168,7 +170,7 @@ def test_a_scaled_window_lays_out_small_and_draws_dense(compositor, scale, flags
 def test_a_scale_that_is_not_positive_is_refused(compositor):
     client = launch(compositor, sys.executable, str(CLIENT))
     try:
-        pump(compositor, lambda seen: ("toplevel", 1, 0) in seen)
+        pump(compositor, lambda seen: ("toplevel", 1, 0, client.pid) in seen)
         with pytest.raises(ValueError):
             compositor.configure(1, 90, 60, 0.0)
     finally:

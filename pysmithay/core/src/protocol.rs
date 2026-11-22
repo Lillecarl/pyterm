@@ -35,7 +35,7 @@ use rustix::net::{
 use crate::{Error, Event, FrameRect, Rect, Result, Target, WindowInfo};
 
 /// The protocol this build speaks.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// The most descriptors one message carries.
 const MOST_FDS: usize = 4;
@@ -186,7 +186,7 @@ pub enum Message {
 impl std::fmt::Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Toplevel(id, tag) => write!(f, "Toplevel({id}, {tag})"),
+            Self::Toplevel(id, tag, pid) => write!(f, "Toplevel({id}, {tag}, {pid})"),
             Self::Title(id, title) => write!(f, "Title({id}, {title:?})"),
             Self::AppId(id, app_id) => write!(f, "AppId({id}, {app_id:?})"),
             Self::Commit(id, damage) => write!(f, "Commit({id}, {damage:?})"),
@@ -840,10 +840,12 @@ fn read_answer(input: &mut Reader) -> Result<Answer> {
 
 fn write_event(out: &mut Writer, event: Event) {
     match event {
-        Event::Toplevel(id, tag) => {
-            out.u8(0);
+        // 0 is version 1's window, with no pid; a parent still reads it.
+        Event::Toplevel(id, tag, pid) => {
+            out.u8(8);
             out.u64(id);
             out.u64(tag);
+            out.u32(pid);
         }
         Event::Title(id, title) => {
             out.u8(1);
@@ -885,7 +887,7 @@ fn write_event(out: &mut Writer, event: Event) {
 
 fn read_event(input: &mut Reader) -> Result<Event> {
     Ok(match input.u8()? {
-        0 => Event::Toplevel(input.u64()?, input.u64()?),
+        0 => Event::Toplevel(input.u64()?, input.u64()?, 0),
         1 => Event::Title(input.u64()?, input.str()?),
         2 => Event::AppId(input.u64()?, input.str()?),
         3 => Event::Commit(input.u64()?, input.rects()?),
@@ -893,6 +895,7 @@ fn read_event(input: &mut Reader) -> Result<Event> {
         5 => Event::Pointer(input.u64()?, input.str()?),
         6 => Event::Selection(input.target()?, input.strings()?),
         7 => Event::Send(input.target()?, input.str()?, input.fd()?),
+        8 => Event::Toplevel(input.u64()?, input.u64()?, input.u32()?),
         _ => return Err(malformed("an unknown event")),
     })
 }
@@ -1204,6 +1207,26 @@ mod tests {
                 seq: 5,
                 request: Request::Unknown(200),
             } => {}
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_window_carries_its_clients_pid() {
+        match round_trip(Message::Event(Event::Toplevel(2, 5, 1234))) {
+            Message::Event(Event::Toplevel(2, 5, 1234)) => {}
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_window_of_a_version_1_child_reads_with_no_pid() {
+        // Message 4 (an event), event 0, the id and the tag.
+        let mut body = vec![4, 0];
+        body.extend_from_slice(&2u64.to_le_bytes());
+        body.extend_from_slice(&5u64.to_le_bytes());
+        match decode(&body, &mut VecDeque::new()).unwrap() {
+            Message::Event(Event::Toplevel(2, 5, 0)) => {}
             other => panic!("{other:?}"),
         }
     }

@@ -152,7 +152,8 @@ impl Compositor {
     /// Accept waiting clients, run every request that has arrived, and
     /// return what happened, oldest first.
     ///
-    /// Each event is a tuple: `("toplevel", id, tag)`, `("title", id, str)`,
+    /// Each event is a tuple: `("toplevel", id, tag, pid)` with pid 0 where
+    /// none is known, `("title", id, str)`,
     /// `("app_id", id, str)`, `("pointer", id, css_name)` with "" for a
     /// pointer the terminal picks, `("commit", id, [(x, y, w, h), ...])` with
     /// the damage in canvas pixels, empty when the commit drew nothing

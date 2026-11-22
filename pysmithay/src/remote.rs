@@ -92,7 +92,7 @@ impl Shared {
                 }
                 Ok(Some(Message::Event(event))) => {
                     match &event {
-                        Event::Toplevel(id, _) => {
+                        Event::Toplevel(id, _, _) => {
                             lock(&self.toplevels).insert(*id);
                         }
                         Event::Closed(id) => {
@@ -248,7 +248,8 @@ fn ids_of(windows: &[WindowInfo]) -> HashSet<u64> {
 
 /// Whether this build speaks the protocol `version` of a live child.
 fn speaks(version: u32) -> bool {
-    version == VERSION
+    // 1 sends a window with no pid, and nothing else differs.
+    version == 1 || version == VERSION
 }
 
 #[pymethods]

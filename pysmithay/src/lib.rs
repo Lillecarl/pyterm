@@ -103,7 +103,9 @@ where
 fn event_py(py: Python<'_>, event: Event) -> PyResult<Py<PyAny>> {
     use std::os::fd::IntoRawFd;
     Ok(match event {
-        Event::Toplevel(id, origin) => ("toplevel", id, origin).into_pyobject(py)?.into_any(),
+        Event::Toplevel(id, origin, pid) => {
+            ("toplevel", id, origin, pid).into_pyobject(py)?.into_any()
+        }
         Event::Title(id, title) => ("title", id, title).into_pyobject(py)?.into_any(),
         Event::AppId(id, app_id) => ("app_id", id, app_id).into_pyobject(py)?.into_any(),
         Event::Commit(id, damage) => ("commit", id, damage).into_pyobject(py)?.into_any(),

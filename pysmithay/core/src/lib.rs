@@ -282,8 +282,9 @@ pub type Rect = (i32, i32, i32, i32);
 
 /// What happened, as `dispatch` answers it.
 pub enum Event {
-    /// A window, and the tag of its client's connection.
-    Toplevel(u64, u64),
+    /// A window, the tag of its client's connection, and the client's
+    /// pid as the socket's peer credentials say; 0 where none is known.
+    Toplevel(u64, u64, u32),
     Title(u64, String),
     AppId(u64, String),
     Commit(u64, Vec<Rect>),
@@ -623,11 +624,17 @@ impl XdgShellHandler for State {
         });
         let id = self.next_id;
         self.next_id += 1;
-        let origin = surface
-            .wl_surface()
-            .client()
+        let client = surface.wl_surface().client();
+        let origin = client
+            .as_ref()
             .and_then(|client| client.get_data::<ClientState>().map(|data| data.origin))
             .unwrap_or(0);
+        // A program that found the compositor through `WAYLAND_DISPLAY`
+        // has tag 0, and its pid is what says which pane started it.
+        // Lillecarl/pyterm#1062.
+        let pid = client
+            .and_then(|client| client.get_credentials(&self.display_handle).ok())
+            .map_or(0, |credentials| u32::try_from(credentials.pid).unwrap_or(0));
         self.toplevels.push(Toplevel {
             id,
             tag: origin,
@@ -640,7 +647,7 @@ impl XdgShellHandler for State {
             resized_at: 0,
             history: VecDeque::new(),
         });
-        self.events.push(Event::Toplevel(id, origin));
+        self.events.push(Event::Toplevel(id, origin, pid));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -1176,7 +1183,8 @@ impl Compositor {
     /// Accept waiting clients, run every request that has arrived, and
     /// return what happened, oldest first.
     ///
-    /// Each event is a tuple: `("toplevel", id, tag)`, `("title", id, str)`,
+    /// Each event is a tuple: `("toplevel", id, tag, pid)` with pid 0 where
+    /// none is known, `("title", id, str)`,
     /// `("app_id", id, str)`, `("pointer", id, css_name)` with "" for a
     /// pointer the terminal picks, `("commit", id, [(x, y, w, h), ...])` with
     /// the damage in canvas pixels, empty when the commit drew nothing
